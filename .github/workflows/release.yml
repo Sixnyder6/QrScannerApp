@@ -1,0 +1,63 @@
+# Имя нашего автоматического процесса
+name: Android CI/CD Release
+
+# Триггер: этот процесс запускается, когда мы создаем и отправляем в репозиторий новый тег, начинающийся с "v" (например, v1.2.9, v1.3.0)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Задачи, которые нужно выполнить
+jobs:
+  build:
+    # Робот будет работать на виртуальной машине с Ubuntu
+    runs-on: ubuntu-latest
+
+    # Шаги, которые робот выполнит по порядку
+    steps:
+      # 1. Скачиваем код нашего проекта
+      - uses: actions/checkout@v3
+
+      # 2. Устанавливаем Java (нужна для сборки Android-проекта)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # 3. Делаем файл gradlew исполняемым
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 4. Собираем релизный APK-файл. Это та же команда, которую выполняет Android Studio
+      - name: Build with Gradle
+        run: ./gradlew assembleRelease
+
+      # 5. Автоматически создаем файл update.json
+      - name: Create update.json
+        run: |
+          # Получаем имя тега (например, v1.2.9) и убираем "v", чтобы получить чистое имя версии "1.2.9"
+          VERSION_NAME=${GITHUB_REF_NAME#v}
+          # Формируем правильный URL для скачивания APK, используя переменные GitHub
+          APK_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-release.apk"
+          # Создаем JSON файл с нужным содержимым
+          echo "{" > app/build/outputs/apk/release/update.json
+          echo "  \"latestVersionCode\": 23," >> app/build/outputs/apk/release/update.json
+          echo "  \"latestVersionName\": \"$VERSION_NAME\"," >> app/build/outputs/apk/release/update.json
+          echo "  \"apkUrl\": \"$APK_URL\"," >> app/build/outputs/apk/release/update.json
+          echo "  \"releaseNotes\": \"Автоматически сгенерированный релиз.\"" >> app/build/outputs/apk/release/update.json
+          echo "}" >> app/build/outputs/apk/release/update.json
+        # ВАЖНО: latestVersionCode пока захардкожен (23). Его нужно будет менять в build.gradle, а не здесь.
+        # Более сложный воркфлоу может парсить его из gradle файла. Пока оставим так для простоты.
+
+      # 6. Создаем релиз на GitHub и загружаем туда два файла: APK и update.json
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          # Используем наш секретный токен для авторизации
+          token: ${{ secrets.GH_TOKEN }}
+          # Указываем, какие файлы нужно прикрепить к релизу
+          files: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/release/update.json
