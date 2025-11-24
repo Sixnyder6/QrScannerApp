@@ -1,5 +1,4 @@
 package com.example.qrscannerapp
-
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -35,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlin.random.Random
-
 // --- Цветовая палитра остается той же ---
 val SplashScreenBackgroundColor = Color.Black
 val SplashScreenLogoColor = Color(0xFF7B61FF)
@@ -43,7 +41,6 @@ val SplashScreenTextColor = Color(0xFFEAEAF0)
 val SplashScreenStudioTextColor = Color(0xFFFFFBEB)
 val SplashScreenStudioGlowColor = Color(0xFFFFC107)
 val BeamColor = Color(0x1AFFFFFF) // Цвет луча проектора
-
 // --- Настройка шрифта остается той же ---
 val provider = GoogleFont.Provider(
     providerAuthority = "com.google.android.gms.fonts",
@@ -53,7 +50,6 @@ val provider = GoogleFont.Provider(
 val InterFont = FontFamily(
     Font(googleFont = GoogleFont("Inter"), fontProvider = provider)
 )
-
 private val BeamShape = object : Shape {
     override fun createOutline(
         size: Size,
@@ -70,7 +66,6 @@ private val BeamShape = object : Shape {
         return Outline.Generic(path)
     }
 }
-
 @Composable
 fun Particles(modifier: Modifier) {
     val particles = remember {
@@ -83,7 +78,6 @@ fun Particles(modifier: Modifier) {
             )
         }
     }
-
     val infiniteTransition = rememberInfiniteTransition(label = "particleTransition")
     val animationProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -105,16 +99,12 @@ fun Particles(modifier: Modifier) {
         }
     }
 }
-
 data class Particle(val x: Float, val y: Float, val size: Float, val alpha: Float)
-
-
 @Composable
 fun SplashScreen(onAnimationFinished: () -> Unit) {
-
     var startAnimation by remember { mutableStateOf(false) }
 
-    // --- АНИМАЦИИ ---
+// --- АНИМАЦИИ ---
     val lampAlpha by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(1000), label = "lampAlpha")
     val beamScaleY by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(2000, 500), label = "beamScaleY")
     val logoReveal by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(2000, 1000), label = "logoReveal")
@@ -237,7 +227,6 @@ fun SplashScreen(onAnimationFinished: () -> Unit) {
         )
     }
 }
-
 @Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 fun SplashScreenPreview() {

@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
+    <!-- Существующий путь для скачивания обновлений -->
     <external-files-path
         name="update_apk"
         path="Download/" />
+
+    <!-- Существующий путь для временного хранения QR-кодов -->
+    <cache-path
+        name="shared_images"
+        path="images/" />
+
+    <!-- ДОБАВЛЕНО: Разрешаем доступ к корневой папке кэша для Excel-файлов -->
+    <cache-path
+        name="shared_files"
+        path="." />
 </paths>

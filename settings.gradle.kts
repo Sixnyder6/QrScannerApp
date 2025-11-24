@@ -1,3 +1,5 @@
+// File: settings.gradle.kts
+
 pluginManagement {
     repositories {
         google {
@@ -12,10 +14,14 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    // V-- НАЧАЛО ИЗМЕНЕНИЙ: Ослабляем строгость правила --V
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS) // Было: FAIL_ON_PROJECT_REPOS
+    // ^-- КОНЕЦ ИЗМЕНЕНИЙ --^
     repositories {
         google()
         mavenCentral()
+        // Добавляем репозиторий, где лежат графики YCharts и Vico
+        maven { url = uri("https://jitpack.io") }
     }
 }
 

@@ -1,0 +1,53 @@
+// File: engine_background.agsl
+
+uniform float2 iResolution;
+uniform float iTime;
+uniform half4 color1;
+uniform half4 color2;
+uniform half4 color3;
+
+// --- Основная функция, которая выполняется для каждого пикселя ---
+half4 main(float2 fragCoord) {
+    // Нормализуем координаты, но оставляем центр в (0,0) для удобства вращения
+    float2 uv = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
+    float time = iTime * 0.3; // Замедляем "двигатель"
+
+    // --- ШАГ 1: "Коленвал" (Главный двигатель) ---
+    // Медленно вращается по кругу радиусом 0.2
+    float radius = 0.2;
+    float2 crankshaftPos = float2(cos(time), sin(time)) * radius;
+
+    // --- ШАГ 2: "Шатуны" и "Поршни" (Вторичные двигатели) ---
+    // Их движение полностью зависит от "коленвала"
+
+    // "Поршень 1": движется по эллипсу, в 2 раза быстрее коленвала
+    float2 piston1Pos = float2(sin(time * 2.0), cos(time)) * 0.4;
+
+    // "Поршень 2": движется по сложной траектории, зависящей от обеих координат коленвала
+    // Это создает асимметричное, интересное движение
+    float2 piston2Pos = float2(
+        crankshaftPos.x + sin(time * 1.5) * 0.3,
+        crankshaftPos.y + cos(time * 2.5) * 0.3
+    );
+
+    // --- ШАГ 3: Расчет "Энергетического поля" ---
+    // Мы считаем обратное расстояние от пикселя (uv) до каждой точки.
+    // Это создает эффект светящихся "горячих" центров.
+    // 'smoothstep' используется для создания плавных краев у волн.
+    float energy1 = smoothstep(0.8, 0.0, distance(uv, crankshaftPos));
+    float energy2 = smoothstep(0.6, 0.0, distance(uv, piston1Pos));
+    float energy3 = smoothstep(0.7, 0.0, distance(uv, piston2Pos));
+
+    // Смешиваем энергии вместе. Сложение создает интерференцию и сложные узоры.
+    float totalEnergy = (energy1 + energy2 + energy3) * 0.5;
+
+    // Добавляем немного вращающегося фона для динамики
+    totalEnergy += sin(uv.x * 5.0 + time) * 0.1;
+
+    // --- ШАГ 4: Синтез цвета ---
+    // Используем итоговую энергию для смешивания цветов
+    half4 finalColor = mix(color1, color2, smoothstep(0.0, 0.3, totalEnergy));
+    finalColor = mix(finalColor, color3, smoothstep(0.3, 0.6, totalEnergy));
+
+    return finalColor;
+}

@@ -3,4 +3,12 @@ plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.compose) apply false
+    alias(libs.plugins.google.gms.google.services) apply false
+
+    // --- НАЧАЛО ДОБАВЛЕНИЙ: Добавляем плагин Hilt ---
+    alias(libs.plugins.hilt.android.gradle) apply false
+    // --- КОНЕЦ ДОБАВЛЕНИЙ ---
+
+    // >>> ВОТ ЧТО НУЖНО ДОБАВИТЬ: Плагин KSP <<<
+    alias(libs.plugins.ksp) apply false
 }
