@@ -1,5 +1,6 @@
 // Файл: TelemetryManager.kt
 package com.example.qrscannerapp
+
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
@@ -13,12 +14,20 @@ import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
 import android.os.SystemClock
+import com.example.qrscannerapp.features.profile.domain.model.PerformanceClass
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
-class TelemetryManager(private val context: Context) {
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class TelemetryManager @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
     /**
      * Собирает информацию об устройстве и версии ОС.
      * @return Строка вида "Google Pixel 8, Android 14"
@@ -198,7 +207,6 @@ class TelemetryManager(private val context: Context) {
         }
     }
 
-// V-- НОВАЯ ФУНКЦИЯ --V
     /**
      * Получает общий объем оперативной памяти (RAM) устройства.
      * Эта метрика стабильна и идеально подходит для классификации производительности.
@@ -217,7 +225,20 @@ class TelemetryManager(private val context: Context) {
             -1.0
         }
     }
-// ^-- КОНЕЦ НОВОЙ ФУНКЦИИ --^
+
+    /**
+     * Определяет класс производительности устройства на основе общего объема RAM.
+     * @return Enum PerformanceClass (LOW, MEDIUM, HIGH).
+     */
+    fun getPerformanceClass(): PerformanceClass {
+        val totalRamGb = getTotalRamInGigabytes()
+        return when {
+            totalRamGb <= 0.0 -> PerformanceClass.UNKNOWN // В случае ошибки
+            totalRamGb < 3.5 -> PerformanceClass.LOW     // < 3.5 GB RAM - ведро
+            totalRamGb < 7.5 -> PerformanceClass.MEDIUM  // от 3.5 до 7.5 GB RAM - рабочая лошадка
+            else -> PerformanceClass.HIGH                // > 7.5 GB RAM - ракета
+        }
+    }
 
     /**
      * Собирает ВСЮ телеметрию (кроме пинга) в удобный для записи в Firestore формат.
@@ -234,7 +255,9 @@ class TelemetryManager(private val context: Context) {
             "deviceUptime" to getDeviceUptime(),
             "isCharging" to isCharging(),
             "batteryHealth" to getBatteryHealth(),
-            "isPowerSaveMode" to isPowerSaveMode()
+            "isPowerSaveMode" to isPowerSaveMode(),
+            // Добавляем общий RAM для будущей аналитики
+            "totalRamInGb" to getTotalRamInGigabytes()
         )
     }
 }

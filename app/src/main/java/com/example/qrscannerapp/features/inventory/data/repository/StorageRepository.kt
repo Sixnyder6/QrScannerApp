@@ -19,11 +19,15 @@ import com.example.qrscannerapp.features.inventory.domain.model.StoragePallet
 import com.example.qrscannerapp.features.inventory.data.worker.InventorySyncWorker
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -44,6 +48,8 @@ class StorageRepository @Inject constructor(
     private val palletsCollection = firestore.collection("storage_pallets")
     private val batteriesCollection = firestore.collection("batteries")
 
+    private var palletsListenerRegistration: ListenerRegistration? = null
+
     // --- ИСТОЧНИКИ ДАННЫХ ДЛЯ UI (РАБОТАЮТ С ЛОКАЛЬНОЙ БАЗОЙ) ---
 
     fun getCellsFlow(): Flow<List<StorageCell>> {
@@ -53,6 +59,51 @@ class StorageRepository @Inject constructor(
     fun getPalletsFlow(): Flow<List<StoragePallet>> {
         return storagePalletDao.getAllPallets().map { entities -> entities.map { it.toDomain() } }
     }
+
+    // --- REAL-TIME LISTENERS (ПЛАН А) ---
+
+    fun startPalletsRealtimeSync() {
+        if (palletsListenerRegistration != null) return
+
+        palletsListenerRegistration = palletsCollection
+            .addSnapshotListener { snapshots, e ->
+                if (e != null) {
+                    Log.w("StorageRepository", "Pallets listen failed.", e)
+                    return@addSnapshotListener
+                }
+
+                if (snapshots != null) {
+                    val serverPallets = snapshots.toObjects(StoragePallet::class.java)
+
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val localPallets = storagePalletDao.getAllPallets().first()
+                            val localIds = localPallets.map { it.id }
+                            val serverIds = serverPallets.map { it.id }
+
+                            val idsToDelete = localIds.filter { it !in serverIds }
+                            if (idsToDelete.isNotEmpty()) {
+                                storagePalletDao.deleteByIds(idsToDelete)
+                            }
+
+                            storagePalletDao.upsertAll(serverPallets.map { it.toEntity() })
+
+                            Log.d("StorageRepository", "Real-time sync: Updated ${serverPallets.size} pallets, Deleted ${idsToDelete.size}")
+                        } catch (ex: Exception) {
+                            Log.e("StorageRepository", "Error updating local DB from Real-time", ex)
+                        }
+                    }
+                }
+            }
+        Log.d("StorageRepository", "Started real-time listener for pallets")
+    }
+
+    fun stopPalletsRealtimeSync() {
+        palletsListenerRegistration?.remove()
+        palletsListenerRegistration = null
+        Log.d("StorageRepository", "Stopped real-time listener for pallets")
+    }
+
 
     // --- ОФЛАЙН-МЕТОДЫ ДЛЯ НОВЫХ ЗАДАЧ ---
 
@@ -76,10 +127,11 @@ class StorageRepository @Inject constructor(
         return try {
             val finalManufacturer = if (manufacturer == "Нет") null else manufacturer
             storagePalletDao.updateManufacturer(palletId, finalManufacturer)
-            triggerSync()
+            palletsCollection.document(palletId).update("manufacturer", finalManufacturer).await()
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e("StorageRepository", "Failed to set manufacturer", e)
+            triggerSync()
             Result.failure(e)
         }
     }
@@ -101,7 +153,7 @@ class StorageRepository @Inject constructor(
             )
             cellsCollection.document(newCell.id).set(newCell).await()
             logActivity("CREATED", "Создал ячейку '${newCell.name}' (ёмкость: ${newCell.capacity})")
-            refreshDataFromServer() // Обновляем локальный кеш
+            refreshDataFromServer()
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e("StorageRepository", "Error creating new cell", e)
@@ -170,9 +222,7 @@ class StorageRepository @Inject constructor(
                 }
                 transaction.delete(cellsCollection.document(cell.id))
             }.await()
-            // Удаляем локально сразу, чтобы не ждать синхронизации
             storageCellDao.deleteById(cell.id)
-
             logActivity("DELETED", "Удалил ячейку '${cell.name}' (${cell.items.size} самокатов)")
             refreshDataFromServer()
             Result.success(Unit)
@@ -182,11 +232,9 @@ class StorageRepository @Inject constructor(
     }
 
     // --- ОНЛАЙН-МЕТОДЫ ДЛЯ ПАЛЕТОВ (PALLETS) ---
-    // Добавлен метод удаления палета, чтобы чистить и локальный кеш
 
     suspend fun deletePallet(pallet: StoragePallet): Result<Unit> {
         return try {
-            // Удаляем из Firestore
             val palletRef = palletsCollection.document(pallet.id)
             val itemsToReset = pallet.items
             val batch = firestore.batch()
@@ -197,14 +245,7 @@ class StorageRepository @Inject constructor(
             }
             batch.commit().await()
             palletRef.delete().await()
-
-            // Удаляем из локального кеша (DAO), чтобы не мерцало при обновлении
             storagePalletDao.deleteById(pallet.id)
-
-            // Логируем в Firestore (не в activityLog, а в pallet_activity_log, но это делает VM, тут просто чистка данных)
-            // Обновляем данные с сервера на всякий случай
-            refreshDataFromServer()
-
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e("StorageRepository", "Error deleting pallet", e)
@@ -223,7 +264,6 @@ class StorageRepository @Inject constructor(
             val palletsSnapshot = palletsCollection.orderBy("palletNumber").get().await()
             val serverPallets = palletsSnapshot.toObjects(StoragePallet::class.java)
 
-            // Важно: Полная синхронизация (удаление локальных, которых нет на сервере)
             val serverIds = serverPallets.map { it.id }
             val localPallets = storagePalletDao.getAllPallets().first()
             val localIdsToDelete = localPallets.filter { it.id !in serverIds }.map { it.id }
@@ -257,6 +297,33 @@ class StorageRepository @Inject constructor(
             )).await()
         } catch (e: Exception) {
             Log.e("StorageRepository", "Failed to write activity log", e)
+        }
+    }
+
+    /**
+     * Ищет самокат по его номеру во всех ячейках хранения.
+     * Выполняет прямой запрос к Firestore для максимальной производительности.
+     * @param scooterId Номер самоката для поиска.
+     * @return Pair<String, String> (номер самоката, имя ячейки) или null, если не найден.
+     */
+    suspend fun findScooterInCell(scooterId: String): Pair<String, String>? {
+        return try {
+            val querySnapshot = cellsCollection
+                .whereArrayContains("items", scooterId)
+                .limit(1) // Нам нужна только первая найденная ячейка
+                .get()
+                .await()
+
+            if (querySnapshot.isEmpty) {
+                null // Самокат не найден ни в одной ячейке
+            } else {
+                val document = querySnapshot.documents.first()
+                val cellName = document.getString("name") ?: "Неизвестная ячейка"
+                scooterId to cellName
+            }
+        } catch (e: Exception) {
+            Log.e("StorageRepository", "Error finding scooter in cell", e)
+            null // В случае ошибки считаем, что не нашли
         }
     }
 }

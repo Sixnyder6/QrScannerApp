@@ -19,10 +19,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Pending
+import androidx.compose.material.icons.outlined.Today
+// import androidx.compose.material.icons.outlined.WarningAmber // Убрали иконку
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,10 +36,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.qrscannerapp.DistributionReport
 import com.example.qrscannerapp.StardustError
 import com.example.qrscannerapp.StardustGlassBg
 import com.example.qrscannerapp.StardustItemBg
@@ -57,8 +61,8 @@ import java.util.*
 
 const val MAX_ITEMS_PER_PALLET = 500
 
-val ColorFujian = Color(0xFFFF8A65) // Мягкий оранжевый
-val ColorByd = Color(0xFF4FC3F7)    // Мягкий голубой
+val ColorFujian = Color(0xFFFF8A65)
+val ColorByd = Color(0xFF4FC3F7)
 
 private fun lerp(start: Float, stop: Float, fraction: Float): Float {
     return start + (stop - start) * fraction
@@ -114,10 +118,13 @@ fun AnimatedCounterText(
 fun InventorySummaryCard(
     totalCount: Int,
     undistributedCount: Int,
+    todayCount: Int = 0,
     fujianCount: Int,
     bydCount: Int,
     onBufferClick: () -> Unit
 ) {
+    var showTodayStatsDialog by remember { mutableStateOf(false) }
+
     val distributedCount = totalCount - undistributedCount
     val progress = if (totalCount > 0) distributedCount.toFloat() / totalCount else 0f
     val progressPercent = (progress * 100).toInt()
@@ -125,31 +132,20 @@ fun InventorySummaryCard(
     val fujianPercent = if (totalCount > 0) (fujianCount.toFloat() / totalCount * 100).toInt() else 0
     val bydPercent = if (totalCount > 0) (bydCount.toFloat() / totalCount * 100).toInt() else 0
 
-    // --- АНИМАЦИЯ ЦВЕТОВ КНОПКИ БУФЕРА ---
-    // Если есть товары - Янтарный, если пусто - Зеленый (но прозрачный)
-    val targetBaseColor = if (undistributedCount > 0) StardustWarning else StardustSuccess
+    val bufferBaseColor = if (undistributedCount > 0) StardustWarning else StardustSuccess
+    val animatedBgColor by animateColorAsState(targetValue = bufferBaseColor.copy(alpha = 0.15f), label = "bufBg")
+    val animatedBorderColor by animateColorAsState(targetValue = bufferBaseColor.copy(alpha = 0.5f), label = "bufBorder")
+    val animatedContentColor by animateColorAsState(targetValue = bufferBaseColor, label = "bufContent")
 
-    val animatedBgColor by animateColorAsState(
-        targetValue = targetBaseColor.copy(alpha = 0.15f), // 15% прозрачности для фона
-        animationSpec = tween(500),
-        label = "BufferBg"
-    )
-    val animatedBorderColor by animateColorAsState(
-        targetValue = targetBaseColor.copy(alpha = 0.5f), // 50% для рамки
-        animationSpec = tween(500),
-        label = "BufferBorder"
-    )
-    val animatedContentColor by animateColorAsState(
-        targetValue = targetBaseColor,
-        animationSpec = tween(500),
-        label = "BufferContent"
-    )
+    val todayBaseColor = StardustPrimary
+    val todayBgColor = todayBaseColor.copy(alpha = 0.15f)
+    val todayBorderColor = todayBaseColor.copy(alpha = 0.5f)
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 16.dp),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -158,7 +154,6 @@ fun InventorySummaryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                // Блок "Всего"
                 Column(modifier = Modifier.weight(1.2f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Home, null, tint = StardustTextSecondary, modifier = Modifier.size(16.dp))
@@ -171,74 +166,109 @@ fun InventorySummaryCard(
                         count = totalCount,
                         suffix = " шт.",
                         color = StardustTextPrimary,
-                        fontSize = 24.sp,
+                        fontSize = 28.sp,
                         fontWeight = FontWeight.Bold
                     )
 
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)) {
+                        Box(modifier = Modifier.weight(fujianPercent.coerceAtLeast(1).toFloat()).fillMaxHeight().background(ColorFujian))
+                        Box(modifier = Modifier.weight(bydPercent.coerceAtLeast(1).toFloat()).fillMaxHeight().background(ColorByd))
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(6.dp).background(ColorFujian, CircleShape))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Fujian: ", color = StardustTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text("$fujianCount", color = StardustTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("($fujianPercent%)", color = ColorFujian, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Surface(
+                            color = ColorFujian.copy(alpha = 0.15f),
+                            shape = CircleShape,
+                            modifier = Modifier.height(24.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            ) {
+                                Box(modifier = Modifier.size(6.dp).background(ColorFujian, CircleShape))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Fujian: $fujianCount", color = ColorFujian, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(6.dp).background(ColorByd, CircleShape))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("BYD: ", color = StardustTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Text("$bydCount", color = StardustTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("($bydPercent%)", color = ColorByd, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Surface(
+                            color = ColorByd.copy(alpha = 0.15f),
+                            shape = CircleShape,
+                            modifier = Modifier.height(24.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            ) {
+                                Box(modifier = Modifier.size(6.dp).background(ColorByd, CircleShape))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("BYD: $bydCount", color = ColorByd, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Блок "В буфере" - СТИЛЬНОЕ СТЕКЛО
-                Surface(
-                    onClick = onBufferClick,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    color = animatedBgColor, // Анимированный фон
-                    border = BorderStroke(1.dp, animatedBorderColor) // Анимированная рамка
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.Start
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                    Surface(
+                        onClick = { showTodayStatsDialog = true },
+                        modifier = Modifier.fillMaxWidth().height(60.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = todayBgColor,
+                        border = BorderStroke(1.dp, todayBorderColor)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Layers, null, tint = animatedContentColor, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("В буфере", color = StardustTextSecondary, fontSize = 12.sp)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("Сегодня", color = StardustTextSecondary, fontSize = 10.sp)
+                                AnimatedCounterText(
+                                    count = todayCount,
+                                    prefix = "+",
+                                    color = StardustPrimary,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Icon(Icons.Outlined.Today, null, tint = StardustPrimary, modifier = Modifier.size(20.dp))
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
+                    }
 
-                        AnimatedCounterText(
-                            count = undistributedCount,
-                            suffix = " шт.",
-                            color = animatedContentColor, // Цвет цифры тоже меняется
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        if (undistributedCount > 0) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.Pending, null, tint = animatedContentColor, modifier = Modifier.size(12.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Нажми для\nпросмотра", color = animatedContentColor, fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium)
+                    Surface(
+                        onClick = onBufferClick,
+                        modifier = Modifier.fillMaxWidth().height(60.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = animatedBgColor,
+                        border = BorderStroke(1.dp, animatedBorderColor)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("В буфере", color = StardustTextSecondary, fontSize = 10.sp)
+                                AnimatedCounterText(
+                                    count = undistributedCount,
+                                    suffix = " шт.",
+                                    color = animatedContentColor,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.CheckCircle, null, tint = animatedContentColor.copy(alpha = 0.7f), modifier = Modifier.size(12.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Всё чисто", color = animatedContentColor.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                            }
+                            Icon(
+                                imageVector = if (undistributedCount > 0) Icons.Outlined.Pending else Icons.Outlined.CheckCircle,
+                                contentDescription = null,
+                                tint = animatedContentColor,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }
@@ -265,69 +295,27 @@ fun InventorySummaryCard(
             }
         }
     }
+
+    if (showTodayStatsDialog) {
+        TodayStatsDialog(todayCount = todayCount, onDismiss = { showTodayStatsDialog = false })
+    }
 }
 
 @Composable
-fun BufferDetailsDialog(
-    items: List<String>,
-    onDismiss: () -> Unit,
-    onDeleteItem: (String) -> Unit
-) {
+fun TodayStatsDialog(todayCount: Int, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = StardustModalBg),
-            modifier = Modifier.heightIn(max = 500.dp)
-        ) {
-            Column(modifier = Modifier.padding(24.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Layers, null, tint = StardustWarning, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("Буфер обмена", style = MaterialTheme.typography.titleLarge, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Эти АКБ отсканированы, но еще не добавлены в палет. Нажми крестик, чтобы удалить ошибку.", color = StardustTextSecondary, fontSize = 12.sp)
-
+        Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg)) {
+            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Outlined.Today, null, tint = StardustPrimary, modifier = Modifier.size(48.dp))
                 Spacer(modifier = Modifier.height(16.dp))
-
-                if (items.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                        Text("Буфер пуст", color = StardustTextSecondary.copy(alpha = 0.5f))
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f, fill = false),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(items) { item ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(StardustItemBg, RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(item, color = StardustTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                                IconButton(
-                                    onClick = { onDeleteItem(item) },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(Icons.Default.Close, null, tint = StardustError, modifier = Modifier.size(18.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-
+                Text("Статистика за сегодня", style = MaterialTheme.typography.titleLarge, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Всего добавлено: +$todayCount шт.", color = StardustSuccess, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(24.dp))
-
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = StardustItemBg)
-                ) {
-                    Text("Закрыть", color = StardustTextPrimary)
+                Text("Детальная статистика по палетам в разработке...", color = StardustTextSecondary, textAlign = TextAlign.Center)
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = StardustItemBg)) {
+                    Text("Закрыть", color = StardustTextSecondary)
                 }
             }
         }
@@ -340,26 +328,130 @@ fun PalletActivityLogView(
     isAdmin: Boolean,
     onClearLogClick: () -> Unit
 ) {
+    val latestEntry = logEntries.firstOrNull()
+    var showFullLogDialog by remember { mutableStateOf(false) }
+
     Card(
-        modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp),
-        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clickable { showFullLogDialog = true },
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
     ) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("История операций:", fontWeight = FontWeight.Bold, color = StardustTextPrimary, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp).weight(1f))
-                if (isAdmin) {
-                    IconButton(onClick = onClearLogClick, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Outlined.DeleteOutline, contentDescription = "Очистить", tint = StardustTextSecondary)
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Outlined.History, null, tint = StardustTextSecondary, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+
+            if (latestEntry != null) {
+                val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(latestEntry.timestamp))
+                val desc = getActionDescriptionShort(latestEntry)
+                Text(
+                    text = "$time • ${latestEntry.userName}: $desc",
+                    color = StardustTextPrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                Text("История операций пуста", color = StardustTextSecondary, style = MaterialTheme.typography.bodyMedium)
+            }
+
+            Icon(Icons.Default.ChevronRight, null, tint = StardustTextSecondary.copy(alpha = 0.5f))
+        }
+    }
+
+    if (showFullLogDialog) {
+        val groupedLogs = remember(logEntries) {
+            logEntries.groupBy {
+                SimpleDateFormat("d MMMM yyyy", Locale("ru")).format(Date(it.timestamp))
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showFullLogDialog = false },
+            containerColor = StardustModalBg,
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("История операций", color = StardustTextPrimary, fontWeight = FontWeight.Bold)
+                    if (isAdmin && logEntries.isNotEmpty()) {
+                        IconButton(onClick = { showFullLogDialog = false; onClearLogClick() }) {
+                            Icon(Icons.Outlined.DeleteOutline, null, tint = StardustError)
+                        }
                     }
                 }
-            }
-            if (logEntries.isEmpty()) {
-                Text("Нет недавних операций.", color = StardustTextSecondary, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(8.dp), textAlign = TextAlign.Center)
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(logEntries, key = { it.id }) { entry -> PalletLogEntryItem(entry) }
+            },
+            text = {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 400.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    groupedLogs.forEach { (date, entries) ->
+                        item {
+                            Text(
+                                text = date,
+                                color = StardustPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 4.dp)
+                            )
+                        }
+                        items(entries) { entry -> PalletLogEntryItem(entry) }
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
                 }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFullLogDialog = false }) { Text("Закрыть", color = StardustPrimary) }
+            }
+        )
+    }
+}
+
+private fun getActionDescriptionShort(entry: PalletActivityLogEntry): String {
+    return when (entry.action) {
+        "CREATED" -> "Создал палет №${entry.palletNumber}"
+        "DISTRIBUTED" -> "Добавил ${entry.itemCount} шт. → №${entry.palletNumber}"
+        "REMOVED_ITEM" -> "Удалил АКБ (№${entry.palletNumber})"
+        "RESTORED_ITEM" -> "Вернул АКБ (№${entry.palletNumber})"
+        "DELETED" -> "Удалил палет №${entry.palletNumber}"
+        else -> entry.action
+    }
+}
+
+@Composable
+fun BufferDetailsDialog(items: List<String>, onDismiss: () -> Unit, onDeleteItem: (String) -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg), modifier = Modifier.heightIn(max = 500.dp)) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Layers, null, tint = StardustWarning, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("Буфер обмена", style = MaterialTheme.typography.titleLarge, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                if (items.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) { Text("Буфер пуст", color = StardustTextSecondary.copy(alpha = 0.5f)) }
+                } else {
+                    LazyColumn(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(items) { item ->
+                            Row(modifier = Modifier.fillMaxWidth().background(StardustItemBg, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text(item, color = StardustTextPrimary, fontSize = 14.sp)
+                                IconButton(onClick = { onDeleteItem(item) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.Close, null, tint = StardustError, modifier = Modifier.size(18.dp)) }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = StardustItemBg)) { Text("Закрыть", color = StardustTextPrimary) }
             }
         }
     }
@@ -370,15 +462,15 @@ fun PalletLogEntryItem(entry: PalletActivityLogEntry) {
     val (icon, color, text) = when (entry.action) {
         "CREATED" -> Triple(Icons.Default.Add, StardustSecondary, "создал палет")
         "DELETED" -> Triple(Icons.Default.Delete, StardustError, "удалил палет")
-        "DISTRIBUTED" -> Triple(Icons.Default.Done, StardustSuccess, "добавил АКБ на палет")
-        "REMOVED_ITEM" -> Triple(Icons.Default.Clear, StardustError, "удалил АКБ с палета")
-        "RESTORED_ITEM" -> Triple(Icons.Default.SettingsBackupRestore, StardustWarning, "восстановил АКБ на палет")
-        else -> Triple(Icons.Default.Done, StardustTextSecondary, entry.action)
+        "DISTRIBUTED" -> Triple(Icons.Default.Done, StardustSuccess, "добавил АКБ")
+        "REMOVED_ITEM" -> Triple(Icons.Default.Clear, StardustError, "удалил АКБ")
+        "RESTORED_ITEM" -> Triple(Icons.Default.SettingsBackupRestore, StardustWarning, "восстановил АКБ")
+        else -> Triple(Icons.Default.Info, StardustTextSecondary, entry.action)
     }
     val actionText = buildAnnotatedString {
-        val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        append("${sdf.format(Date(entry.timestamp))} ")
-        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold, color = StardustTextPrimary)) { append("${entry.userName ?: "Система"}") }
+        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(entry.timestamp))
+        withStyle(style = SpanStyle(color = StardustTextSecondary, fontSize = 11.sp)) { append("$time ") }
+        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold, color = StardustTextPrimary)) { append("${entry.userName ?: "System"}") }
         append(" $text ")
         if (entry.palletNumber != null) {
             withStyle(style = SpanStyle(color = StardustPrimary, fontWeight = FontWeight.Bold)) { append("№${entry.palletNumber}") }
@@ -387,22 +479,29 @@ fun PalletLogEntryItem(entry: PalletActivityLogEntry) {
             append(" (${entry.itemCount} шт.)")
         }
     }
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(8.dp))
-        Text(text = actionText, color = StardustTextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+        Text(text = actionText, color = StardustTextSecondary, fontSize = 12.sp)
     }
+    HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f), thickness = 0.5.dp)
 }
 
 @Composable
 fun PulsatingShareButton(modifier: Modifier = Modifier, enabled: Boolean, onClick: () -> Unit) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulsating")
-    val scale by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 2.5f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Restart), label = "scale")
-    val alpha by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 0f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Restart), label = "alpha")
-    Box(modifier = modifier.size(48.dp), contentAlignment = Alignment.Center) {
-        if (enabled) Box(Modifier.size(48.dp).scale(scale).graphicsLayer { this.alpha = alpha }.background(StardustPrimary.copy(alpha = 0.5f), CircleShape))
-        IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(40.dp).clip(CircleShape).background(StardustPrimary), colors = IconButtonDefaults.iconButtonColors(contentColor = StardustTextPrimary, disabledContentColor = StardustTextSecondary)) {
-            Icon(Icons.Default.Share, "Экспорт")
+    val scale by infiniteTransition.animateFloat(initialValue = 1f, targetValue = 1.1f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "scale")
+    val alpha by infiniteTransition.animateFloat(initialValue = 0.5f, targetValue = 0f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Restart), label = "alpha")
+
+    Box(modifier = modifier.size(56.dp), contentAlignment = Alignment.Center) {
+        if (enabled) Box(Modifier.size(56.dp).scale(scale).graphicsLayer { this.alpha = alpha }.background(StardustPrimary, CircleShape))
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(56.dp).clip(CircleShape).background(StardustPrimary),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = StardustTextPrimary, disabledContentColor = StardustTextSecondary)
+        ) {
+            Icon(Icons.Default.Share, "Экспорт", modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -548,5 +647,125 @@ fun PalletItemListItem(batteryId: String, onDelete: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         Text(batteryId, color = StardustTextPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
         IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.Clear, null, tint = StardustError) }
+    }
+}
+
+// --- НОВЫЙ ДИАЛОГ ОТЧЕТА ---
+@Composable
+fun DistributionReportDialog(
+    report: DistributionReport,
+    onDismiss: () -> Unit
+) {
+    val hasErrors = report.errorCount > 0
+    val dialogColor = if (hasErrors) StardustWarning else StardustSuccess
+    // Заголовок только текстом
+    // Убираем иконку и оставляем только текст "ВНИМАНИЕ" (капсом) для ошибок
+
+    Dialog(onDismissRequest = {}) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = StardustModalBg),
+            border = if (hasErrors) BorderStroke(2.dp, StardustError) else null, // Красная рамка при ошибке
+            modifier = Modifier.fillMaxWidth().heightIn(max = 600.dp)
+        ) {
+            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+
+                if (hasErrors) {
+                    // СТРОГИЙ ДИЗАЙН ПРИ ОШИБКЕ
+                    Text("ВНИМАНИЕ", style = MaterialTheme.typography.displaySmall, color = Color.White, fontWeight = FontWeight.Black)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Попытка добавить АКБ другого производителя",
+                        color = StardustError,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
+                    )
+                } else {
+                    // ОБЫЧНЫЙ ДИЗАЙН ПРИ УСПЕХЕ
+                    Icon(
+                        imageVector = Icons.Outlined.CheckCircle,
+                        contentDescription = null,
+                        tint = StardustSuccess,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Успешно!", style = MaterialTheme.typography.titleLarge, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Крупные цифры
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Добавлено", color = StardustTextSecondary, fontSize = 12.sp)
+                        Text("+${report.successCount}", color = StardustSuccess, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (report.errorCount > 0) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Исключено", color = StardustTextSecondary, fontSize = 12.sp)
+                            Text("${report.errorCount}", color = StardustError, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                if (report.duplicateCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Дубликатов: ${report.duplicateCount}", color = StardustTextSecondary, fontSize = 12.sp)
+                }
+
+                // Список ошибок
+                if (hasErrors) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        "Уберите эти АКБ из списка:",
+                        color = StardustTextSecondary,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .background(StardustItemBg, RoundedCornerShape(12.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(report.excludedItems) { item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(StardustModalBg, RoundedCornerShape(8.dp))
+                                    .border(1.dp, StardustError.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(StardustError, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("№${item.indexInList}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(item.code, color = StardustTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = if(hasErrors) StardustWarning else StardustPrimary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(if(hasErrors) "Я понял" else "Продолжить", color = if(hasErrors) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }

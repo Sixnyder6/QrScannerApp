@@ -1,9 +1,8 @@
-// --- ElectricianMainScreen.kt (ФИНАЛЬНАЯ ВЕРСИЯ С АРХИТЕКТУРОЙ "ФОН СНИЗУ" И ЛОГИКОЙ ОБНОВЛЕНИЙ) ---
+// --- ElectricianMainScreen.kt (ПОЛНАЯ ВЕРСИЯ v2.0 С НОВЫМИ ФИЧАМИ) ---
 
 package com.example.qrscannerapp.features.electrician.ui
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -11,9 +10,17 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,12 +32,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -39,14 +51,17 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import coil.compose.AsyncImage
 import com.example.qrscannerapp.*
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.features.electrician.ui.repair.ElectricianHistoryScreen
 import com.example.qrscannerapp.features.electrician.ui.repair.RepairScreen
 import com.example.qrscannerapp.features.electrician.ui.viewmodel.HistoryViewModel
 import com.example.qrscannerapp.features.electrician.ui.viewmodel.HistoryViewModelFactory
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+// ... (ElectricianSection и ProfileRoute без изменений) ...
 sealed class ElectricianSection(val route: String, val title: String, val icon: ImageVector) {
     object Repair : ElectricianSection("repair", "Ремонт", Icons.Default.Build)
     object Profile : ElectricianSection("profile", "Профиль", Icons.Default.AccountCircle)
@@ -57,6 +72,7 @@ sealed class ProfileRoute(val route: String, val title: String) {
     object History : ProfileRoute("profile_history", "История ремонтов")
 }
 
+// ... (ElectricianMainScreen, ProfileNavHost, UnifiedSettingsScreen без изменений) ...
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ElectricianMainScreen(authManager: AuthManager) {
@@ -146,7 +162,6 @@ fun ElectricianMainScreen(authManager: AuthManager) {
         }
     }
 }
-
 @Composable
 private fun ProfileNavHost(
     navController: NavHostController,
@@ -168,22 +183,18 @@ private fun ProfileNavHost(
         }
     }
 }
-
 @Composable
 fun UnifiedSettingsScreen(authManager: AuthManager) {
     val authState by authManager.authState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val telemetryManager = remember { TelemetryManager(context) }
-    // V-- НАЧАЛО ИЗМЕНЕНИЙ: Инициализируем UpdateManager как HiltViewModel --V
     val updateManager: UpdateManager = hiltViewModel()
-    // ^-- КОНЕЦ ИЗМЕНЕНИЙ --^
     val settingsManager = remember { SettingsManager(context) }
 
     val isSoundEnabled by settingsManager.isSoundEnabledFlow.collectAsState(initial = true)
     val isVibrationEnabled by settingsManager.isVibrationEnabledFlow.collectAsState(initial = true)
 
-    // V-- НАЧАЛО ИЗМЕНЕНИЙ: Логика запроса разрешения на уведомления --V
     var hasNotificationPermission by remember {
         mutableStateOf(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -191,7 +202,7 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
                     context,
                     Manifest.permission.POST_NOTIFICATIONS
                 ) == PackageManager.PERMISSION_GRANTED
-            } else { true } // Для старых версий разрешение не нужно
+            } else { true }
         )
     }
 
@@ -204,7 +215,6 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
             }
         }
     )
-    // ^-- КОНЕЦ ИЗМЕНЕНИЙ --^
 
     Column(
         modifier = Modifier
@@ -249,7 +259,6 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
             Column(modifier = Modifier.padding(vertical = 8.dp)) {
                 SettingsRow(icon = Icons.Default.Info, title = "Версия приложения", value = telemetryManager.getAppVersion())
                 HorizontalDivider(color = StardustItemBg)
-                // V-- НАЧАЛО ИЗМЕНЕНИЙ: Передаем новую логику клика в UpdateChecker --V
                 UpdateChecker(
                     updateManager = updateManager,
                     onCheckClick = {
@@ -262,7 +271,6 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
                         }
                     }
                 )
-                // ^-- КОНЕЦ ИЗМЕНЕНИЙ --^
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
@@ -305,38 +313,47 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
     }
 }
 
-// V-- НАЧАЛО ИЗМЕНЕНИЙ: UpdateChecker теперь принимает лямбду для клика --V
+// --- НАЧАЛО ИЗМЕНЕНИЙ ---
+
 @Composable
 private fun UpdateChecker(updateManager: UpdateManager, onCheckClick: () -> Unit) {
-// ^-- КОНЕЦ ИЗМЕНЕНИЙ --^
     val updateState by updateManager.updateState.collectAsState()
-    val scope = rememberCoroutineScope()
     var showUpdateDialog by remember { mutableStateOf(false) }
 
+    // Показываем диалог, когда появляется доступное обновление
     LaunchedEffect(updateState) {
         if (updateState is UpdateState.UpdateAvailable) {
             showUpdateDialog = true
         }
     }
 
-    if (showUpdateDialog && updateState is UpdateState.UpdateAvailable) {
-        UpdateAvailableDialog(
-            info = (updateState as UpdateState.UpdateAvailable).info,
-            onDismiss = { showUpdateDialog = false },
-            onConfirm = {
-                // `startUpdate` теперь не suspend-функция
-                updateManager.startUpdate((updateState as UpdateState.UpdateAvailable).info)
-                showUpdateDialog = false
-            }
-        )
+    // Логика отображения диалога
+    if (showUpdateDialog) {
+        val currentState = updateState
+        if (currentState is UpdateState.UpdateAvailable) {
+            UpdateAvailableDialog(
+                info = currentState.info,
+                updateState = updateState, // Передаем текущее состояние
+                onDismiss = {
+                    showUpdateDialog = false
+                    if (updateState !is UpdateState.Downloading) {
+                        updateManager.resetState()
+                    }
+                },
+                onConfirm = {
+                    updateManager.startUpdate(currentState.info)
+                }
+            )
+        }
     }
 
+    // Ряд в настройках
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
                 if (updateState !is UpdateState.Checking && updateState !is UpdateState.Downloading) {
-                    onCheckClick() // Используем переданную лямбду
+                    onCheckClick()
                 }
             }
             .padding(horizontal = 16.dp, vertical = 16.dp),
@@ -358,55 +375,215 @@ private fun UpdateChecker(updateManager: UpdateManager, onCheckClick: () -> Unit
         Icon(Icons.Default.ChevronRight, contentDescription = null, tint = StardustTextSecondary)
     }
 }
-// ... (остальные функции остаются без изменений)
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun UpdateAvailableDialog(
     info: UpdateInfo,
+    updateState: UpdateState,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
+    var fullScreenImageUri by remember { mutableStateOf<String?>(null) }
+
+    // Показываем полноэкранное изображение, если ссылка на него есть
+    if (fullScreenImageUri != null) {
+        FullScreenImageViewerDialog(
+            imageUrl = fullScreenImageUri!!,
+            onDismiss = { fullScreenImageUri = null }
+        )
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            // Запрещаем закрывать диалог во время загрузки
+            if (updateState !is UpdateState.Downloading) {
+                onDismiss()
+            }
+        },
         confirmButton = {
-            Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) {
-                Text("Скачать")
+            if (updateState !is UpdateState.Downloading) {
+                val buttonText = "Скачать" + (info.apkSize?.let { " ($it)" } ?: "")
+                Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) {
+                    Text(buttonText)
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Позже", color = StardustTextSecondary)
+            if (updateState !is UpdateState.Downloading) {
+                TextButton(onClick = onDismiss) {
+                    Text("Позже", color = StardustTextSecondary)
+                }
             }
         },
-        title = { Text("Доступно обновление!", color = StardustTextPrimary) },
+        title = { Text("Доступна новая версия ${info.latestVersionName}!", color = StardustTextPrimary) },
         text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState())
-            ) {
-                Text(
-                    text = "Новая версия: ${info.latestVersionName}",
-                    color = StardustTextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Что нового:",
-                    color = StardustTextSecondary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = info.releaseNotes,
-                    color = StardustTextPrimary,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
+            AnimatedContent(targetState = updateState is UpdateState.Downloading, label = "update_content_switcher") { isDownloading ->
+                if (isDownloading) {
+                    // СОСТОЯНИЕ 2: ЗАГРУЗКА
+                    val progress = (updateState as? UpdateState.Downloading)?.progress ?: 0
+                    DownloadProgressIndicator(progress = progress)
+                } else {
+                    // СОСТОЯНИЕ 1: ИНФОРМАЦИЯ
+                    UpdateInfoContent(info = info, onImageClick = { fullScreenImageUri = it })
+                }
             }
         },
         containerColor = StardustModalBg
     )
 }
+
+@Composable
+private fun UpdateInfoContent(info: UpdateInfo, onImageClick: (String) -> Unit) {
+    var isExpanded by remember { mutableStateOf(false) }
+    val itemsToShow = if (isExpanded) info.releaseItems else info.releaseItems?.take(2)
+
+    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+        if (!info.imageUrls.isNullOrEmpty()) {
+            ImageSlider(imageUrls = info.imageUrls, onImageClick = onImageClick)
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+        Column(modifier = Modifier.animateContentSize()) {
+            if (!itemsToShow.isNullOrEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    itemsToShow.forEach { item ->
+                        Row(verticalAlignment = Alignment.Top) {
+                            val (tagText, tagBaseColor) = when (item.type.lowercase()) {
+                                "new" -> "New" to Color(0xFF4CAF50)
+                                "fix" -> "Fix" to Color(0xFFFFC107)
+                                "beta" -> "Beta" to Color(0xFFE91E63)
+                                else -> "Info" to Color.Gray
+                            }
+                            UpdateTag(text = tagText, baseColor = tagBaseColor)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(text = item.text, color = StardustTextPrimary, fontSize = 14.sp, lineHeight = 20.sp)
+                        }
+                    }
+                }
+                if ((info.releaseItems?.size ?: 0) > 2) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = if (isExpanded) "Свернуть" else "Подробнее...",
+                        color = StardustPrimary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { isExpanded = !isExpanded }
+                    )
+                }
+            } else if (info.releaseNotes.isNotBlank()) {
+                Text(text = info.releaseNotes, color = StardustTextPrimary, fontSize = 14.sp, lineHeight = 20.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadProgressIndicator(progress: Int) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Идет загрузка...", color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Spacer(modifier = Modifier.height(16.dp))
+        LinearProgressIndicator(
+            progress = { progress / 100f },
+            modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+            color = StardustPrimary,
+            trackColor = StardustItemBg
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("${progress}%", color = StardustTextSecondary, fontSize = 12.sp)
+    }
+}
+
+@Composable
+fun FullScreenImageViewerDialog(imageUrl: String, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.8f))
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = "Full screen image",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+fun UpdateTag(text: String, baseColor: Color) {
+    val shape = RoundedCornerShape(6.dp)
+    Box(
+        modifier = Modifier
+            .border(width = 1.dp, color = baseColor, shape = shape)
+            .background(color = baseColor.copy(alpha = 0.25f), shape = shape)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Text(text = text, color = baseColor, fontWeight = FontWeight.Bold, fontSize = 12.sp, lineHeight = 12.sp)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ImageSlider(imageUrls: List<String>, onImageClick: (String) -> Unit) {
+    val pagerState = rememberPagerState(pageCount = { imageUrls.size })
+
+    LaunchedEffect(pagerState.pageCount) {
+        while(true) {
+            delay(4000)
+            if (pagerState.pageCount > 0) {
+                val nextPage = (pagerState.currentPage + 1) % pagerState.pageCount
+                pagerState.animateScrollToPage(nextPage)
+            }
+        }
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .clip(RoundedCornerShape(16.dp))
+        ) { page ->
+            AsyncImage(
+                model = imageUrls[page],
+                contentDescription = "Изображение обновления ${page + 1}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clickable { onImageClick(imageUrls[page]) }
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            Modifier.padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            repeat(pagerState.pageCount) { iteration ->
+                val color = if (pagerState.currentPage == iteration) StardustPrimary else StardustTextSecondary.copy(alpha = 0.5f)
+                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(color))
+            }
+        }
+    }
+}
+
+// ... (SettingsCategory, SettingsRow, SettingsToggleRow без изменений) ...
 @Composable
 private fun SettingsCategory(title: String) {
     Text(

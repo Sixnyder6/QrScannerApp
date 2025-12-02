@@ -1,4 +1,5 @@
-// Полная, измененная версия файла: UpdateManager.kt
+// --- Файл UpdateManager.kt ---
+// --- Версия с добавленным полем apkSize ---
 
 package com.example.qrscannerapp
 
@@ -26,12 +27,33 @@ import java.io.IOException
 import java.net.URL
 import javax.inject.Inject
 
+// НОВЫЙ КЛАСС для одного пункта в списке изменений
+data class ReleaseItem(
+    @SerializedName("type") val type: String, // "new", "fix", "beta"
+    @SerializedName("text") val text: String  // "Описание изменения"
+)
+
+// ОБНОВЛЕННЫЙ КЛАСС с информацией об обновлении
 data class UpdateInfo(
     @SerializedName("latestVersionCode") val latestVersionCode: Int,
     @SerializedName("latestVersionName") val latestVersionName: String,
     @SerializedName("apkUrl") val apkUrl: String,
-    @SerializedName("releaseNotes") val releaseNotes: String
+
+    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    // НОВОЕ ПОЛЕ: Размер файла для отображения на кнопке
+    @SerializedName("apkSize") val apkSize: String? = null,
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
+    // Старое поле. Оставляем для совместимости и простых заметок.
+    @SerializedName("releaseNotes") val releaseNotes: String,
+
+    // НОВОЕ ПОЛЕ: Список ссылок на картинки для слайдера
+    @SerializedName("imageUrls") val imageUrls: List<String>? = null,
+
+    // НОВОЕ ПОЛЕ: Структурированный список изменений с тегами
+    @SerializedName("releaseItems") val releaseItems: List<ReleaseItem>? = null
 )
+
 sealed interface UpdateState {
     object Idle : UpdateState
     object Checking : UpdateState
@@ -53,9 +75,7 @@ class UpdateManager @Inject constructor(
     private val workManager = WorkManager.getInstance(context)
 
     companion object {
-        // --- ИЗМЕНЕННАЯ СТРОКА ---
-        private const val UPDATE_URL = "https://github.com/Sixnyder6/QrScannerApp/releases/latest/download/update.json"
-        // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+        private const val UPDATE_URL = "https://github.com/Sixnyder6/QrscannerApp/releases/latest/download/update.json"
         private const val UPDATE_WORK_NAME = "app_update_work"
     }
 

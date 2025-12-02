@@ -1,5 +1,4 @@
-
-// File: app/build.gradle.kts
+// Полное содержимое для ИСПРАВЛЕННОГО файла app/build.gradle.kts
 
 plugins {
     alias(libs.plugins.android.application)
@@ -18,8 +17,8 @@ android {
         applicationId = "com.example.qrscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        versionName = "1.3.0"
+        versionCode = 24
+        versionName = "1.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -50,7 +49,10 @@ android {
         shaders = true
     }
 
-    composeOptions { }
+    composeOptions {
+        // ВАЖНОЕ ИСПРАВЛЕНИЕ: Указание версии расширения компилятора Kotlin для AGP 8.x и API 36
+        kotlinCompilerExtensionVersion = "1.5.11"
+    }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -86,7 +88,8 @@ dependencies {
 
     // Hilt
     implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
+    // V-- ВОТ ЕДИНСТВЕННОЕ ИЗМЕНЕНИЕ: НЕПРАВИЛЬНЫЙ КОМПИЛЯТОР ЗАМЕНЕН НА ПРАВИЛЬНЫЙ --V
+    ksp("com.google.dagger:hilt-android-compiler:2.51.1")
 
     // Зависимости для WorkManager и его интеграции с Hilt
     implementation("androidx.work:work-runtime-ktx:2.9.0")
@@ -157,4 +160,16 @@ dependencies {
     implementation("androidx.room:room-runtime:$room_version")
     ksp("androidx.room:room-compiler:$room_version")
     implementation("androidx.room:room-ktx:$room_version")
+
+    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    // Библиотека для загрузки изображений из сети
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
+    // 3D Visualization (Sceneview)
+    // V-- НАЧАЛО ИЗМЕНЕНИЙ --V
+    // Обновляем библиотеку до версии, которая поддерживает нужные нам функции
+    implementation("io.github.sceneview:sceneview:2.2.1")
+    implementation("androidx.compose.material:material-icons-extended")
+    // ^-- КОНЕЦ ИЗМЕНЕНИЙ --^
 }
