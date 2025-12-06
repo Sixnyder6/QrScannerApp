@@ -1,10 +1,11 @@
-// File: features/profile/ui/EmployeeProfileScreen.kt
-
+// Файл: features/profile/ui/EmployeeProfileScreen.kt
 package com.example.qrscannerapp.features.profile.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,35 +16,36 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.qrscannerapp.StardustError
-import com.example.qrscannerapp.StardustGlassBg
-import com.example.qrscannerapp.StardustItemBg
-import com.example.qrscannerapp.StardustPrimary
-import com.example.qrscannerapp.StardustTextPrimary
-import com.example.qrscannerapp.StardustTextSecondary
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.qrscannerapp.*
 import com.example.qrscannerapp.common.ui.AppBackground
+import com.example.qrscannerapp.features.profile.domain.model.DevicePerformanceDetails
+import com.example.qrscannerapp.features.profile.domain.model.PerformanceClass
 import com.example.qrscannerapp.features.profile.domain.model.UserActivityLog
 import com.example.qrscannerapp.features.profile.domain.model.UserProfile
 import com.example.qrscannerapp.features.profile.ui.viewmodel.EmployeeProfileViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
+// V-- ХИРУРГИЧЕСКИЙ ФИКС: ОПРЕДЕЛЯЕМ НЕДОСТАЮЩИЕ ЦВЕТА ПРЯМО ЗДЕСЬ --V
+private val StardustGreen = Color(0xFF37B34A)
+private val StardustYellow = Color(0xFFF9A825)
+// ^-- КОНЕЦ ФИКСА --^
+
 @Composable
 fun EmployeeProfileScreen(
-    viewModel: EmployeeProfileViewModel = viewModel()
+    viewModel: EmployeeProfileViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Архитектура уже корректна. AppBackground является корневым элементом.
     AppBackground {
-        // Контент располагается внутри BoxScope, предоставляемого AppBackground.
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 uiState.isLoading -> {
@@ -70,11 +72,15 @@ fun EmployeeProfileScreen(
                         }
 
                         item {
+                            DevicePerformanceCard(details = uiState.performanceDetails)
+                        }
+
+                        item {
                             Text(
                                 "Последняя активность и телеметрия",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = StardustTextSecondary,
-                                modifier = Modifier.padding(bottom = 8.dp, top = 16.dp)
+                                modifier = Modifier.padding(bottom = 8.dp, top = 8.dp)
                             )
                         }
                         if (uiState.activityHistory.isEmpty()) {
@@ -99,6 +105,70 @@ fun EmployeeProfileScreen(
         }
     }
 }
+
+@Composable
+fun DevicePerformanceCard(details: DevicePerformanceDetails) {
+    val (icon, text, color) = when (details.performanceClass) {
+        PerformanceClass.LOW -> Triple(Icons.Default.DirectionsCar, "Низкая", StardustError)
+        PerformanceClass.MEDIUM -> Triple(Icons.Default.LocalShipping, "Средняя", StardustYellow)
+        PerformanceClass.HIGH -> Triple(Icons.Default.RocketLaunch, "Высокая", StardustGreen)
+        PerformanceClass.UNKNOWN -> Triple(Icons.Default.QuestionMark, "Нет данных", StardustTextSecondary)
+    }
+
+    val totalRamFormatted = if (details.totalRamGb > 0) {
+        "%.1f GB RAM".format(Locale.US, details.totalRamGb)
+    } else {
+        "N/A"
+    }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(color.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = "Performance Class",
+                    tint = color,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Производительность устройства",
+                    color = StardustTextSecondary,
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = text,
+                    color = color,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = totalRamFormatted,
+                color = StardustTextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
 
 @Composable
 fun TelemetrySnapshotCard(log: UserActivityLog) {
@@ -138,7 +208,6 @@ fun TelemetrySnapshotCard(log: UserActivityLog) {
                     )
                 }
             }
-
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(12.dp))
@@ -155,14 +224,19 @@ fun TelemetrySnapshotCard(log: UserActivityLog) {
 
             Text("Устройство", fontWeight = FontWeight.SemiBold, color = StardustTextSecondary, fontSize = 12.sp)
             Spacer(modifier = Modifier.height(8.dp))
-            TelemetryRow(icon = Icons.Default.PhoneAndroid, label = "Сеть", value = log.networkState)
+
             TelemetryRow(icon = Icons.Default.BatteryStd, label = "Батарея", value = "${log.lastBatteryLevel}% ${if(log.isCharging) "(зарядка)" else ""}")
-            TelemetryRow(icon = Icons.Default.Memory, label = "RAM", value = log.freeRam)
-            TelemetryRow(icon = Icons.Default.Storage, label = "Память", value = log.freeStorage)
+            TelemetryRow(icon = Icons.Default.Thermostat, label = "Здоровье батареи", value = log.batteryHealth)
+            TelemetryRow(icon = Icons.Default.EnergySavingsLeaf, label = "Энергосбережение", value = if (log.isPowerSaveMode) "Включено" else "Выключено", valueColor = if(log.isPowerSaveMode) StardustYellow else StardustTextPrimary)
+            TelemetryRow(icon = Icons.Default.SignalCellularAlt, label = "Сеть", value = log.networkState)
+            TelemetryRow(icon = Icons.Default.Speed, label = "Пинг", value = log.networkPing)
+            TelemetryRow(icon = Icons.Default.Memory, label = "RAM (свободно)", value = log.freeRam)
+            TelemetryRow(icon = Icons.Default.Storage, label = "Память (свободно)", value = log.freeStorage)
             TelemetryRow(icon = Icons.Default.Update, label = "Uptime", value = log.deviceUptime)
         }
     }
 }
+
 @Composable
 fun TelemetryRow(icon: ImageVector, label: String, value: String, valueColor: Color = StardustTextPrimary) {
     Row(
@@ -205,6 +279,7 @@ fun ProfileHeaderCard(profile: UserProfile) {
         }
     }
 }
+
 @Composable
 fun ProfileInfoRow(icon: ImageVector, label: String, value: String) {
     Row(
@@ -218,35 +293,5 @@ fun ProfileInfoRow(icon: ImageVector, label: String, value: String) {
         Text(text = "$label:", color = StardustTextSecondary, fontSize = 14.sp)
         Spacer(modifier = Modifier.weight(1f))
         Text(text = value, color = StardustTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
-    }
-}
-
-@Composable
-fun ActivityHistoryItem(log: UserActivityLog) {
-    val sdf = remember { SimpleDateFormat("dd.MM.yyyy 'в' HH:mm", Locale.getDefault()) }
-    Card(
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = StardustGlassBg),
-        modifier = Modifier.padding(vertical = 6.dp)
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = sdf.format(Date(log.timestamp)),
-                color = StardustTextPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Скопировано номеров: ${log.itemCount}", color = StardustTextSecondary, fontSize = 14.sp)
-                if (log.manualEntryCount > 0) {
-                    Text(" (вручную: ${log.manualEntryCount})", color = StardustError, fontSize = 14.sp)
-                }
-            }
-            Text("Затрачено времени: ~${log.durationSeconds} сек.", color = StardustTextSecondary, fontSize = 12.sp)
-        }
     }
 }

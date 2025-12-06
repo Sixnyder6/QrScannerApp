@@ -6,7 +6,7 @@ import com.google.firebase.firestore.ServerTimestamp
 import java.util.*
 
 /**
-Модель данных для одного палета, как она хранится в Firestore.
+ * Модель данных для одного палета, как она хранится в Firestore.
  */
 data class StoragePallet(
     val id: String = UUID.randomUUID().toString(),
@@ -15,15 +15,14 @@ data class StoragePallet(
     @ServerTimestamp
     val createdAt: Date? = null,
     val isFull: Boolean = false,
-    // --- V НАЧАЛО ИЗМЕНЕНИЙ V ---
-    val manufacturer: String? = null // Добавляем поле для производителя
-    // --- ^ КОНЕЦ ИЗМЕНЕНИЙ ^ ---
+    val manufacturer: String? = null // Производитель (BYD/FUJIAN)
 ) {
+    // Пустой конструктор для Firebase десериализации
     constructor() : this("", 0, emptyList(), null, false, null)
 }
 
 /**
-Модель данных, описывающая состояние UI для экрана распределения по палетам.
+ * Модель данных, описывающая состояние UI для экрана распределения по палетам.
  */
 data class PalletDistributionUiState(
     val isLoading: Boolean = true,
@@ -36,7 +35,7 @@ data class PalletDistributionUiState(
 )
 
 /**
-Модель данных для записи активности по палетам (для истории).
+ * Модель данных для записи активности по палетам (для истории).
  */
 data class PalletActivityLogEntry(
     val id: String = UUID.randomUUID().toString(),
@@ -48,5 +47,6 @@ data class PalletActivityLogEntry(
     val itemCount: Int? = null,
     val palletId: String? = null
 ) {
+    // Пустой конструктор для Firebase десериализации
     constructor() : this("", 0, null, null, "", null, null, null)
 }

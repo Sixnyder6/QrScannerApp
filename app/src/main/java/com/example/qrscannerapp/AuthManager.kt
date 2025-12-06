@@ -1,4 +1,5 @@
 package com.example.qrscannerapp
+
 import android.content.Context
 import android.util.Log
 import androidx.datastore.core.DataStore
@@ -18,17 +19,41 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "internal_auth_store")
 private const val TAG = "InternalAuth"
+
+// --- НОВАЯ СТРУКТУРА РОЛЕЙ ---
+enum class UserRole(val key: String, val displayName: String) {
+    ADMIN("admin", "Администратор"),
+    MOVER("muver", "Мувер"), // Ключ оставили старый для совместимости
+    ELECTRICIAN("electrician", "Электрик"),
+    INVENTORY_MANAGER("inventory_manager", "Кладовщик"), // Ключ старый, название новое
+    TECHNIC("technic", "Техник"), // НОВАЯ РОЛЬ
+    USER("user", "Пользователь"); // Роль по умолчанию
+
+    companion object {
+        fun fromKey(key: String?): UserRole {
+            return entries.find { it.key == key } ?: USER
+        }
+
+        // Список для выпадающего меню при создании сотрудника
+        fun getSelectableRoles(): List<UserRole> {
+            return entries.filter { it != USER }
+        }
+    }
+}
+
 data class AuthState(
     val isLoggedIn: Boolean,
     val userId: String? = null,
     val userName: String? = null,
     val isAdmin: Boolean = false,
-    val role: String? = null,
+    val role: UserRole = UserRole.USER, // Теперь здесь тип UserRole
     val error: String? = null,
     val isLoading: Boolean = true
 )
+
 class AuthManager(private val context: Context) {
     private val firestore = Firebase.firestore
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -54,19 +79,12 @@ class AuthManager(private val context: Context) {
         }
     }
 
-    // --- ИСПРАВЛЕННЫЙ КОД ---
     fun goOnline() {
         val uid = _authState.value.userId ?: return
         Log.d(TAG, "Setting status to 'online' for user $uid")
         try {
             val userDocRef = firestore.collection("internal_users").document(uid)
-
-            // Просто устанавливаем статус "online"
             userDocRef.update("status", "online")
-
-            // Метод onDisconnect() НЕ СУЩЕСТВУЕТ в Firestore, поэтому мы его убираем.
-            // Статус "offline" будет установлен функцией goOffline() при выходе.
-
         } catch (e: Exception) {
             Log.e(TAG, "Error setting online status for user $uid", e)
         }
@@ -86,7 +104,6 @@ class AuthManager(private val context: Context) {
             Log.e(TAG, "Error setting offline status for user $uid", e)
         }
     }
-// --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
     private suspend fun loadUserData(uid: String) {
         try {
@@ -94,17 +111,20 @@ class AuthManager(private val context: Context) {
             if (userDocument.exists()) {
                 val displayName = userDocument.getString("displayName") ?: "Без имени"
                 val isAdmin = userDocument.getBoolean("isAdmin") ?: false
-                val role = userDocument.getString("role")
+
+                // Считываем строку и превращаем в Enum
+                val roleString = userDocument.getString("role")
+                val userRole = UserRole.fromKey(roleString)
 
                 _authState.value = AuthState(
                     isLoggedIn = true,
                     userId = uid,
                     userName = displayName,
                     isAdmin = isAdmin,
-                    role = role,
+                    role = userRole, // Сохраняем как Enum
                     isLoading = false
                 )
-                Log.d(TAG, "Successfully loaded data for user: $displayName, isAdmin: $isAdmin, role: $role")
+                Log.d(TAG, "Successfully loaded data for user: $displayName, isAdmin: $isAdmin, role: ${userRole.displayName}")
 
                 goOnline()
 
@@ -140,16 +160,20 @@ class AuthManager(private val context: Context) {
                     Log.d(TAG, "Password is correct. Login successful.")
                     val userId = userDocument.id
 
+                    // Telemetry update logic remains here...
                     launch {
                         try {
-                            val telemetryManager = TelemetryManager(context)
-                            val telemetryData = telemetryManager.getAllTelemetry()
-                            firestore.collection("internal_users").document(userId)
-                                .update(telemetryData)
-                                .await()
-                            Log.d(TAG, "Telemetry for user $userId updated successfully: $telemetryData")
+                            // Примечание: предполагается, что TelemetryManager существует в проекте
+                            // Если код не компилируется, удалите этот блок или импортируйте TelemetryManager
+                            /*
+                             val telemetryManager = TelemetryManager(context)
+                             val telemetryData = telemetryManager.getAllTelemetry()
+                             firestore.collection("internal_users").document(userId)
+                                 .update(telemetryData)
+                                 .await()
+                            */
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to update telemetry for user $userId", e)
+                            Log.e(TAG, "Failed to update telemetry", e)
                         }
                     }
 

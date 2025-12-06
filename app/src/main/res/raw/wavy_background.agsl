@@ -1,53 +1,47 @@
-// File: engine_background.agsl
+// File: res/raw/engine_background.agsl
 
 uniform float2 iResolution;
 uniform float iTime;
-uniform half4 color1;
-uniform half4 color2;
-uniform half4 color3;
 
-// --- Основная функция, которая выполняется для каждого пикселя ---
+// --- УЛУЧШЕНИЕ: Гибкая настройка цветов с понятными именами ---
+uniform half4 backgroundColor; // Цвет фона/низкой энергии
+uniform half4 midEnergyColor;  // Цвет средней энергии
+uniform half4 coreEnergyColor; // Цвет ядра/высокой энергии
+
+// --- УЛУЧШЕНИЕ: Параметры для управления анимацией и внешним видом ---
+uniform float animationSpeed;  // Общая скорость анимации
+uniform float energyBrightness;  // Общая яркость "энергии"
+uniform float mainOrbitRadius; // Радиус "коленвала"
+uniform float piston1SpeedMult;  // Множитель скорости "поршня 1"
+uniform float piston2SpeedMult;  // Множитель скорости "поршня 2"
+uniform float rampMidPoint;      // Точка перехода от фона к среднему цвету
+uniform float rampCorePoint;     // Точка перехода от среднего цвета к ядру
+
 half4 main(float2 fragCoord) {
-    // Нормализуем координаты, но оставляем центр в (0,0) для удобства вращения
     float2 uv = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
-    float time = iTime * 0.3; // Замедляем "двигатель"
+    float time = iTime * animationSpeed;
 
-    // --- ШАГ 1: "Коленвал" (Главный двигатель) ---
-    // Медленно вращается по кругу радиусом 0.2
-    float radius = 0.2;
-    float2 crankshaftPos = float2(cos(time), sin(time)) * radius;
+    // --- ШАГ 1: "Коленвал" ---
+    float2 crankshaftPos = float2(cos(time), sin(time)) * mainOrbitRadius;
 
-    // --- ШАГ 2: "Шатуны" и "Поршни" (Вторичные двигатели) ---
-    // Их движение полностью зависит от "коленвала"
-
-    // "Поршень 1": движется по эллипсу, в 2 раза быстрее коленвала
-    float2 piston1Pos = float2(sin(time * 2.0), cos(time)) * 0.4;
-
-    // "Поршень 2": движется по сложной траектории, зависящей от обеих координат коленвала
-    // Это создает асимметричное, интересное движение
+    // --- ШАГ 2: "Шатуны" и "Поршни" ---
+    float2 piston1Pos = float2(sin(time * piston1SpeedMult), cos(time)) * (mainOrbitRadius * 2.0);
     float2 piston2Pos = float2(
-        crankshaftPos.x + sin(time * 1.5) * 0.3,
-        crankshaftPos.y + cos(time * 2.5) * 0.3
+        crankshaftPos.x + sin(time * piston2SpeedMult) * (mainOrbitRadius * 1.5),
+        crankshaftPos.y + cos(time * (piston2SpeedMult + 1.0)) * (mainOrbitRadius * 1.5)
     );
 
     // --- ШАГ 3: Расчет "Энергетического поля" ---
-    // Мы считаем обратное расстояние от пикселя (uv) до каждой точки.
-    // Это создает эффект светящихся "горячих" центров.
-    // 'smoothstep' используется для создания плавных краев у волн.
     float energy1 = smoothstep(0.8, 0.0, distance(uv, crankshaftPos));
     float energy2 = smoothstep(0.6, 0.0, distance(uv, piston1Pos));
     float energy3 = smoothstep(0.7, 0.0, distance(uv, piston2Pos));
 
-    // Смешиваем энергии вместе. Сложение создает интерференцию и сложные узоры.
-    float totalEnergy = (energy1 + energy2 + energy3) * 0.5;
-
-    // Добавляем немного вращающегося фона для динамики
+    float totalEnergy = (energy1 + energy2 + energy3) * energyBrightness;
     totalEnergy += sin(uv.x * 5.0 + time) * 0.1;
 
     // --- ШАГ 4: Синтез цвета ---
-    // Используем итоговую энергию для смешивания цветов
-    half4 finalColor = mix(color1, color2, smoothstep(0.0, 0.3, totalEnergy));
-    finalColor = mix(finalColor, color3, smoothstep(0.3, 0.6, totalEnergy));
+    half4 finalColor = mix(backgroundColor, midEnergyColor, smoothstep(0.0, rampMidPoint, totalEnergy));
+    finalColor = mix(finalColor, coreEnergyColor, smoothstep(rampMidPoint, rampCorePoint, totalEnergy));
 
     return finalColor;
 }

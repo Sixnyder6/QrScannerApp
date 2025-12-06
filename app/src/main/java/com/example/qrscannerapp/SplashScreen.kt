@@ -1,10 +1,10 @@
+// Полное содержимое для ИСПРАВЛЕННОГО файла SplashScreen.kt
+
 package com.example.qrscannerapp
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+
+import androidx.compose.animation.AnimatedVisibility // <-- ВОТ НУЖНЫЙ ИМПОРТ
+import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn // <-- И ЭТОТ ТОЖЕ
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -32,16 +32,16 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
+import androidx.hilt.navigation.compose.hiltViewModel
 import kotlin.random.Random
-// --- Цветовая палитра остается той же ---
+
+// ... (весь код для цветов, шрифтов, Particles и BeamShape остается без изменений) ...
 val SplashScreenBackgroundColor = Color.Black
 val SplashScreenLogoColor = Color(0xFF7B61FF)
 val SplashScreenTextColor = Color(0xFFEAEAF0)
 val SplashScreenStudioTextColor = Color(0xFFFFFBEB)
 val SplashScreenStudioGlowColor = Color(0xFFFFC107)
-val BeamColor = Color(0x1AFFFFFF) // Цвет луча проектора
-// --- Настройка шрифта остается той же ---
+val BeamColor = Color(0x1AFFFFFF)
 val provider = GoogleFont.Provider(
     providerAuthority = "com.google.android.gms.fonts",
     providerPackage = "com.google.android.gms",
@@ -100,21 +100,32 @@ fun Particles(modifier: Modifier) {
     }
 }
 data class Particle(val x: Float, val y: Float, val size: Float, val alpha: Float)
+
 @Composable
-fun SplashScreen(onAnimationFinished: () -> Unit) {
+fun SplashScreen(
+    onAnimationFinished: () -> Unit,
+    viewModel: SplashScreenViewModel = hiltViewModel()
+) {
     var startAnimation by remember { mutableStateOf(false) }
 
-// --- АНИМАЦИИ ---
+    val isLoading by viewModel.isLoading.collectAsState()
+    val loadingStatus by viewModel.loadingStatus.collectAsState()
+
     val lampAlpha by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(1000), label = "lampAlpha")
     val beamScaleY by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(2000, 500), label = "beamScaleY")
     val logoReveal by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(2000, 1000), label = "logoReveal")
     val textAlpha by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(1500, 3000), label = "textAlpha")
     val studioAlpha by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(1500, 3500), label = "studioAlpha")
 
-    LaunchedEffect(key1 = true) {
+    LaunchedEffect(isLoading) {
+        if (!isLoading) {
+            kotlinx.coroutines.delay(1500)
+            onAnimationFinished()
+        }
+    }
+
+    LaunchedEffect(Unit) {
         startAnimation = true
-        delay(5000)
-        onAnimationFinished()
     }
 
     Box(
@@ -123,7 +134,6 @@ fun SplashScreen(onAnimationFinished: () -> Unit) {
             .background(SplashScreenBackgroundColor),
         contentAlignment = Alignment.Center
     ) {
-        // --- ПРОЕКТОР И ЛУЧ ---
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.TopCenter
@@ -162,13 +172,10 @@ fun SplashScreen(onAnimationFinished: () -> Unit) {
                     .background(SplashScreenLogoColor, shape = RoundedCornerShape(2.dp))
             )
         }
-
-        // --- ЛОГОТИП И НАЗВАНИЕ ---
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // --- ИСПРАВЛЕНИЕ ЗДЕСЬ: Правильная анимация проявления ---
             Image(
                 painter = painterResource(id = R.drawable.ic_qr_logo),
                 contentDescription = "QR Scan Logo",
@@ -183,17 +190,14 @@ fun SplashScreen(onAnimationFinished: () -> Unit) {
                             brush = Brush.verticalGradient(
                                 colors = listOf(Color.Black, Color.Transparent),
                                 startY = 0f,
-                                endY = size.height * logoReveal // Анимируем конечную точку градиента
+                                endY = size.height * logoReveal
                             ),
-                            blendMode = BlendMode.DstOut // Используем DstOut, чтобы "стирать" черную маску
+                            blendMode = BlendMode.DstOut
                         )
                     },
                 colorFilter = ColorFilter.tint(SplashScreenLogoColor)
             )
-            // --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
             Spacer(modifier = Modifier.height(20.dp))
-
             Text(
                 text = "QR SCAN",
                 modifier = Modifier.alpha(textAlpha),
@@ -205,7 +209,22 @@ fun SplashScreen(onAnimationFinished: () -> Unit) {
             )
         }
 
-        // --- ПОДПИСЬ СТУДИИ ---
+        // НОВЫЙ ЭЛЕМЕНТ: Текст статуса загрузки
+        AnimatedVisibility(
+            visible = startAnimation,
+            enter = fadeIn(animationSpec = tween(durationMillis = 1000, delayMillis = 2000)),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 80.dp)
+        ) {
+            Text(
+                text = loadingStatus, // <-- Показываем текст из ViewModel
+                fontFamily = InterFont,
+                fontSize = 14.sp,
+                color = SplashScreenTextColor.copy(alpha = 0.7f)
+            )
+        }
+
         Text(
             text = "A LUCIUS STUDIO PROJECT",
             modifier = Modifier
@@ -227,6 +246,7 @@ fun SplashScreen(onAnimationFinished: () -> Unit) {
         )
     }
 }
+
 @Preview(showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 fun SplashScreenPreview() {

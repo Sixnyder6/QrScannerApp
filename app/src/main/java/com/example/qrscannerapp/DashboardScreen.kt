@@ -1,5 +1,5 @@
 // Полная, обновленная версия файла: DashboardScreen.kt
-// Реализовано: Добавление, Удаление и РЕДАКТИРОВАНИЕ (карандаш)
+// Реализовано: Добавление, Удаление и РЕДАКТИРОВАНИЕ (карандаш) + НОВАЯ СИСТЕМА РОЛЕЙ
 
 package com.example.qrscannerapp
 
@@ -37,6 +37,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+// ИМПОРТ НАШЕГО ENUM
+import com.example.qrscannerapp.UserRole
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,19 +80,21 @@ fun DashboardScreen(
             initialName = employeeToEdit?.name ?: "",
             // Логин при редактировании не показываем старый (безопасность), либо оставляем пустым
             initialUsername = "",
-            initialRole = employeeToEdit?.role?.ifBlank { "muver" } ?: "muver",
+            // Если редактируем - конвертируем строку из БД в Enum, иначе берем дефолтную роль (например Мувер)
+            initialRole = if (employeeToEdit != null) UserRole.fromKey(employeeToEdit!!.role) else UserRole.MOVER,
             isEditMode = employeeToEdit != null,
             onDismiss = {
                 showAddEditDialog = false
                 employeeToEdit = null
             },
             onConfirm = { name, username, pass, role ->
+                // role здесь приходит как UserRole, нам нужно достать ключ (.key)
                 if (employeeToEdit != null) {
                     // Режим редактирования
-                    viewModel.updateEmployee(employeeToEdit!!.id, name, username, pass, role)
+                    viewModel.updateEmployee(employeeToEdit!!.id, name, username, pass, role.key)
                 } else {
                     // Режим создания
-                    viewModel.createEmployee(name, username, pass, role)
+                    viewModel.createEmployee(name, username, pass, role.key)
                 }
                 showAddEditDialog = false
                 employeeToEdit = null
@@ -396,6 +400,11 @@ fun DashboardScreen(
         }
     }
 }
+
+// ... Остальные Composable (ActiveTaskItem, DashboardTaskDetailsSheet и т.д.) без изменений ...
+// Для краткости я их пропустил, но в твоем файле они должны остаться!
+// Если ты копируешь весь файл, убедись, что вспомогательные функции ниже тоже скопированы.
+// Я сейчас добавлю их для полноты картины, чтобы ты мог просто сделать Ctrl+A -> Ctrl+V.
 
 @Composable
 fun ActiveTaskItem(task: Task, onClick: () -> Unit) {
@@ -747,7 +756,9 @@ fun EmployeeListSheet(
                             Column {
                                 Text(employee.name, color = StardustTextPrimary, fontSize = 16.sp)
                                 if (employee.role.isNotBlank()) {
-                                    Text(employee.role, color = StardustTextSecondary, fontSize = 12.sp)
+                                    // ИСПОЛЬЗУЕМ ENUM ДЛЯ КРАСИВОГО ОТОБРАЖЕНИЯ РОЛИ
+                                    val roleDisplayName = UserRole.fromKey(employee.role).displayName
+                                    Text(roleDisplayName, color = StardustTextSecondary, fontSize = 12.sp)
                                 }
                             }
                         }
@@ -904,17 +915,17 @@ fun EmployeeActivityListItem(activity: EmployeeActivity, onClick: () -> Unit) {
 fun AddEditEmployeeDialog(
     initialName: String = "",
     initialUsername: String = "",
-    initialRole: String = "muver",
+    initialRole: UserRole = UserRole.MOVER, // Теперь принимаем Enum
     isEditMode: Boolean = false,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, username: String, password: String, role: String) -> Unit
+    onConfirm: (name: String, username: String, password: String, role: UserRole) -> Unit
 ) {
     var name by remember { mutableStateOf(initialName) }
     var username by remember { mutableStateOf(initialUsername) }
     var password by remember { mutableStateOf("") }
 
-    // Список ролей
-    val roles = listOf("muver", "admin", "electrician", "inventory_manager")
+    // Список ролей берем из ENUM
+    val roles = UserRole.getSelectableRoles()
     var selectedRole by remember { mutableStateOf(initialRole) }
     var isRoleExpanded by remember { mutableStateOf(false) }
 
@@ -986,7 +997,7 @@ fun AddEditEmployeeDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     OutlinedTextField(
-                        value = selectedRole,
+                        value = selectedRole.displayName, // Показываем красивое имя
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Роль") },
@@ -1008,7 +1019,7 @@ fun AddEditEmployeeDialog(
                     ) {
                         roles.forEach { role ->
                             DropdownMenuItem(
-                                text = { Text(text = role, color = StardustTextPrimary) },
+                                text = { Text(text = role.displayName, color = StardustTextPrimary) },
                                 onClick = {
                                     selectedRole = role
                                     isRoleExpanded = false

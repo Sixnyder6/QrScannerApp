@@ -1,27 +1,34 @@
-// Полная, измененная версия файла AppNavigation.kt
+// Полное содержимое для ИСПРАВЛЕННОГО файла AppNavigation.kt
 
 package com.example.qrscannerapp
-import android.app.Application
+
 import android.content.pm.PackageManager
 import android.os.Build
 import android.view.View
+import android.widget.Toast
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -38,8 +45,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.features.electrician.ui.UnifiedSettingsScreen
+import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseAddItemScreen
+import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseDashboardScreen
+import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseViewModel
+import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.WarehouseCatalogScreen
 import com.example.qrscannerapp.features.inventory.ui.distribution.PalletDistributionScreen
 import com.example.qrscannerapp.features.inventory.ui.storage.StorageScreen
 import com.example.qrscannerapp.features.profile.ui.EmployeeProfileScreen
@@ -49,8 +62,8 @@ import com.example.qrscannerapp.features.tasks.ui.viewmodel.MyTasksViewModel
 import com.example.qrscannerapp.features.vehicle_report.ui.VehicleReportAnalyticsScreen
 import com.example.qrscannerapp.features.vehicle_report.ui.VehicleReportHistoryScreen
 import com.example.qrscannerapp.features.vehicle_report.ui.VehicleReportScreen
+import com.example.qrscannerapp.features.visual_repair.ui.VisualRepairScreen
 import kotlinx.coroutines.launch
-
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
     object Scanner : Screen("scanner", "Сканер", Icons.Outlined.DocumentScanner)
@@ -68,7 +81,11 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     object AdminRepairLog : Screen("admin_repair_log", "Журнал ремонтов", Icons.Outlined.Build)
     object PalletDistribution : Screen("pallet_distribution", "Приемка", Icons.Outlined.Inventory)
     object Storage : Screen("storage", "Хранение", Icons.Outlined.Inventory2)
+    object Warehouse : Screen("warehouse", "Склад", Icons.Outlined.Warehouse)
+    object WarehouseCatalog : Screen("warehouse_catalog", "Каталог запчастей", Icons.AutoMirrored.Outlined.MenuBook)
+    object WarehouseAddItem : Screen("warehouse_add_item", "Новая запчасть", Icons.Default.Add)
     object TaskCreation : Screen("task_creation", "Создать Задачу", Icons.Default.Add)
+    object VisualRepair : Screen("visual_repair/{scooterId}", "3D Осмотр", Icons.Outlined.Build)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,18 +131,11 @@ fun MainApp() {
     val authManager = remember { AuthManager(context) }
     val authState by authManager.authState.collectAsState()
 
-    // V-- НАЧАЛО ИЗМЕНЕНИЙ (Блок 1 из 3) --V
-    // 1. Создаем состояние, которое будет хранить Composable-блок с кнопками для TopAppBar.
-    // По умолчанию оно пустое.
     var topBarActions: @Composable RowScope.() -> Unit by remember { mutableStateOf({}) }
 
-    // 2. При смене экрана (currentRoute) мы сбрасываем это состояние до пустого,
-    // чтобы кнопки со старого экрана не "переезжали" на новый.
     LaunchedEffect(currentRoute) {
         topBarActions = {}
     }
-    // ^-- КОНЕЦ ИЗМЕНЕНИЙ (Блок 1 из 3) --^
-
 
     val menuItems = remember(authState.isAdmin) {
         val itemsList = mutableListOf<Screen>()
@@ -133,6 +143,7 @@ fun MainApp() {
         itemsList.add(Screen.MyTasks)
         itemsList.add(Screen.PalletDistribution)
         itemsList.add(Screen.Storage)
+        itemsList.add(Screen.Warehouse)
 
         if (authState.isAdmin) {
             itemsList.add(Screen.Dashboard)
@@ -151,9 +162,10 @@ fun MainApp() {
                     Screen.MyTasks.route -> 1
                     Screen.PalletDistribution.route -> 2
                     Screen.Storage.route -> 3
-                    Screen.Dashboard.route -> 4
-                    Screen.VehicleReport.route -> 5
-                    Screen.QrGenerator.route -> 6
+                    Screen.Warehouse.route -> 4
+                    Screen.Dashboard.route -> 5
+                    Screen.VehicleReport.route -> 6
+                    Screen.QrGenerator.route -> 7
                     else -> 10
                 }
             }
@@ -163,6 +175,7 @@ fun MainApp() {
     AppBackground {
         ModalNavigationDrawer(
             drawerState = drawerState,
+            gesturesEnabled = currentRoute != Screen.VisualRepair.route,
             drawerContent = {
                 ModalDrawerSheet(
                     drawerContainerColor = Color.Transparent,
@@ -239,12 +252,22 @@ fun MainApp() {
                         Screen.Account, Screen.SessionDetail, Screen.Dashboard,
                         Screen.EmployeeProfile, Screen.AdminRepairLog, Screen.PalletDistribution,
                         Screen.Storage, Screen.MyTasks, Screen.TaskCreation,
-                        Screen.VehicleReport, Screen.VehicleReportHistory, Screen.VehicleReportAnalytics
+                        Screen.VehicleReport, Screen.VehicleReportHistory, Screen.VehicleReportAnalytics,
+                        Screen.VisualRepair, Screen.Warehouse,
+                        Screen.WarehouseCatalog, Screen.WarehouseAddItem
                     )
                     val currentScreen = allScreens.find { it.route == currentRoute }
                     val topBarTitle = currentScreen?.title ?: ""
 
-                    if (currentRoute != Screen.Scanner.route) {
+                    // --- ИЗМЕНЕНИЕ: Добавляем WarehouseCatalog в список исключений ---
+                    val screensWithoutMainTopBar = listOf(
+                        Screen.Scanner.route,
+                        Screen.VisualRepair.route,
+                        Screen.WarehouseAddItem.route,
+                        Screen.WarehouseCatalog.route
+                    )
+
+                    if (currentRoute !in screensWithoutMainTopBar) {
                         TopAppBar(
                             title = { Text(topBarTitle) },
                             navigationIcon = {
@@ -252,7 +275,8 @@ fun MainApp() {
                                     Screen.EmployeeProfile.route, Screen.AdminRepairLog.route,
                                     Screen.SessionDetail.route, Screen.Storage.route,
                                     Screen.TaskCreation.route, Screen.VehicleReportHistory.route,
-                                    Screen.VehicleReportAnalytics.route
+                                    Screen.VehicleReportAnalytics.route,
+                                    Screen.VisualRepair.route
                                 )
                                 if (currentRoute in backButtonScreens) {
                                     IconButton(onClick = { navController.popBackStack() }) {
@@ -267,17 +291,12 @@ fun MainApp() {
                                     }
                                 }
                             },
-                            // V-- НАЧАЛО ИЗМЕНЕНИЙ (Блок 2 из 3) --V
-                            // 3. Используем наше состояние для отображения кнопок.
-                            // Если состояние пустое, ничего не отобразится.
-                            // Если StorageScreen положит туда свою кнопку, она отобразится.
                             actions = { topBarActions() },
-                            // ^-- КОНЕЦ ИЗМЕНЕНИЙ (Блок 2 из 3) --^
                             colors = TopAppBarDefaults.topAppBarColors(
                                 containerColor = Color.Black.copy(alpha = 0.3f),
                                 titleContentColor = StardustTextPrimary,
                                 navigationIconContentColor = StardustTextPrimary,
-                                actionIconContentColor = StardustTextPrimary // Добавлено для консистентности цвета иконки
+                                actionIconContentColor = StardustTextPrimary
                             )
                         )
                     }
@@ -295,12 +314,9 @@ fun MainApp() {
                     hapticManager = hapticManager,
                     view = view,
                     authManager = authManager,
-                    // V-- НАЧАЛО ИЗМЕНЕНИЙ (Блок 3 из 3) --V
-                    // 4. Передаем функцию для *установки* состояния в AppNavHost.
                     setTopBarActions = { actions ->
                         topBarActions = actions
                     }
-                    // ^-- КОНЕЦ ИЗМЕНЕНИЙ (Блок 3 из 3) --^
                 )
             }
         }
@@ -313,18 +329,83 @@ fun DrawerFooter(
     appVersionName: String,
     onNavigateToAccount: () -> Unit
 ) {
+    val userName = authState.userName ?: "Пользователь"
+    // Загрузка фото (дублируем логику, чтобы не тащить лишних зависимостей)
+    val photoUrl = remember(userName) { getEmployeePhotoUrl(userName) }
+
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
+
         if (authState.isLoggedIn) {
-            Column(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onNavigateToAccount).padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            // Кликабельная карточка профиля
+            Surface(
+                onClick = onNavigateToAccount,
+                color = Color.Transparent,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Text(authState.userName ?: "Пользователь", color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text("Перейти в профиль", color = StardustTextSecondary.copy(alpha = 0.7f), fontSize = 12.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .padding(8.dp)
+                        // Легкий фон при клике будет сам обрабатываться Surface
+                        .background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    // Фото
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, StardustPrimary.copy(alpha = 0.5f), CircleShape)
+                    ) {
+                        if (photoUrl != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(photoUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .align(Alignment.Center),
+                                tint = StardustTextSecondary
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    // Текст
+                    Column {
+                        Text(
+                            text = userName,
+                            color = StardustTextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = authState.role.displayName, // Показываем роль
+                            color = StardustTextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
         } else {
-            TextButton(onClick = onNavigateToAccount, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            // Кнопка входа
+            TextButton(onClick = onNavigateToAccount, modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.AccountCircle, contentDescription = "Войти", tint = StardustTextSecondary)
                     Spacer(Modifier.width(8.dp))
@@ -332,7 +413,10 @@ fun DrawerFooter(
                 }
             }
         }
-        Text(appVersionName, modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), textAlign = TextAlign.Center, color = StardustTextSecondary.copy(alpha = 0.5f), fontSize = 12.sp)
+
+        Text(appVersionName, modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp), textAlign = TextAlign.Center, color = StardustTextSecondary.copy(alpha = 0.5f), fontSize = 12.sp)
     }
 }
 
@@ -346,9 +430,10 @@ fun AppNavHost(
     hapticManager: HapticFeedbackManager,
     view: View,
     authManager: AuthManager,
-    setTopBarActions: (@Composable RowScope.() -> Unit) -> Unit // Принимаем функцию
+    setTopBarActions: (@Composable RowScope.() -> Unit) -> Unit
 ) {
     val viewModel: QrScannerViewModel = hiltViewModel()
+    val authState by authManager.authState.collectAsState()
 
     NavHost(
         navController = navController,
@@ -373,12 +458,13 @@ fun AppNavHost(
                 },
                 onNavigateToHistory = {
                     navController.navigate(Screen.History.route) { launchSingleTop = true }
+                },
+                onNavigateToVisualRepair = { scooterId ->
+                    val route = Screen.VisualRepair.route.replace("{scooterId}", scooterId)
+                    navController.navigate(route)
                 }
             )
         }
-
-        // ... (остальные composable без изменений) ...
-
         composable(route = Screen.MyTasks.route, enterTransition = { fadeEnter }, exitTransition = { fadeExit }, popEnterTransition = { fadeEnter }, popExitTransition = { fadeExit }) {
             MyTasksScreen(
                 onMenuClick = onMenuClick,
@@ -386,7 +472,6 @@ fun AppNavHost(
                 }
             )
         }
-
         composable(route = Screen.QrGenerator.route, enterTransition = { fadeEnter }, exitTransition = { fadeExit }, popEnterTransition = { fadeEnter }, popExitTransition = { fadeExit }) {
             QrGeneratorScreen()
         }
@@ -412,7 +497,6 @@ fun AppNavHost(
                 }
             )
         }
-
         composable(route = Screen.VehicleReport.route, enterTransition = { fadeEnter }, exitTransition = { fadeExit }, popEnterTransition = { fadeEnter }, popExitTransition = { fadeExit }) {
             VehicleReportScreen(
                 onNavigateToHistory = {
@@ -420,7 +504,6 @@ fun AppNavHost(
                 }
             )
         }
-
         composable(route = Screen.VehicleReportHistory.route, enterTransition = { fadeEnter }, exitTransition = { fadeExit }, popEnterTransition = { fadeEnter }, popExitTransition = { fadeExit }) {
             VehicleReportHistoryScreen(
                 onNavigateToAnalytics = {
@@ -428,11 +511,9 @@ fun AppNavHost(
                 }
             )
         }
-
         composable(route = Screen.VehicleReportAnalytics.route, enterTransition = { fadeEnter }, exitTransition = { fadeExit }, popEnterTransition = { fadeEnter }, popExitTransition = { fadeExit }) {
             VehicleReportAnalyticsScreen()
         }
-
         composable(route = Screen.History.route, enterTransition = { fadeEnter }, exitTransition = { fadeExit }, popEnterTransition = { fadeEnter }, popExitTransition = { fadeExit }) {
             HistoryScreen(viewModel = viewModel, navController = navController)
         }
@@ -458,11 +539,104 @@ fun AppNavHost(
                 viewModel = viewModel,
                 authManager = authManager,
                 onNavigateBack = { navController.popBackStack() },
-                setTopBarActions = setTopBarActions // Передаем функцию экрану
+                setTopBarActions = setTopBarActions
+            )
+        }
+
+        // --- ИСПРАВЛЕНИЕ: Передаем userRole в Dashboard ---
+        composable(route = Screen.Warehouse.route) {
+            WarehouseDashboardScreen(
+                navController = navController,
+                isAdmin = authState.isAdmin,
+                userRole = authState.role // Передаем роль!
+            )
+        }
+
+        composable(route = Screen.WarehouseCatalog.route) {
+            val warehouseViewModel: WarehouseViewModel = viewModel()
+            val items by warehouseViewModel.items.collectAsState()
+            val context = LocalContext.current
+
+            LaunchedEffect(Unit) {
+                warehouseViewModel.uiEvents.collect { event ->
+                    when (event) {
+                        is WarehouseViewModel.UiEvent.ShowSnackbar -> {
+                            Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
+                        }
+                        else -> {}
+                    }
+                }
+            }
+
+            WarehouseCatalogScreen(
+                items = items,
+                onNavigateToAddItem = {
+                    navController.navigate(Screen.WarehouseAddItem.route)
+                },
+                onTakeItem = { item, quantity ->
+                    val currentUserName = authState.userName ?: "Неизвестный сотрудник"
+                    warehouseViewModel.onTakeItem(item, quantity, currentUserName)
+                },
+                isAdmin = authState.isAdmin,
+                userRole = authState.role,
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable(route = Screen.WarehouseAddItem.route) {
+            val warehouseViewModel: WarehouseViewModel = viewModel()
+            val items by warehouseViewModel.items.collectAsState()
+            val dynamicCategories = remember(items) {
+                (items.map { it.category } + listOf("Электроника", "Ходовая", "Механика", "Колеса", "Расходники")).distinct()
+            }
+            val context = LocalContext.current
+            LaunchedEffect(Unit) {
+                warehouseViewModel.uiEvents.collect { event ->
+                    when (event) {
+                        is WarehouseViewModel.UiEvent.NavigateBack -> {
+                            navController.popBackStack()
+                        }
+                        is WarehouseViewModel.UiEvent.ShowSnackbar -> {
+                            Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+            WarehouseAddItemScreen(
+                existingCategories = dynamicCategories,
+                onNavigateUp = {
+                    navController.popBackStack()
+                },
+                onItemCreated = { newItem ->
+                    warehouseViewModel.onAddNewItem(
+                        fullName = newItem.fullName,
+                        shortName = newItem.shortName,
+                        sku = newItem.sku,
+                        category = newItem.category,
+                        unit = newItem.unit,
+                        totalStock = newItem.totalStock
+                    )
+                }
             )
         }
         composable(route = Screen.TaskCreation.route, enterTransition = { fadeEnter }, exitTransition = { fadeExit }, popEnterTransition = { fadeEnter }, popExitTransition = { fadeExit }) {
             TaskCreationScreen(navController = navController)
+        }
+        composable(
+            route = Screen.VisualRepair.route,
+            arguments = listOf(navArgument("scooterId") { type = NavType.StringType }),
+            enterTransition = { fadeEnter },
+            exitTransition = { fadeExit },
+            popEnterTransition = { fadeEnter },
+            popExitTransition = { fadeExit }
+        ) { backStackEntry ->
+            val scooterId = backStackEntry.arguments?.getString("scooterId")
+            VisualRepairScreen(
+                scooterId = scooterId,
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
     }
 }

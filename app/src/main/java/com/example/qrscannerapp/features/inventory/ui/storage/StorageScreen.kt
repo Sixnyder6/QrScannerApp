@@ -9,6 +9,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image // Добавлен импорт
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -19,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions // Добавлен импорт
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -29,24 +31,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale // Добавлен импорт
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource // Добавлен импорт
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction // Добавлен импорт
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import kotlinx.coroutines.launch
-import org.apache.poi.xssf.usermodel.XSSFWorkbook
-import java.io.File
-import java.io.FileOutputStream
+import androidx.compose.ui.zIndex // Добавлен импорт
 import androidx.core.content.FileProvider
 import com.example.qrscannerapp.AuthManager
 import com.example.qrscannerapp.QrScannerViewModel
+import com.example.qrscannerapp.R // Убедитесь, что R импортирован для картинки scooter
 import com.example.qrscannerapp.StardustError
 import com.example.qrscannerapp.StardustGlassBg
 import com.example.qrscannerapp.StardustItemBg
@@ -61,11 +65,13 @@ import com.example.qrscannerapp.StorageCell
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.features.inventory.data.export.StorageExportManager
 import com.example.qrscannerapp.features.inventory.ui.distribution.getColorByProgress
+import kotlinx.coroutines.launch
+import org.apache.poi.xssf.usermodel.XSSFWorkbook
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.compose.ui.unit.TextUnit
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,9 +93,12 @@ fun StorageScreen(
     var cellToEdit by remember { mutableStateOf<StorageCell?>(null) }
     var cellToDelete by remember { mutableStateOf<StorageCell?>(null) }
 
-    // --- V НОВЫЙ БЛОК: Состояние для диалога массового добавления V ---
+    // --- Состояние для диалога массового добавления ---
     var cellForBulkAdd by remember { mutableStateOf<StorageCell?>(null) }
-    // --- ^ КОНЕЦ НОВОГО БЛОКА ^ ---
+
+    // --- НОВОЕ: Состояние для найденного самоката (для открытия окна) ---
+    // Хранит пару: (Номер самоката, Название ячейки)
+    var foundScooterData by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     val storageExportManager = remember { StorageExportManager(context) }
     val authState by authManager.authState.collectAsState()
@@ -182,13 +191,35 @@ fun StorageScreen(
                             )
                             Spacer(modifier = Modifier.height(16.dp))
 
+                            // --- ПОЛЕ ПОИСКА С ЛОГИКОЙ ОТКРЫТИЯ ОКНА ---
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("Поиск (название, описание, номер)") },
+                                // ИЗМЕНЕНИЕ: Иконка лупы теперь кнопка
                                 leadingIcon = {
-                                    Icon(Icons.Default.Search, contentDescription = "Поиск")
+                                    IconButton(onClick = {
+                                        // ЛОГИКА ПОИСКА ПРИ НАЖАТИИ НА ЛУПУ
+                                        val query = searchQuery.trim()
+                                        if (query.isNotEmpty()) {
+                                            // Ищем ячейку, в которой есть этот самокат (точное совпадение или частичное)
+                                            val foundCell = uiState.cells.find { cell ->
+                                                cell.items.any { it.equals(query, ignoreCase = true) }
+                                            }
+
+                                            if (foundCell != null) {
+                                                // Если нашли - открываем диалог с самокатом
+                                                // Используем введенный запрос как номер, или найденный реальный номер
+                                                val realNumber = foundCell.items.find { it.equals(query, ignoreCase = true) } ?: query
+                                                foundScooterData = realNumber to foundCell.name
+                                            } else {
+                                                Toast.makeText(context, "Самокат не найден", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Search, contentDescription = "Найти")
+                                    }
                                 },
                                 trailingIcon = {
                                     if (searchQuery.isNotEmpty()) {
@@ -198,6 +229,22 @@ fun StorageScreen(
                                     }
                                 },
                                 singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = {
+                                    // Дублируем логику поиска для кнопки на клавиатуре
+                                    val query = searchQuery.trim()
+                                    if (query.isNotEmpty()) {
+                                        val foundCell = uiState.cells.find { cell ->
+                                            cell.items.any { it.equals(query, ignoreCase = true) }
+                                        }
+                                        if (foundCell != null) {
+                                            val realNumber = foundCell.items.find { it.equals(query, ignoreCase = true) } ?: query
+                                            foundScooterData = realNumber to foundCell.name
+                                        } else {
+                                            Toast.makeText(context, "Самокат не найден", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = TextFieldDefaults.colors(
                                     focusedIndicatorColor = Color.Transparent,
@@ -207,7 +254,7 @@ fun StorageScreen(
                                     unfocusedContainerColor = StardustGlassBg,
                                     focusedTextColor = StardustTextPrimary,
                                     unfocusedTextColor = StardustTextPrimary,
-                                    focusedLeadingIconColor = StardustTextSecondary,
+                                    focusedLeadingIconColor = StardustPrimary, // Подсветим лупу
                                     unfocusedLeadingIconColor = StardustTextSecondary,
                                     focusedTrailingIconColor = StardustTextSecondary,
                                     unfocusedTrailingIconColor = StardustTextSecondary,
@@ -252,7 +299,6 @@ fun StorageScreen(
                                         StorageCellTile(
                                             cell = cell,
                                             searchQuery = searchQuery,
-                                            // <--- ИЗМЕНЕНИЕ №1: ВОЗВРАЩАЕМ СТАРУЮ ЛОГИКУ НА КЛИК
                                             onClick = {
                                                 if (undistributedCount > 0) {
                                                     viewModel.distributeScootersToCell(cell)
@@ -266,7 +312,6 @@ fun StorageScreen(
                                             onEditClick = {
                                                 cellToEdit = cell
                                             },
-                                            // <--- ИЗМЕНЕНИЕ №2: ДОБАВЛЯЕМ НОВЫЙ ОБРАБОТЧИК
                                             onBulkAddClick = {
                                                 cellForBulkAdd = cell
                                             }
@@ -282,6 +327,23 @@ fun StorageScreen(
                 }
             }
         }
+    }
+
+    // --- ДИАЛОГИ ---
+
+    // 1. Диалог найденного самоката (НОВЫЙ)
+    if (foundScooterData != null) {
+        ScooterSearchResultDialog(
+            scooterNumber = foundScooterData!!.first,
+            locationName = foundScooterData!!.second,
+            lastUser = "Система", // Или передать сюда пользователя, если он есть в данных
+            onDismiss = { foundScooterData = null },
+            onNavigate = {
+                // Мы уже на экране склада, просто закрываем диалог
+                // Фильтрация в списке уже сработала из-за searchQuery
+                foundScooterData = null
+            }
+        )
     }
 
     if (showCreateDialog) {
@@ -378,6 +440,98 @@ fun StorageScreen(
     }
 }
 
+// --- Компонент окна самоката (вставлен сюда для работы) ---
+@Composable
+fun ScooterSearchResultDialog(
+    scooterNumber: String,
+    locationName: String,
+    lastUser: String,
+    onDismiss: () -> Unit,
+    onNavigate: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
+            contentAlignment = Alignment.BottomCenter,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(460.dp)
+        ) {
+            // САМОКАТ (Слой сверху)
+            Image(
+                painter = painterResource(id = R.drawable.scooter), // Убедитесь, что ресурс существует
+                contentDescription = "Scooter",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .size(280.dp)
+                    .align(Alignment.TopCenter)
+                    .offset(y = 20.dp)
+                    .zIndex(1f)
+            )
+
+            // КАРТОЧКА (Слой снизу)
+            Card(
+                shape = RoundedCornerShape(32.dp),
+                colors = CardDefaults.cardColors(containerColor = StardustModalBg),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+                    .align(Alignment.BottomCenter)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 90.dp, start = 24.dp, end = 24.dp, bottom = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Самокат найден!",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = StardustSuccess,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = scooterNumber,
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = StardustTextPrimary,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 2.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Place, null, tint = StardustSecondary, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(locationName, color = StardustTextPrimary, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Person, null, tint = StardustTextSecondary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Добавил: $lastUser", color = StardustTextSecondary, fontSize = 14.sp)
+                        }
+                    }
+
+                    Button(
+                        onClick = onNavigate,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Перейти к месту", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun BulkAddScootersDialog(
     cell: StorageCell,
@@ -421,7 +575,6 @@ fun StorageCellTile(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onEditClick: () -> Unit,
-    // <--- ИЗМЕНЕНИЕ №3: ДОБАВЛЯЕМ НОВЫЙ ПАРАМЕТР В ФУНКЦИЮ
     onBulkAddClick: () -> Unit
 ) {
     val progress = if (cell.capacity > 0) cell.items.size.toFloat() / cell.capacity.toFloat() else 0f
@@ -451,14 +604,13 @@ fun StorageCellTile(
                         text = cell.name, highlight = searchQuery, fontWeight = FontWeight.Bold,
                         fontSize = 18.sp, color = StardustTextPrimary, modifier = Modifier.weight(1f)
                     )
-                    // <--- ИЗМЕНЕНИЕ №4: ДОБАВЛЯЕМ НОВУЮ ИКОНКУ И ОБОРАЧИВАЕМ В ROW
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.PlaylistAdd, // Иконка "список с плюсом"
                             contentDescription = "Массовое добавление",
                             tint = StardustTextSecondary,
                             modifier = Modifier
-                                .size(24.dp) // Чуть больше для удобства нажатия
+                                .size(24.dp)
                                 .clickable(onClick = onBulkAddClick)
                         )
                         Spacer(Modifier.width(8.dp))

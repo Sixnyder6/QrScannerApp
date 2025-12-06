@@ -1,14 +1,14 @@
-// Path: app/src/main/java/com/example/qrscannerapp/AppModule.kt
+// Полное содержимое для ИСПРАВЛЕННОГО файла AppModule.kt
 
 package com.example.qrscannerapp
 
 import android.content.Context
+import coil.ImageLoader // <-- НОВЫЙ ИМПОРТ
 import com.example.qrscannerapp.features.electrician.data.local.dao.RepairLogDao
 import com.example.qrscannerapp.features.electrician.data.repository.RepairLogRepository
-// --- V НАЧАЛО ИЗМЕНЕНИЙ V ---
 import com.example.qrscannerapp.features.inventory.data.local.dao.StorageCellDao
 import com.example.qrscannerapp.features.inventory.data.local.dao.StoragePalletDao
-// --- ^ КОНЕЦ ИЗМЕНЕНИЙ ^ ---
+import com.example.qrscannerapp.features.profile.data.repository.EmployeeProfileRepository
 import com.example.qrscannerapp.features.scanner.data.local.dao.ScanSessionDao
 import com.example.qrscannerapp.features.scanner.data.repository.ScanSessionRepository
 import com.example.qrscannerapp.features.tasks.data.local.dao.TaskDao
@@ -38,6 +38,8 @@ object AppModule {
         return AppDatabase.getDatabase(context)
     }
 
+    // --- DAO PROVIDERS ---
+
     @Provides
     @Singleton
     fun provideRepairLogDao(database: AppDatabase): RepairLogDao {
@@ -50,7 +52,6 @@ object AppModule {
         return database.scanSessionDao()
     }
 
-    // --- V НАЧАЛО ИЗМЕНЕНИЙ V ---
     @Provides
     @Singleton
     fun provideStorageCellDao(database: AppDatabase): StorageCellDao {
@@ -62,7 +63,6 @@ object AppModule {
     fun provideStoragePalletDao(database: AppDatabase): StoragePalletDao {
         return database.storagePalletDao()
     }
-    // --- ^ КОНЕЦ ИЗМЕНЕНИЙ ^ ---
 
     @Provides
     @Singleton
@@ -76,11 +76,21 @@ object AppModule {
         return database.vehicleReportHistoryDao()
     }
 
+    // --- FIREBASE & MANAGERS ---
+
     @Provides
     @Singleton
     fun provideFirebaseFirestore(): FirebaseFirestore {
         return FirebaseFirestore.getInstance()
     }
+
+    @Provides
+    @Singleton
+    fun provideDevicePerformanceManager(telemetryManager: TelemetryManager): DevicePerformanceManager {
+        return DevicePerformanceManager(telemetryManager)
+    }
+
+    // --- REPOSITORIES ---
 
     @Provides
     @Singleton
@@ -96,6 +106,15 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideEmployeeProfileRepository(
+        firestore: FirebaseFirestore,
+        telemetryManager: TelemetryManager
+    ): EmployeeProfileRepository {
+        return EmployeeProfileRepository(firestore, telemetryManager)
+    }
+
+    @Provides
+    @Singleton
     fun provideSyncManager(
         @ApplicationContext context: Context,
         repairLogRepository: RepairLogRepository,
@@ -104,15 +123,21 @@ object AppModule {
         return SyncManager(context, repairLogRepository, scanSessionRepository)
     }
 
-    @Provides
+    // V-- НАЧАЛО НОВЫХ ПРОВАЙДЕРОВ ДЛЯ ПРЕДЗАГРУЗКИ --V
+
     @Singleton
-    fun provideTelemetryManager(@ApplicationContext context: Context): TelemetryManager {
-        return TelemetryManager(context)
+    @Provides
+    fun provideSettingsManager(@ApplicationContext context: Context): SettingsManager {
+        return SettingsManager(context)
     }
 
-    @Provides
     @Singleton
-    fun provideDevicePerformanceManager(telemetryManager: TelemetryManager): DevicePerformanceManager {
-        return DevicePerformanceManager(telemetryManager)
+    @Provides
+    fun provideImageLoader(@ApplicationContext context: Context): ImageLoader {
+        return ImageLoader.Builder(context)
+            // ИСПРАВЛЕНИЕ: Убран лишний параметр "enable ="
+            .respectCacheHeaders(false) // Важно для корректной работы кэша с GitHub
+            .build()
     }
+    // ^-- КОНЕЦ НОВЫХ ПРОВАЙДЕРОВ --^
 }

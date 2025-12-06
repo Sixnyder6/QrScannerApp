@@ -25,6 +25,7 @@ data class AccountUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
     val userName: String = "Загрузка...",
+    val userRole: String = "Сотрудник", // НОВОЕ ПОЛЕ: Для отображения должности
     val registrationDate: String = "-",
     // Общая статистика
     val totalScans: Int = 0,
@@ -48,6 +49,15 @@ private data class UserActivitySummary(
     val scansToday: Int,
     val sessionsToday: Int,
     val weeklyScans: List<ChartDataPoint>
+)
+
+// Вспомогательный data class для возврата 5 значений (добавили роль)
+data class UserProfileData(
+    val name: String,
+    val role: String,
+    val regDate: String,
+    val isShiftActive: Boolean,
+    val shiftStartTime: Long
 )
 
 
@@ -131,17 +141,18 @@ class AccountViewModel(private val authManager: AuthManager) : ViewModel() {
                 val activitySummaryDeferred = async { fetchUserActivitySummary(uid) }
 
                 // Ждем выполнения всех задач
-                val (name, regDate, isShiftActive, shiftStartTime) = profileDeferred.await()
+                val profileData = profileDeferred.await()
                 val activitySummary = activitySummaryDeferred.await()
 
                 // Обновляем UI одним махом со всеми полученными данными
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        userName = name,
-                        registrationDate = regDate,
-                        isShiftActive = isShiftActive,
-                        shiftStartTime = shiftStartTime,
+                        userName = profileData.name,
+                        userRole = profileData.role, // Сохраняем роль
+                        registrationDate = profileData.regDate,
+                        isShiftActive = profileData.isShiftActive,
+                        shiftStartTime = profileData.shiftStartTime,
                         totalScans = activitySummary.totalScans,
                         totalSessions = activitySummary.totalSessions,
                         scansToday = activitySummary.scansToday,
@@ -155,12 +166,25 @@ class AccountViewModel(private val authManager: AuthManager) : ViewModel() {
         }
     }
 
-    // Теперь эта функция возвращает кортеж с 4 значениями
-    private suspend fun fetchUserProfile(userId: String): Quadruple<String, String, Boolean, Long> {
+    // Теперь эта функция возвращает UserProfileData
+    private suspend fun fetchUserProfile(userId: String): UserProfileData {
         val userDoc = db.collection("internal_users").document(userId).get().await()
         if (!userDoc.exists()) throw Exception("User document not found")
 
         val name = userDoc.getString("displayName") ?: "Без имени"
+
+        // --- ЧТЕНИЕ РОЛИ ---
+        val rawRole = userDoc.getString("role")
+        val isAdmin = userDoc.getBoolean("isAdmin") ?: false
+        val roleDisplayName = if (rawRole != null) {
+            UserRole.fromKey(rawRole).displayName
+        } else if (isAdmin) {
+            "Администратор"
+        } else {
+            "Сотрудник"
+        }
+        // -------------------
+
         val regTimestamp = userDoc.getLong("registrationTimestamp")
         val regDate = if (regTimestamp != null) {
             SimpleDateFormat("dd.MM.yyyy", Locale.getDefault()).format(Date(regTimestamp))
@@ -172,7 +196,7 @@ class AccountViewModel(private val authManager: AuthManager) : ViewModel() {
         val isShiftActive = userDoc.getBoolean("isShiftActive") ?: false
         val shiftStartTime = userDoc.getLong("shiftStartTime") ?: 0L
 
-        return Quadruple(name, regDate, isShiftActive, shiftStartTime)
+        return UserProfileData(name, roleDisplayName, regDate, isShiftActive, shiftStartTime)
     }
 
     private suspend fun fetchUserActivitySummary(userId: String): UserActivitySummary {
@@ -240,10 +264,6 @@ class AccountViewModel(private val authManager: AuthManager) : ViewModel() {
         )
     }
 }
-
-// Вспомогательный data class для возврата 4 значений
-data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
-
 
 // Фабрика остается без изменений
 class AccountViewModelFactory(private val authManager: AuthManager) : ViewModelProvider.Factory {
