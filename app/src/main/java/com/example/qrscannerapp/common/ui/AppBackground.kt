@@ -3,73 +3,55 @@ package com.example.qrscannerapp.common.ui
 
 import android.graphics.RuntimeShader
 import android.os.Build
+import androidx.annotation.RawRes
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ShaderBrush
-// V-- ИЗМЕНЕНИЕ 1: Ненужные импорты удалены (Hilt, ViewModel, PerformanceClass) --V
+import androidx.compose.ui.platform.LocalContext
+import com.example.qrscannerapp.R
 
-private const val AGSL_WAVY_SHADER_SRC = """
-    uniform float2 iResolution;
-    uniform float iTime;
-    uniform half4 color1;
-    uniform half4 color2;
-    uniform half4 color3;
+data class ShaderBackgroundTheme(
+    @RawRes val shaderResourceId: Int,
+    val colors: List<Color>,
+    val animationSpeed: Float = 0.3f,
+    val piston1SpeedMult: Float = 2.0f,
+    val piston2SpeedMult: Float = 1.5f,
+    val rampMidPoint: Float = 0.3f,
+    val rampCorePoint: Float = 0.6f
+)
 
-    float random(float2 st) {
-        return fract(sin(dot(st.xy, float2(12.9898, 78.233))) * 43758.5453123);
-    }
+val DeepSpaceTheme = ShaderBackgroundTheme(
+    shaderResourceId = R.raw.engine_background,
+    colors = listOf(
+        Color(0.02f, 0.01f, 0.04f, 1.0f),
+        Color(0.3f, 0.15f, 0.6f, 1.0f),
+        Color(0.6f, 0.5f, 0.9f, 1.0f)
+    ),
+    animationSpeed = 0.25f
+)
 
-    half4 main(float2 fragCoord) {
-        float2 uv = fragCoord.xy / iResolution.xy;
-        float wave1 = sin(uv.x * 3.0 + uv.y * 5.0 + iTime * 0.1);
-        float wave2 = cos(uv.x * 2.0 - uv.y * 4.0 + iTime * 0.2);
-        float basePattern = (wave1 + wave2) * 0.5;
-        float noise = random(uv + iTime * 0.01) * 0.1 - 0.05;
-        float finalValue = basePattern + noise;
-        half4 finalColor = mix(color1, color2, smoothstep(-0.5, 0.0, finalValue));
-        finalColor = mix(finalColor, color3, smoothstep(0.0, 0.5, finalValue));
-        return half4(finalColor.rgb, 1.0);
-    }
-"""
-
-// V-- ИЗМЕНЕНИЕ 2: Сигнатура и логика функции полностью упрощены --V
 @Composable
 fun AppBackground(
     modifier: Modifier = Modifier,
+    theme: ShaderBackgroundTheme = DeepSpaceTheme,
     content: @Composable BoxScope.() -> Unit
 ) {
-    // "Мозг" отключен. Логика теперь зависит только от версии ОС.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        // Если ОС поддерживает шейдеры, всегда используем их.
-        ShaderPoweredBackground(modifier, content)
+        ShaderPoweredBackground(modifier, theme, content)
     } else {
-        // Для старых версий ОС используем запасную анимацию.
-        LegacyGradientBackground(modifier, content)
-    }
-}
-
-// Эта функция больше не используется, но оставим ее на случай будущих изменений.
-@Composable
-private fun StaticBackground(
-    modifier: Modifier = Modifier,
-    content: @Composable BoxScope.() -> Unit
-) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(StaticBackgroundColor)
-    ) {
-        content()
+        // Устройства со старой версией Android теперь будут использовать
+        // новую, значительно улучшенную версию Legacy-фона.
+        LegacyGradientBackground(modifier, theme.colors, content)
     }
 }
 
@@ -77,36 +59,51 @@ private fun StaticBackground(
 @Composable
 private fun ShaderPoweredBackground(
     modifier: Modifier = Modifier,
+    theme: ShaderBackgroundTheme,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "time_transition")
+    val context = LocalContext.current
+    val shader = remember {
+        val shaderSrc = context.resources.openRawResource(theme.shaderResourceId)
+            .bufferedReader().use { it.readText() }
+        RuntimeShader(shaderSrc)
+    }
+    val shaderBrush = remember { ShaderBrush(shader) }
+    val infiniteTransition = rememberInfiniteTransition(label = "shader_master_transition")
+
     val time by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 3600f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3_600_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
+        initialValue = 0f, targetValue = 3600f,
+        animationSpec = infiniteRepeatable(tween(3_600_000, easing = LinearEasing)),
         label = "time"
     )
-
-    val shader = remember { RuntimeShader(AGSL_WAVY_SHADER_SRC) }
-    val shaderBrush = remember { ShaderBrush(shader) }
+    val pulsatingBrightness by infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 0.45f,
+        animationSpec = infiniteRepeatable(tween(4000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "brightness"
+    )
+    val pulsatingRadius by infiniteTransition.animateFloat(
+        initialValue = 0.18f, targetValue = 0.22f,
+        animationSpec = infiniteRepeatable(tween(5000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "radius"
+    )
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .drawWithCache {
                 shader.setFloatUniform("iResolution", size.width, size.height)
-                val color1 = ShaderColors[0]
-                val color2 = ShaderColors[1]
-                val color3 = ShaderColors[2]
-                shader.setFloatUniform("color1", color1.red, color1.green, color1.blue, color1.alpha)
-                shader.setFloatUniform("color2", color2.red, color2.green, color2.blue, color2.alpha)
-                shader.setFloatUniform("color3", color3.red, color3.green, color3.blue, color3.alpha)
-
+                shader.setFloatUniform("backgroundColor", theme.colors[0].red, theme.colors[0].green, theme.colors[0].blue, theme.colors[0].alpha)
+                shader.setFloatUniform("midEnergyColor", theme.colors[1].red, theme.colors[1].green, theme.colors[1].blue, theme.colors[1].alpha)
+                shader.setFloatUniform("coreEnergyColor", theme.colors[2].red, theme.colors[2].green, theme.colors[2].blue, theme.colors[2].alpha)
+                shader.setFloatUniform("animationSpeed", theme.animationSpeed)
+                shader.setFloatUniform("piston1SpeedMult", theme.piston1SpeedMult)
+                shader.setFloatUniform("piston2SpeedMult", theme.piston2SpeedMult)
+                shader.setFloatUniform("rampMidPoint", theme.rampMidPoint)
+                shader.setFloatUniform("rampCorePoint", theme.rampCorePoint)
                 onDrawBehind {
                     shader.setFloatUniform("iTime", time)
+                    shader.setFloatUniform("energyBrightness", pulsatingBrightness)
+                    shader.setFloatUniform("mainOrbitRadius", pulsatingRadius)
                     drawRect(shaderBrush)
                 }
             }
@@ -115,54 +112,69 @@ private fun ShaderPoweredBackground(
     }
 }
 
+// --- ИЗМЕНЕНИЕ НАЧАЛОСЬ ЗДЕСЬ ---
+// Мы полностью заменяем старый Legacy-фон на новый, многослойный,
+// чтобы он выглядел достойно на флагманах вроде S10+.
+
 @Composable
 private fun LegacyGradientBackground(
     modifier: Modifier = Modifier,
+    colors: List<Color>,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "legacy_wave_transition")
-    val animatedProgress1 by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 20000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "wave1_progress"
+    val infiniteTransition = rememberInfiniteTransition(label = "super_legacy_transition")
+
+    // Анимируем несколько параметров для создания сложного, не повторяющегося движения
+    val progress1 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(15000, easing = LinearEasing), RepeatMode.Reverse)
     )
-    val animatedProgress2 by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 18000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "wave2_progress"
+    val progress2 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(22000, easing = LinearEasing), RepeatMode.Reverse)
     )
+    val progress3 by infiniteTransition.animateFloat(
+        initialValue = 1f, targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(18000, easing = LinearEasing), RepeatMode.Reverse)
+    )
+
+    // Безопасно извлекаем цвета из темы, предоставляя значения по умолчанию
+    val baseColor = colors.getOrNull(0) ?: Color.Black
+    val midColor = colors.getOrNull(1) ?: Color.Blue
+    val coreColor = colors.getOrNull(2) ?: Color.Magenta
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .drawBehind {
-                val width = size.width
-                val height = size.height
-                val diagonal = width + height
+            .drawWithCache {
+                onDrawBehind {
+                    // Слой 1: Основной темный фон, чтобы избежать плоского черного цвета.
+                    drawRect(brush = Brush.verticalGradient(listOf(baseColor, baseColor.copy(alpha = 0.8f))))
 
-                val shift2 = (animatedProgress2 * 2f - 1f) * diagonal
-                val brush2 = Brush.linearGradient(
-                    colors = WaveGradientColors2,
-                    start = Offset(shift2, 0f),
-                    end = Offset(0f, shift2)
-                )
-                drawRect(brush2)
+                    // Слой 2: Большое, медленное "дыхание" света для атмосферы.
+                    val radius2 = size.width * (1.2f + progress2 * 0.5f)
+                    val center2 = Offset(size.width * progress3, size.height * (1f - progress2))
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(midColor.copy(alpha = 0.3f), Color.Transparent),
+                            center = center2,
+                            radius = radius2
+                        )
+                    )
 
-                val shift1 = (animatedProgress1 * 2f - 1f) * diagonal
-                val brush1 = Brush.linearGradient(
-                    colors = WaveGradientColors1,
-                    start = Offset(0f, shift1),
-                    end = Offset(shift1, 0f)
-                )
-                drawRect(brush1)
+                    // Слой 3: Более яркое и быстрое "ядро", имитирующее центр шейдера.
+                    val radius1 = size.width * (0.8f + progress1 * 0.3f)
+                    val center1 = Offset(size.width * (1f - progress1), size.height * progress3)
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(coreColor.copy(alpha = 0.4f), Color.Transparent),
+                            center = center1,
+                            radius = radius1
+                        ),
+                        // Режим смешивания 'Plus' красиво складывает цвета, делая их ярче при пересечении.
+                        blendMode = BlendMode.Plus
+                    )
+                }
             }
     ) {
         content()

@@ -1,5 +1,3 @@
-// File: AccountScreen.kt
-
 package com.example.qrscannerapp
 
 import android.util.Log
@@ -35,6 +33,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
@@ -46,9 +45,27 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.qrscannerapp.common.ui.AppBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+// =================================================================================
+// ХЕЛПЕР ДЛЯ ЗАГРУЗКИ ФОТО
+// =================================================================================
+private const val GITHUB_EMPLOYEES_URL = "https://raw.githubusercontent.com/Sixnyder6/QrScannerApp/master/images/employees/"
+
+fun getEmployeePhotoUrl(userName: String): String? {
+    val filename = when (userName) {
+        "Николай Никасов" -> "nikasov.png"
+        "Михаил Ситников" -> "sitnikov.png"
+        "Соболев Владислав" -> "sobolev.png"
+        // Сюда можно добавлять новых сотрудников по мере появления фото
+        else -> null
+    }
+    return filename?.let { GITHUB_EMPLOYEES_URL + it }
+}
 
 // =================================================================================
 // ОСНОВНОЙ ЭКРАН (ТОЧКА ВХОДА)
@@ -66,7 +83,6 @@ fun AccountScreen(authManager: AuthManager) {
         }
     }
 
-    // Архитектура уже корректна. AppBackground является корневым элементом.
     AppBackground {
         Box(modifier = Modifier.fillMaxSize()) {
             when {
@@ -152,6 +168,7 @@ fun PersonalProfileScreen(
         item {
             ProfileHeader(
                 userName = state.userName,
+                userRole = state.userRole, // Передаем роль
                 isShiftActive = state.isShiftActive,
                 onStartShift = { viewModel.startShift() },
                 onEndShift = { viewModel.endShift() },
@@ -220,6 +237,7 @@ fun PersonalProfileScreen(
 @Composable
 fun ProfileHeader(
     userName: String,
+    userRole: String,
     isShiftActive: Boolean,
     onStartShift: () -> Unit,
     onEndShift: () -> Unit,
@@ -228,6 +246,8 @@ fun ProfileHeader(
     val scope = rememberCoroutineScope()
     var animatingButton by remember { mutableStateOf<String?>(null) }
 
+    val photoUrl = remember(userName) { getEmployeePhotoUrl(userName) }
+
     val vibrantPurple = Color(0xFF8E2DE2)
     val deepPurple = Color(0xFF4A00E0)
     val brush = Brush.linearGradient(colors = listOf(vibrantPurple, deepPurple))
@@ -235,7 +255,7 @@ fun ProfileHeader(
     val textStyleWithShadow = TextStyle(
         shadow = Shadow(
             color = Color.Black.copy(alpha = 0.25f),
-            offset = Offset(2f, 2f),
+            offset = Offset(0f, 2f),
             blurRadius = 4f
         )
     )
@@ -248,16 +268,79 @@ fun ProfileHeader(
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Icon(imageVector = Icons.Default.Person, contentDescription = "Profile", modifier = Modifier.size(60.dp), tint = Color.White)
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = userName, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White, style = textStyleWithShadow)
-                Text(text = "Сотрудник", fontSize = 16.sp, color = Color.White.copy(alpha = 0.8f), style = textStyleWithShadow)
+        Column(
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // --- ВЕРХНЯЯ ЧАСТЬ: ФОТО + ТЕКСТ (ГОРИЗОНТАЛЬНО) ---
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // 1. Фотография (Слева)
+                Box(
+                    modifier = Modifier
+                        .size(110.dp)
+                        .clip(CircleShape)
+                        .border(3.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                        .background(Color.Black.copy(alpha = 0.2f))
+                ) {
+                    if (photoUrl != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(photoUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Profile Photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(60.dp)
+                                .align(Alignment.Center),
+                            tint = Color.White.copy(alpha = 0.8f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(20.dp)) // Отступ
+
+                // 2. Текст (Справа)
+                Column(
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = userName,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        style = textStyleWithShadow,
+                        lineHeight = 28.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Бэджик для роли
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = userRole,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = StardustPrimary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
             }
+
+            // --- НИЖНЯЯ ЧАСТЬ: КНОПКИ ---
             Column(
-                modifier = Modifier
-                    .padding(top = 16.dp)
-                    .width(IntrinsicSize.Max),
+                modifier = Modifier.width(IntrinsicSize.Max),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 PressableButton(

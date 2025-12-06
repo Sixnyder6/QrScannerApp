@@ -1,0 +1,108 @@
+uniform float2 iResolution;
+uniform float iTime;
+
+// METAPHOR PARAMETERS
+uniform float breathRate;     // Частота "вдохов" организма
+uniform float cellDensity;    // Плотность клеточной структуры
+uniform float3 tissueColor;   // Цвет самой ткани (темная база)
+uniform float3 glowColor;     // Цвет биолюминесценции (свет)
+uniform float pulseStrength;  // Интенсивность вспышки при вдохе
+
+// UTIL: Pseudo-random hash for organic variance
+half2 hash2(float2 p) {
+    p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
+    return fract(sin(p) * 43758.5453);
+}
+
+// CORE: Organic Voronoi with "Breathing" offset
+// Вместо статичной решетки, точки смещаются синусоидально, имитируя мягкую ткань.
+half voronoi(float2 x, float time, float breathingPhase) {
+    float2 n = floor(x);
+    float2 f = fract(x);
+
+    float m = 8.0;
+
+    // Check neighbor cells (3x3 grid)
+    for(int j = -1; j <= 1; j++) {
+        for(int i = -1; i <= 1; i++) {
+            float2 g = float2(float(i), float(j));
+            float2 o = hash2(n + g);
+
+            // Animate the nucleus position within the cell
+            // This creates the "squishy" movement
+            float2 offset = 0.5 + 0.5 * sin(time + 6.2831 * o);
+
+            // Vector from pixel to feature point
+            float2 r = g + offset - f;
+
+            // Euclidean distance, but softened
+            float d = length(r);
+
+            // Metaphor: Soft membrane tension
+            // We modulate distance based on the global breathing phase
+            d *= 1.0 - (0.2 * breathingPhase);
+
+            if(d < m) {
+                m = d;
+            }
+        }
+    }
+    return half(m);
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord.xy / iResolution.xy;
+
+    // Correct aspect ratio for circular cells
+    float2 p = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
+
+    // GLOBAL BREATH CYCLE
+    // A slow, rhythmic sine wave that controls everything
+    float breath = sin(iTime * breathRate) * 0.5 + 0.5;
+
+    // Slight zoom on inhale (expansion)
+    p *= 1.0 - (0.05 * breath);
+
+    // LAYERING
+    // Layer 1: The deep, slow-moving tissue (Background)
+    half v1 = voronoi(p * cellDensity, iTime * 0.2, breath);
+
+    // Layer 2: The neural network / fine capillaries (Detail)
+    // Offset slightly and scaled up
+    half v2 = voronoi((p * cellDensity * 2.0) + 5.0, iTime * 0.3, breath);
+
+    // SYNTHESIS
+    // Invert Voronoi: 0 is center (nucleus), 1 is edge.
+    // We want glowing edges (membranes) or glowing centers?
+    // Let's create glowing "nuclei" that connect.
+
+    half organicPattern = smoothstep(0.0, 1.2, v1 * v1 + v2 * 0.5);
+
+    // Invert for "Orb" look: Light is in the center of the cell
+    half light = 1.0 - organicPattern;
+    light = pow(light, 3.0); // Sharpen the falloff for a glow effect
+
+    // Add the pulse: The light gets stronger during the "inhale"
+    light *= 1.0 + (pulseStrength * breath);
+
+    // COLOR MIXING
+    // Start with the dark tissue color
+    float3 col = tissueColor;
+
+    // Add the bioluminescent glow
+    // Use the light map to blend the glow color
+    col = mix(col, glowColor, light);
+
+    // Add subtle subsurface scattering (simulated) at the edges of the light
+    col += glowColor * 0.2 * smoothstep(0.0, 0.5, light) * (1.0 - light);
+
+    // CINEMATIC FINISH
+    // Vignette to focus on the center
+    float vig = 1.0 - length(uv - 0.5) * 0.8;
+    col *= vig;
+
+    // Dithering to prevent banding on gradients
+    col += (hash2(fragCoord).x - 0.5) * 0.01;
+
+    return half4(col, 1.0);
+}

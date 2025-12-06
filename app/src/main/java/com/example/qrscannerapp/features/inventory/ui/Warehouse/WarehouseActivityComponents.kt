@@ -1,4 +1,4 @@
-// Полное содержимое для нового файла WarehouseActivityComponents.kt
+// Полное содержимое для ОБНОВЛЕННОГО файла WarehouseActivityComponents.kt
 
 package com.example.qrscannerapp.features.inventory.ui.Warehouse.components
 
@@ -22,30 +22,23 @@ import com.example.qrscannerapp.*
 import java.text.SimpleDateFormat
 import java.util.*
 
-// --- НОВЫЕ Модели и демо-данные для лога операций ---
-data class DemoTakenItem(val partName: String, val quantity: Int)
+// --- ИЗМЕНЕНО: Новые модели данных для сгруппированных операций из Firebase ---
+// --- Старые Demo-модели и val demoActivities были УДАЛЕНЫ ---
 
-data class DemoActivity(
+/**
+ * Представляет один взятый товар внутри сгруппированной операции.
+ */
+data class TakenItem(val itemName: String, val quantity: Int)
+
+/**
+ * Представляет одну сгруппированную операцию.
+ * Может содержать несколько товаров, если они были взяты одним пользователем
+ * в течение короткого промежутка времени.
+ */
+data class GroupedActivity(
     val userName: String,
-    val items: List<DemoTakenItem>,
-    val timestamp: Long
-)
-
-val demoActivities = listOf(
-    // Операция с несколькими предметами
-    DemoActivity(
-        "Соболев В.",
-        items = listOf(
-            DemoTakenItem("Контроллер V3.1", 2),
-            DemoTakenItem("Болтики М5 (5-гранные)", 50)
-        ),
-        timestamp = System.currentTimeMillis() - 1000 * 60 * 60 * 4
-    ),
-    // Обычные операции
-    DemoActivity("Николай", listOf(DemoTakenItem("Задний тормоз", 1)), System.currentTimeMillis() - 1000 * 60 * 5),
-    DemoActivity("Мельников", listOf(DemoTakenItem("Нижняя дека", 6)), System.currentTimeMillis() - 1000 * 60 * 60 * 2),
-    DemoActivity("Тест Юзер", listOf(DemoTakenItem("Грипса резиновая", 4)), System.currentTimeMillis() - 1000 * 60 * 60 * 8),
-    DemoActivity("Николай", listOf(DemoTakenItem("Покрышка 10-дюймовая", 1)), System.currentTimeMillis() - 1000 * 60 * 60 * 24),
+    val items: List<TakenItem>,
+    val timestamp: Long // Используется время последней транзакции в группе
 )
 
 
@@ -53,9 +46,14 @@ val demoActivities = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ActivityLogSheet(onDismiss: () -> Unit) {
+fun ActivityLogSheet(
+    // ИЗМЕНЕНО: Теперь компонент принимает список реальных, сгруппированных операций
+    activities: List<GroupedActivity>,
+    onDismiss: () -> Unit
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var selectedActivity by remember { mutableStateOf<DemoActivity?>(null) }
+    // ИЗМЕНЕНО: Состояние теперь хранит объект нового типа GroupedActivity
+    var selectedActivity by remember { mutableStateOf<GroupedActivity?>(null) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -74,7 +72,8 @@ fun ActivityLogSheet(onDismiss: () -> Unit) {
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(demoActivities) { activity ->
+                // ИЗМЕНЕНО: Используем переданный список 'activities' вместо 'demoActivities'
+                items(activities) { activity ->
                     ActivityCard(
                         activity = activity,
                         onClick = { selectedActivity = activity }
@@ -94,7 +93,11 @@ fun ActivityLogSheet(onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ActivityDetailSheet(activity: DemoActivity, onDismiss: () -> Unit) {
+fun ActivityDetailSheet(
+    // ИЗМЕНЕНО: Принимаем новый тип данных
+    activity: GroupedActivity,
+    onDismiss: () -> Unit
+) {
     val sheetState = rememberModalBottomSheetState()
     val time = SimpleDateFormat("d MMMM yyyy, HH:mm", Locale("ru")).format(Date(activity.timestamp))
 
@@ -125,8 +128,10 @@ fun ActivityDetailSheet(activity: DemoActivity, onDismiss: () -> Unit) {
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(item.partName, color = StardustTextPrimary, modifier = Modifier.weight(1f))
-                            Text("${item.quantity} шт.", color = StardustPrimary, fontWeight = FontWeight.Bold)
+                            // ИЗМЕНЕНО: Используем поле itemName из модели TakenItem
+                            Text(item.itemName, color = StardustTextPrimary, modifier = Modifier.weight(1f))
+                            // ИЗМЕНЕНО: Берем абсолютное значение, т.к. в логах оно отрицательное
+                            Text("${kotlin.math.abs(item.quantity)} шт.", color = StardustPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -137,7 +142,12 @@ fun ActivityDetailSheet(activity: DemoActivity, onDismiss: () -> Unit) {
 
 
 @Composable
-fun ActivityCard(activity: DemoActivity, onClick: () -> Unit) {
+fun ActivityCard(
+    // ИЗМЕНЕНО: Принимаем новый тип данных
+    activity: GroupedActivity,
+    onClick: () -> Unit
+) {
+    // Логика остается прежней, просто работает с новыми полями
     val firstItem = activity.items.first()
     val otherItemsCount = activity.items.size - 1
 
@@ -161,7 +171,8 @@ fun ActivityCard(activity: DemoActivity, onClick: () -> Unit) {
                 Text(activity.userName, color = StardustTextPrimary, fontWeight = FontWeight.Medium)
                 Text(
                     text = buildAnnotatedString {
-                        append("${firstItem.partName} - ${firstItem.quantity} шт.")
+                        // ИЗМЕНЕНО: Используем поле itemName и абсолютное значение количества
+                        append("${firstItem.itemName} - ${kotlin.math.abs(firstItem.quantity)} шт.")
                         if (otherItemsCount > 0) {
                             withStyle(style = SpanStyle(color = StardustPrimary, fontWeight = FontWeight.Bold)) {
                                 append(" и еще +$otherItemsCount")

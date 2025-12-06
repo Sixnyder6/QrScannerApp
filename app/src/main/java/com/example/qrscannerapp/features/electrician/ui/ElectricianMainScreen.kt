@@ -1,5 +1,3 @@
-// --- ElectricianMainScreen.kt (ПОЛНАЯ ВЕРСИЯ v2.0 С НОВЫМИ ФИЧАМИ) ---
-
 package com.example.qrscannerapp.features.electrician.ui
 
 import android.Manifest
@@ -52,7 +50,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import coil.compose.AsyncImage
-import com.example.qrscannerapp.*
+import com.example.qrscannerapp.* // Здесь импортируется UserRole и AuthManager
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.features.electrician.ui.repair.ElectricianHistoryScreen
 import com.example.qrscannerapp.features.electrician.ui.repair.RepairScreen
@@ -72,7 +70,6 @@ sealed class ProfileRoute(val route: String, val title: String) {
     object History : ProfileRoute("profile_history", "История ремонтов")
 }
 
-// ... (ElectricianMainScreen, ProfileNavHost, UnifiedSettingsScreen без изменений) ...
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ElectricianMainScreen(authManager: AuthManager) {
@@ -183,6 +180,8 @@ private fun ProfileNavHost(
         }
     }
 }
+
+// --- ИСПРАВЛЕННАЯ ФУНКЦИЯ НАСТРОЕК ---
 @Composable
 fun UnifiedSettingsScreen(authManager: AuthManager) {
     val authState by authManager.authState.collectAsState()
@@ -227,12 +226,14 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
             Column(modifier = Modifier.padding(vertical = 8.dp)) {
                 SettingsRow(icon = Icons.Default.Person, title = "Имя", value = authState.userName ?: "...")
                 HorizontalDivider(color = StardustItemBg)
-                SettingsRow(icon = Icons.Default.Shield, title = "Роль", value = authState.role?.replaceFirstChar { it.titlecase() } ?: "...")
+                // ИСПРАВЛЕНИЕ 1: Используем displayName из Enum
+                SettingsRow(icon = Icons.Default.Shield, title = "Роль", value = authState.role.displayName)
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (authState.role != "electrician") {
+        // ИСПРАВЛЕНИЕ 2: Сравниваем с Enum
+        if (authState.role != UserRole.ELECTRICIAN) {
             SettingsCategory(title = "Эффекты при сканировании")
             Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = StardustGlassBg)) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
@@ -312,8 +313,7 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
         }
     }
 }
-
-// --- НАЧАЛО ИЗМЕНЕНИЙ ---
+// -------------------------------------
 
 @Composable
 private fun UpdateChecker(updateManager: UpdateManager, onCheckClick: () -> Unit) {

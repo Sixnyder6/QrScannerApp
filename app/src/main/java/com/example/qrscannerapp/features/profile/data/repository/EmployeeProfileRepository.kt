@@ -2,6 +2,7 @@
 package com.example.qrscannerapp.features.profile.data.repository
 
 import com.example.qrscannerapp.TelemetryManager
+import com.example.qrscannerapp.UserRole // <-- ИМПОРТИРУЕМ ENUM
 import com.example.qrscannerapp.features.profile.domain.model.DevicePerformanceDetails
 import com.example.qrscannerapp.features.profile.domain.model.PerformanceClass
 import com.example.qrscannerapp.features.profile.domain.model.UserActivityLog
@@ -21,20 +22,14 @@ import javax.inject.Singleton
 @Singleton
 class EmployeeProfileRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
-    private val telemetryManager: TelemetryManager // Инжектим наш сканер
+    private val telemetryManager: TelemetryManager
 ) {
 
-    // --- КОНСТАНТЫ ДЛЯ КОЛЛЕКЦИЙ FIREBASE ---
     private companion object {
         const val USERS_COLLECTION = "internal_users"
         const val ACTIVITY_LOG_COLLECTION = "activity_log"
     }
 
-    /**
-     * Загружает основную информацию о профиле пользователя один раз.
-     * @param userId ID пользователя.
-     * @return Result, содержащий UserProfile или ошибку.
-     */
     suspend fun getUserProfile(userId: String): Result<UserProfile> {
         return try {
             val userDoc = firestore.collection(USERS_COLLECTION).document(userId).get().await()
@@ -45,10 +40,25 @@ class EmployeeProfileRepository @Inject constructor(
             val dateOfBirthStr = userDoc.getString("dateOfBirth")
             val age = if (dateOfBirthStr != null) calculateAge(dateOfBirthStr) else 0
 
+            // --- ИСПРАВЛЕНИЕ: ПРАВИЛЬНОЕ ОПРЕДЕЛЕНИЕ РОЛИ ---
+            val rawRole = userDoc.getString("role")
+            val isAdmin = userDoc.getBoolean("isAdmin") ?: false
+
+            // Если есть поле role, берем красивое имя из Enum.
+            // Если нет, но isAdmin=true -> Администратор. Иначе -> Сотрудник.
+            val roleDisplayName = if (rawRole != null) {
+                UserRole.fromKey(rawRole).displayName
+            } else if (isAdmin) {
+                "Администратор"
+            } else {
+                "Сотрудник"
+            }
+            // ------------------------------------------------
+
             val profile = UserProfile(
                 name = userDoc.getString("displayName") ?: "Без имени",
                 username = userDoc.getString("username") ?: "N/A",
-                role = if (userDoc.getBoolean("isAdmin") == true) "Администратор" else "Сотрудник",
+                role = roleDisplayName, // Используем вычисленное имя
                 age = age,
                 deviceInfo = userDoc.getString("deviceInfo") ?: "Нет данных",
                 appVersion = userDoc.getString("appVersion") ?: "-",
@@ -60,11 +70,10 @@ class EmployeeProfileRepository @Inject constructor(
         }
     }
 
-    /**
-     * Подписывается на последнее событие в логе активности пользователя.
-     * @param userId ID пользователя.
-     * @return Flow, который эмитит Result с последним логом или ошибкой.
-     */
+    // ... (Остальной код без изменений - listenForLastActivity, getPerformanceDetails, calculateAge) ...
+    // Для экономии места я его пропустил, но в твоем файле он должен остаться!
+    // Если хочешь, могу прислать файл целиком.
+
     fun listenForLastActivity(userId: String): Flow<Result<UserActivityLog?>> = callbackFlow {
         val listener = firestore.collection(ACTIVITY_LOG_COLLECTION)
             .whereEqualTo("creatorId", userId)
@@ -99,24 +108,15 @@ class EmployeeProfileRepository @Inject constructor(
                     )
                     trySend(Result.success(lastActivity))
                 } else {
-                    // Пользователь еще ничего не делал
                     trySend(Result.success(null))
                 }
             }
-        // Этот блок выполнится, когда Flow будет закрыт (например, ViewModel уничтожится)
         awaitClose { listener.remove() }
     }
 
-    /**
-     * Определяет класс производительности на основе данных из лога.
-     * Если в логе нет данных о RAM, использует сканер для определения по текущему устройству.
-     * @param log Лог активности, может быть null.
-     * @return DevicePerformanceDetails с классом и объемом RAM.
-     */
     fun getPerformanceDetails(log: UserActivityLog?): DevicePerformanceDetails {
         val totalRam = log?.totalRamInGb
         if (totalRam != null && totalRam > 0) {
-            // Если в логе есть инфа о RAM, вычисляем класс по ней
             val performanceClass = when {
                 totalRam < 3.5 -> PerformanceClass.LOW
                 totalRam < 7.5 -> PerformanceClass.MEDIUM
@@ -124,9 +124,6 @@ class EmployeeProfileRepository @Inject constructor(
             }
             return DevicePerformanceDetails(performanceClass, totalRam)
         } else {
-            // Если в логе инфы нет (старые записи), возвращаем UNKNOWN.
-            // В реальном времени мы бы могли использовать TelemetryManager, но для исторических
-            // данных это будет некорректно. Показываем, что данных просто нет.
             return DevicePerformanceDetails(PerformanceClass.UNKNOWN, 0.0)
         }
     }
@@ -135,10 +132,8 @@ class EmployeeProfileRepository @Inject constructor(
         return try {
             val sdf = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
             val birthDate = sdf.parse(dateOfBirthString)!!
-
             val birthCal = Calendar.getInstance().apply { time = birthDate }
             val todayCal = Calendar.getInstance()
-
             var age = todayCal.get(Calendar.YEAR) - birthCal.get(Calendar.YEAR)
             if (todayCal.get(Calendar.DAY_OF_YEAR) < birthCal.get(Calendar.DAY_OF_YEAR)) {
                 age--
