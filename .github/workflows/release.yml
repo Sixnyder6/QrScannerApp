@@ -24,7 +24,7 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleRelease
 
-      - name: Create Advanced update.json
+      - name: Create Advanced release_notes.json
         run: |
           # Читаем versionCode и versionName из build.gradle.kts
           VERSION_CODE=$(grep -o 'versionCode = [0-9]*' app/build.gradle.kts | awk '{print $3}')
