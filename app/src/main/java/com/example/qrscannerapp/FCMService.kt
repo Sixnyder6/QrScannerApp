@@ -1,4 +1,4 @@
 package com.example.qrscannerapp
 
-class NotificationHelper {
+class FCMService {
 }
