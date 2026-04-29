@@ -20,6 +20,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Talsec repository for freeRASP
+        maven { url = uri("https://developer.talsec.app/repository/release") }
         // Добавляем репозиторий, где лежат графики YCharts и Vico
         maven { url = uri("https://jitpack.io") }
     }

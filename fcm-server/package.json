@@ -1,0 +1,158 @@
+const express = require("express");
+const { GoogleAuth } = require("google-auth-library");
+const axios = require("axios");
+
+const app = express();
+app.use(express.json());
+
+// ── Конфиг ──────────────────────────────────────────────────────────────────
+// PROJECT_ID берём из переменной окружения Railway (настроим там)
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
+const FCM_URL = `https://fcm.googleapis.com/v1/projects/${PROJECT_ID}/messages:send`;
+
+// Секретный токен для защиты эндпоинта — только наше приложение знает его
+const API_SECRET = process.env.API_SECRET || "change_me_in_railway";
+
+// ── Получаем OAuth токен через Service Account ───────────────────────────────
+// Ключ сервисного аккаунта передаётся через переменную окружения FIREBASE_SERVICE_ACCOUNT
+// (JSON строка — вставим в Railway)
+async function getAccessToken() {
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+const auth = new GoogleAuth({
+credentials: serviceAccount,
+scopes: ["https://www.googleapis.com/auth/firebase.messaging"],
+});
+const client = await auth.getClient();
+const tokenResponse = await client.getAccessToken();
+return tokenResponse.token;
+}
+
+// ── Эндпоинт отправки уведомления ───────────────────────────────────────────
+app.post("/send-notification", async (req, res) => {
+// Проверяем секретный токен
+const secret = req.headers["x-api-secret"];
+if (secret !== API_SECRET) {
+return res.status(401).json({ error: "Unauthorized" });
+}
+
+const { token, title, body, data } = req.body;
+
+if (!token || !title || !body) {
+return res.status(400).json({ error: "token, title, body are required" });
+}
+
+try {
+const accessToken = await getAccessToken();
+
+const message = {
+message: {
+token: token,
+notification: {
+title: title,
+body: body,
+},
+android: {
+priority: data?.isMention === "true" ? "high" : "normal",
+notification: {
+channel_id: getChannelId(data?.type, data?.isMention === "true"),
+sound: "default",
+},
+},
+data: data || {},
+},
+};
+
+const response = await axios.post(FCM_URL, message, {
+headers: {
+Authorization: `Bearer ${accessToken}`,
+"Content-Type": "application/json",
+},
+});
+
+console.log(`FCM sent to ${token.substring(0, 20)}... — ${response.status}`);
+return res.json({ success: true, messageId: response.data.name });
+
+} catch (error) {
+const errMsg = error.response?.data || error.message;
+console.error("FCM error:", errMsg);
+return res.status(500).json({ error: errMsg });
+}
+});
+
+// ── Эндпоинт отправки нескольким пользователям ──────────────────────────────
+app.post("/send-multicast", async (req, res) => {
+const secret = req.headers["x-api-secret"];
+if (secret !== API_SECRET) {
+return res.status(401).json({ error: "Unauthorized" });
+}
+
+const { tokens, title, body, data } = req.body;
+
+if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
+return res.status(400).json({ error: "tokens array required" });
+}
+
+try {
+const accessToken = await getAccessToken();
+const results = [];
+
+// FCM v1 не поддерживает multicast напрямую — отправляем по одному
+// но параллельно через Promise.all
+await Promise.all(
+tokens.map(async (token) => {
+try {
+const message = {
+message: {
+token: token,
+notification: { title, body },
+android: {
+priority: data?.isMention === "true" ? "high" : "normal",
+notification: {
+channel_id: getChannelId(data?.type, data?.isMention === "true"),
+sound: "default",
+},
+},
+data: data || {},
+},
+};
+
+const response = await axios.post(FCM_URL, message, {
+headers: {
+Authorization: `Bearer ${accessToken}`,
+"Content-Type": "application/json",
+},
+});
+results.push({ token: token.substring(0, 20), success: true });
+} catch (e) {
+results.push({ token: token.substring(0, 20), success: false, error: e.message });
+}
+})
+);
+
+console.log(`Multicast: ${results.filter((r) => r.success).length}/${tokens.length} sent`);
+return res.json({ results });
+
+} catch (error) {
+return res.status(500).json({ error: error.message });
+}
+});
+
+// ── Health check ─────────────────────────────────────────────────────────────
+app.get("/health", (req, res) => {
+res.json({ status: "ok", project: PROJECT_ID });
+});
+
+// ── Старт ────────────────────────────────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+console.log(`FCM Proxy server running on port ${PORT}`);
+console.log(`Project: ${PROJECT_ID}`);
+});
+
+function getChannelId(type, isMention) {
+if (type === "chat" && isMention) return "channel_chat_mention";
+if (type === "chat") return "channel_chat";
+if (type === "shift_request" || type === "shift_response") return "channel_shifts";
+if (type === "task") return "channel_tasks";
+return "channel_system";
+}

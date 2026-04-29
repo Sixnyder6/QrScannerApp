@@ -22,7 +22,6 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Pending
 import androidx.compose.material.icons.outlined.Today
-// import androidx.compose.material.icons.outlined.WarningAmber // Убрали иконку
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -52,17 +51,31 @@ import com.example.qrscannerapp.StardustSuccess
 import com.example.qrscannerapp.StardustTextPrimary
 import com.example.qrscannerapp.StardustTextSecondary
 import com.example.qrscannerapp.StardustWarning
+import com.example.qrscannerapp.features.inventory.domain.model.CellGroup
+import com.example.qrscannerapp.features.inventory.domain.model.CellStatus
+import com.example.qrscannerapp.features.inventory.domain.model.CellType
 import com.example.qrscannerapp.features.inventory.domain.model.PalletActivityLogEntry
 import com.example.qrscannerapp.features.inventory.domain.model.StoragePallet
 import java.text.SimpleDateFormat
 import java.util.*
 
-// --- КОНСТАНТЫ И ФУНКЦИИ ---
+// --- ЦВЕТА ТИПОВ ЯЧЕЕК ---
 
-const val MAX_ITEMS_PER_PALLET = 500
+val ColorFujian     = Color(0xFFFF8A65)  // WIND 4.0 FUJIAN — оранжевый
+val ColorByd        = Color(0xFF4FC3F7)  // WIND 4.0 BYD — голубой
+val ColorNinebotNew = Color(0xFF69F0AE)  // WIND 5.0 Новый (5BB) — зелёный
+val ColorNinebotOld = Color(0xFFFFAB40)  // WIND 5.0 Старый (SF) — янтарный
 
-val ColorFujian = Color(0xFFFF8A65)
-val ColorByd = Color(0xFF4FC3F7)
+/** Возвращает цвет для типа ячейки */
+fun colorForCellType(cellType: CellType?): Color = when (cellType) {
+    CellType.FUJIAN      -> ColorFujian
+    CellType.BYD         -> ColorByd
+    CellType.NINEBOT_NEW -> ColorNinebotNew
+    CellType.NINEBOT_OLD -> ColorNinebotOld
+    null                 -> StardustPrimary
+}
+
+// --- ФУНКЦИИ ---
 
 private fun lerp(start: Float, stop: Float, fraction: Float): Float {
     return start + (stop - start) * fraction
@@ -121,6 +134,8 @@ fun InventorySummaryCard(
     todayCount: Int = 0,
     fujianCount: Int,
     bydCount: Int,
+    ninebotNewCount: Int = 0,
+    ninebotOldCount: Int = 0,
     onBufferClick: () -> Unit
 ) {
     var showTodayStatsDialog by remember { mutableStateOf(false) }
@@ -131,6 +146,8 @@ fun InventorySummaryCard(
 
     val fujianPercent = if (totalCount > 0) (fujianCount.toFloat() / totalCount * 100).toInt() else 0
     val bydPercent = if (totalCount > 0) (bydCount.toFloat() / totalCount * 100).toInt() else 0
+    val ninebotNewPercent = if (totalCount > 0) (ninebotNewCount.toFloat() / totalCount * 100).toInt() else 0
+    val ninebotOldPercent = if (totalCount > 0) (ninebotOldCount.toFloat() / totalCount * 100).toInt() else 0
 
     val bufferBaseColor = if (undistributedCount > 0) StardustWarning else StardustSuccess
     val animatedBgColor by animateColorAsState(targetValue = bufferBaseColor.copy(alpha = 0.15f), label = "bufBg")
@@ -172,42 +189,29 @@ fun InventorySummaryCard(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    // Progress bar — 4 сегмента по типам АКБ
                     Row(modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)) {
-                        Box(modifier = Modifier.weight(fujianPercent.coerceAtLeast(1).toFloat()).fillMaxHeight().background(ColorFujian))
-                        Box(modifier = Modifier.weight(bydPercent.coerceAtLeast(1).toFloat()).fillMaxHeight().background(ColorByd))
+                        if (fujianPercent > 0) Box(modifier = Modifier.weight(fujianPercent.toFloat()).fillMaxHeight().background(ColorFujian))
+                        if (bydPercent > 0) Box(modifier = Modifier.weight(bydPercent.toFloat()).fillMaxHeight().background(ColorByd))
+                        if (ninebotNewPercent > 0) Box(modifier = Modifier.weight(ninebotNewPercent.toFloat()).fillMaxHeight().background(ColorNinebotNew))
+                        if (ninebotOldPercent > 0) Box(modifier = Modifier.weight(ninebotOldPercent.toFloat()).fillMaxHeight().background(ColorNinebotOld))
+                        // Fallback если всё 0
+                        if (fujianPercent == 0 && bydPercent == 0 && ninebotNewPercent == 0 && ninebotOldPercent == 0) {
+                            Box(modifier = Modifier.weight(1f).fillMaxHeight().background(StardustItemBg))
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    // Чипы — WIND 4.0
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Surface(
-                            color = ColorFujian.copy(alpha = 0.15f),
-                            shape = CircleShape,
-                            modifier = Modifier.height(24.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            ) {
-                                Box(modifier = Modifier.size(6.dp).background(ColorFujian, CircleShape))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Fujian: $fujianCount", color = ColorFujian, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        Surface(
-                            color = ColorByd.copy(alpha = 0.15f),
-                            shape = CircleShape,
-                            modifier = Modifier.height(24.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            ) {
-                                Box(modifier = Modifier.size(6.dp).background(ColorByd, CircleShape))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("BYD: $bydCount", color = ColorByd, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        CountChip("Fujian", fujianCount, ColorFujian)
+                        CountChip("BYD", bydCount, ColorByd)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    // Чипы — WIND 5.0
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        CountChip("5BB", ninebotNewCount, ColorNinebotNew)
+                        CountChip("SF", ninebotOldCount, ColorNinebotOld)
                     }
                 }
 
@@ -276,7 +280,7 @@ fun InventorySummaryCard(
             Spacer(modifier = Modifier.height(16.dp))
             Column {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Упаковано в палеты", fontSize = 12.sp, color = StardustTextSecondary)
+                    Text("Упаковано в ячейки", fontSize = 12.sp, color = StardustTextSecondary)
                     AnimatedCounterText(
                         count = progressPercent,
                         suffix = "%",
@@ -302,6 +306,24 @@ fun InventorySummaryCard(
 }
 
 @Composable
+private fun CountChip(label: String, count: Int, color: Color) {
+    Surface(
+        color = color.copy(alpha = 0.15f),
+        shape = CircleShape,
+        modifier = Modifier.height(24.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        ) {
+            Box(modifier = Modifier.size(6.dp).background(color, CircleShape))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("$label: $count", color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
 fun TodayStatsDialog(todayCount: Int, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
         Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg)) {
@@ -312,7 +334,7 @@ fun TodayStatsDialog(todayCount: Int, onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Всего добавлено: +$todayCount шт.", color = StardustSuccess, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(24.dp))
-                Text("Детальная статистика по палетам в разработке...", color = StardustTextSecondary, textAlign = TextAlign.Center)
+                Text("Детальная статистика по ячейкам в разработке...", color = StardustTextSecondary, textAlign = TextAlign.Center)
                 Spacer(modifier = Modifier.height(24.dp))
                 Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = StardustItemBg)) {
                     Text("Закрыть", color = StardustTextSecondary)
@@ -418,11 +440,11 @@ fun PalletActivityLogView(
 
 private fun getActionDescriptionShort(entry: PalletActivityLogEntry): String {
     return when (entry.action) {
-        "CREATED" -> "Создал палет №${entry.palletNumber}"
+        "CREATED" -> "Создал ячейку №${entry.palletNumber}"
         "DISTRIBUTED" -> "Добавил ${entry.itemCount} шт. → №${entry.palletNumber}"
         "REMOVED_ITEM" -> "Удалил АКБ (№${entry.palletNumber})"
         "RESTORED_ITEM" -> "Вернул АКБ (№${entry.palletNumber})"
-        "DELETED" -> "Удалил палет №${entry.palletNumber}"
+        "DELETED" -> "Удалил ячейку №${entry.palletNumber}"
         else -> entry.action
     }
 }
@@ -460,8 +482,8 @@ fun BufferDetailsDialog(items: List<String>, onDismiss: () -> Unit, onDeleteItem
 @Composable
 fun PalletLogEntryItem(entry: PalletActivityLogEntry) {
     val (icon, color, text) = when (entry.action) {
-        "CREATED" -> Triple(Icons.Default.Add, StardustSecondary, "создал палет")
-        "DELETED" -> Triple(Icons.Default.Delete, StardustError, "удалил палет")
+        "CREATED" -> Triple(Icons.Default.Add, StardustSecondary, "создал ячейку")
+        "DELETED" -> Triple(Icons.Default.Delete, StardustError, "удалил ячейку")
         "DISTRIBUTED" -> Triple(Icons.Default.Done, StardustSuccess, "добавил АКБ")
         "REMOVED_ITEM" -> Triple(Icons.Default.Clear, StardustError, "удалил АКБ")
         "RESTORED_ITEM" -> Triple(Icons.Default.SettingsBackupRestore, StardustWarning, "восстановил АКБ")
@@ -516,7 +538,7 @@ fun PalletTile(
     onDeleteClick: () -> Unit,
     onEditManufacturerClick: () -> Unit
 ) {
-    val progress = if (MAX_ITEMS_PER_PALLET > 0) pallet.items.size.toFloat() / MAX_ITEMS_PER_PALLET else 0f
+    val progress = pallet.fillProgress
     val progressColor = getColorByProgress(progress)
     val borderWidth by animateDpAsState(targetValue = if (isHighlighted) 4.dp else 0.dp, animationSpec = tween(500), label = "border")
     val borderColor by animateColorAsState(targetValue = if (isHighlighted) StardustWarning else Color.Transparent, animationSpec = tween(500), label = "borderCol")
@@ -529,7 +551,15 @@ fun PalletTile(
         Box(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Палет №${pallet.palletNumber}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = StardustTextPrimary)
+                    Text(
+                        pallet.resolvedDisplayName,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = StardustTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onEditManufacturerClick, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.Factory, null, tint = StardustSecondary) }
                         Spacer(Modifier.width(8.dp))
@@ -537,11 +567,28 @@ fun PalletTile(
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                pallet.manufacturer?.let { Chip(it) }
+                CellTypeChip(pallet)
                 Spacer(modifier = Modifier.weight(1f, fill = false))
-                Text("${pallet.items.size} / $MAX_ITEMS_PER_PALLET", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = StardustTextPrimary)
+                Text("${pallet.items.size} / ${pallet.capacity}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = StardustTextPrimary)
                 Spacer(modifier = Modifier.weight(1f))
-                Text("Нажмите для добавления\nУдерживайте для деталей", fontSize = 10.sp, textAlign = TextAlign.Center, color = StardustTextSecondary)
+                // Показать статус если не ACTIVE
+                val status = pallet.resolvedStatus
+                if (status != CellStatus.ACTIVE) {
+                    Box(
+                        modifier = Modifier
+                            .background(StardustPrimary.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            "${status.emoji} ${status.displayName}",
+                            fontSize = 10.sp,
+                            color = StardustPrimary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                } else {
+                    Text("Нажмите для добавления\nУдерживайте для деталей", fontSize = 10.sp, textAlign = TextAlign.Center, color = StardustTextSecondary)
+                }
             }
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(8.dp).align(Alignment.BottomCenter), color = progressColor, trackColor = StardustItemBg)
         }
@@ -557,21 +604,152 @@ fun NewPalletTile(onClick: () -> Unit) {
     }
 }
 
+/**
+ * Чип типа ячейки — показывает цветной лейбл с коротким названием типа.
+ */
 @Composable
-fun Chip(text: String) {
-    val bgColor = when(text) {
-        "FUJIAN" -> ColorFujian.copy(alpha = 0.2f)
-        "BYD" -> ColorByd.copy(alpha = 0.2f)
-        else -> StardustPrimary.copy(alpha = 0.3f)
-    }
-    val contentColor = when(text) {
-        "FUJIAN" -> ColorFujian
-        "BYD" -> ColorByd
-        else -> StardustPrimary
-    }
+fun CellTypeChip(pallet: StoragePallet) {
+    val cellType = pallet.resolvedCellType
+    val color = colorForCellType(cellType)
+    val label = cellType?.shortLabel ?: pallet.manufacturer ?: return
 
-    Box(modifier = Modifier.background(bgColor, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp)) {
-        Text(text, color = contentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.2f), RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(label, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/**
+ * Диалог выбора типа ячейки.
+ * Показывает 4 типа АКБ + опцию "Универсальная" (без типа).
+ */
+@Composable
+fun CellTypeSelectionDialog(
+    pallet: StoragePallet,
+    onDismiss: () -> Unit,
+    onCellTypeSelected: (StoragePallet, CellType?) -> Unit
+) {
+    val currentType = pallet.resolvedCellType
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = StardustModalBg)
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    "Тип ячейки №${pallet.palletNumber}",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = StardustTextPrimary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Ячейка будет принимать только АКБ выбранного типа",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StardustTextSecondary
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Группа WIND 4.0
+                Text(
+                    "WIND 4.0",
+                    color = StardustTextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                CellType.entries.filter { it.group == CellGroup.WIND_40 }.forEach { type ->
+                    CellTypeOption(
+                        type = type,
+                        isSelected = currentType == type,
+                        onClick = { onCellTypeSelected(pallet, type) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Группа WIND 5.0
+                Text(
+                    "WIND 5.0 / Ninebot",
+                    color = StardustTextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                CellType.entries.filter { it.group == CellGroup.WIND_50 }.forEach { type ->
+                    CellTypeOption(
+                        type = type,
+                        isSelected = currentType == type,
+                        onClick = { onCellTypeSelected(pallet, type) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Опция "Универсальная"
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onCellTypeSelected(pallet, null) }
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = currentType == null,
+                        onClick = { onCellTypeSelected(pallet, null) },
+                        colors = RadioButtonDefaults.colors(selectedColor = StardustTextSecondary)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Универсальная (любые АКБ)", color = StardustTextSecondary)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CellTypeOption(
+    type: CellType,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val color = colorForCellType(type)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(
+            selected = isSelected,
+            onClick = onClick,
+            colors = RadioButtonDefaults.colors(selectedColor = color)
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(color, CircleShape)
+        )
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(type.displayName, color = StardustTextPrimary, fontWeight = FontWeight.Medium)
+            Text(
+                "Префикс: ${type.prefix}",
+                color = StardustTextSecondary,
+                fontSize = 11.sp
+            )
+        }
     }
 }
 
@@ -614,32 +792,12 @@ fun ExportOptionsDialog(
 fun PalletDeleteDialog(pallet: StoragePallet, onDismiss: () -> Unit, onConfirmDelete: (StoragePallet) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Удалить палет №${pallet.palletNumber}?") },
-        text = { Text("Вы уверены? Это действие удалит палет из системы и сбросит статус ${pallet.items.size} привязанных АКБ. АКБ снова станут доступны для приемки.") },
+        title = { Text("Удалить ячейку №${pallet.palletNumber}?") },
+        text = { Text("Вы уверены? Это действие удалит ячейку из системы и сбросит статус ${pallet.items.size} привязанных АКБ. АКБ снова станут доступны для приемки.") },
         confirmButton = { Button(onClick = { onConfirmDelete(pallet) }, colors = ButtonDefaults.buttonColors(containerColor = StardustError)) { Text("Удалить", color = StardustTextPrimary) } },
         dismissButton = { Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = StardustItemBg)) { Text("Отмена", color = StardustTextSecondary) } },
         containerColor = StardustModalBg, titleContentColor = StardustTextPrimary, textContentColor = StardustTextSecondary
     )
-}
-
-@Composable
-fun ManufacturerSelectionDialog(pallet: StoragePallet, onDismiss: () -> Unit, onManufacturerSelected: (StoragePallet, String) -> Unit) {
-    val manufacturers = listOf("FUJIAN", "BYD", "Нет")
-    Dialog(onDismissRequest = onDismiss) {
-        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg)) {
-            Column(modifier = Modifier.padding(24.dp)) {
-                Text("Производитель для Палета №${pallet.palletNumber}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = StardustTextPrimary)
-                Spacer(modifier = Modifier.height(16.dp))
-                manufacturers.forEach { manufacturer ->
-                    Row(modifier = Modifier.fillMaxWidth().clickable { onManufacturerSelected(pallet, manufacturer) }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = (pallet.manufacturer == manufacturer) || (manufacturer == "Нет" && pallet.manufacturer == null), onClick = { onManufacturerSelected(pallet, manufacturer) }, colors = RadioButtonDefaults.colors(selectedColor = StardustPrimary))
-                        Spacer(Modifier.width(8.dp))
-                        Text(manufacturer, color = StardustTextPrimary)
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -650,7 +808,7 @@ fun PalletItemListItem(batteryId: String, onDelete: () -> Unit) {
     }
 }
 
-// --- НОВЫЙ ДИАЛОГ ОТЧЕТА ---
+// --- ДИАЛОГ ОТЧЕТА ---
 @Composable
 fun DistributionReportDialog(
     report: DistributionReport,
@@ -658,31 +816,27 @@ fun DistributionReportDialog(
 ) {
     val hasErrors = report.errorCount > 0
     val dialogColor = if (hasErrors) StardustWarning else StardustSuccess
-    // Заголовок только текстом
-    // Убираем иконку и оставляем только текст "ВНИМАНИЕ" (капсом) для ошибок
 
     Dialog(onDismissRequest = {}) {
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = StardustModalBg),
-            border = if (hasErrors) BorderStroke(2.dp, StardustError) else null, // Красная рамка при ошибке
+            border = if (hasErrors) BorderStroke(2.dp, StardustError) else null,
             modifier = Modifier.fillMaxWidth().heightIn(max = 600.dp)
         ) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
 
                 if (hasErrors) {
-                    // СТРОГИЙ ДИЗАЙН ПРИ ОШИБКЕ
                     Text("ВНИМАНИЕ", style = MaterialTheme.typography.displaySmall, color = Color.White, fontWeight = FontWeight.Black)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Попытка добавить АКБ другого производителя",
+                        "Попытка добавить АКБ другого типа",
                         color = StardustError,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium,
                         textAlign = TextAlign.Center
                     )
                 } else {
-                    // ОБЫЧНЫЙ ДИЗАЙН ПРИ УСПЕХЕ
                     Icon(
                         imageVector = Icons.Outlined.CheckCircle,
                         contentDescription = null,
@@ -695,7 +849,6 @@ fun DistributionReportDialog(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Крупные цифры
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Добавлено", color = StardustTextSecondary, fontSize = 12.sp)
@@ -714,7 +867,6 @@ fun DistributionReportDialog(
                     Text("Дубликатов: ${report.duplicateCount}", color = StardustTextSecondary, fontSize = 12.sp)
                 }
 
-                // Список ошибок
                 if (hasErrors) {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
@@ -750,7 +902,10 @@ fun DistributionReportDialog(
                                     Text("№${item.indexInList}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
-                                Text(item.code, color = StardustTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Column {
+                                    Text(item.code, color = StardustTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                    Text(item.reason, color = StardustError, fontSize = 11.sp)
+                                }
                             }
                         }
                     }

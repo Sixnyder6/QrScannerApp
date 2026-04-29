@@ -6,6 +6,7 @@ import com.example.qrscannerapp.features.inventory.data.*
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.GroupedActivity
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.TakenItem
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.warehouseCatalogItems
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -41,7 +42,7 @@ class WarehouseViewModel : ViewModel() {
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     // --- StateFlow для списка сотрудников ---
-    private val _employees = MutableStateFlow(demoEmployees) // Заглушка на время загрузки
+    private val _employees = MutableStateFlow(demoEmployees)
     val employees: StateFlow<List<Employee>> = _employees.asStateFlow()
 
     // StateFlow для всего состояния смены
@@ -49,6 +50,20 @@ class WarehouseViewModel : ViewModel() {
         ShiftState(employee = demoEmployees.first(), status = EmployeeStatus.ON_SHIFT)
     )
     val shiftState: StateFlow<ShiftState> = _shiftState.asStateFlow()
+
+    // ==========================================
+    // НОВЫЕ STATEFLOW ДЛЯ ЗАКАЗОВ И КОРЗИНЫ
+    // ==========================================
+
+    // Корзина (локальный список товаров перед отправкой заказа)
+    private val _cart = MutableStateFlow<List<OrderItem>>(emptyList())
+    val cart: StateFlow<List<OrderItem>> = _cart.asStateFlow()
+
+    // Список активных заказов (для кладовщика - все, для техника - свои)
+    private val _orders = MutableStateFlow<List<WarehouseOrder>>(emptyList())
+    val orders: StateFlow<List<WarehouseOrder>> = _orders.asStateFlow()
+
+    private var ordersJob: Job? = null
 
 
     // --- СОБЫТИЯ UI (Channel) ---
@@ -67,7 +82,153 @@ class WarehouseViewModel : ViewModel() {
         subscribeToNewsStream()
         subscribeToEmployees()
         subscribeToShiftState()
+        // Подписка на заказы происходит позже, когда мы знаем User ID и роль (в Composable)
     }
+
+    // ==========================================
+    // ЛОГИКА КОРЗИНЫ (CART)
+    // ==========================================
+
+    fun onAddToCart(item: WarehouseItem, quantity: Int) {
+        val currentCart = _cart.value.toMutableList()
+        val existingIndex = currentCart.indexOfFirst { it.itemId == item.id }
+
+        if (existingIndex != -1) {
+            // Если товар уже есть, обновляем количество
+            val existingItem = currentCart[existingIndex]
+            val newQuantity = existingItem.quantity + quantity
+            // Проверка, чтобы не превысить складской остаток (опционально, но полезно)
+            if (newQuantity > item.stockCount) {
+                viewModelScope.launch { _uiEvents.send(UiEvent.ShowSnackbar("Нельзя заказать больше, чем есть на складе")) }
+                return
+            }
+            currentCart[existingIndex] = existingItem.copy(quantity = newQuantity)
+        } else {
+            // Добавляем новый
+            if (quantity > item.stockCount) {
+                viewModelScope.launch { _uiEvents.send(UiEvent.ShowSnackbar("Нельзя заказать больше, чем есть на складе")) }
+                return
+            }
+            currentCart.add(
+                OrderItem(
+                    itemId = item.id,
+                    itemName = item.shortName,
+                    itemImageUrl = item.imageUrl,
+                    quantity = quantity,
+                    unit = item.unit
+                )
+            )
+        }
+        _cart.value = currentCart
+        viewModelScope.launch { _uiEvents.send(UiEvent.ShowSnackbar("Добавлено в корзину")) }
+    }
+
+    fun onRemoveFromCart(itemId: String) {
+        val currentCart = _cart.value.toMutableList()
+        currentCart.removeIf { it.itemId == itemId }
+        _cart.value = currentCart
+    }
+
+    fun onClearCart() {
+        _cart.value = emptyList()
+    }
+
+    fun onSubmitOrder(userId: String, userName: String, userRole: String) {
+        if (_cart.value.isEmpty()) return
+
+        viewModelScope.launch {
+            _isLoading.value = true
+            val newOrder = WarehouseOrder(
+                userId = userId,
+                userName = userName,
+                userRole = userRole,
+                items = _cart.value,
+                status = OrderStatus.CREATED
+            )
+
+            val result = repository.createOrder(newOrder)
+            _isLoading.value = false
+
+            result.onSuccess {
+                _cart.value = emptyList() // Очищаем корзину
+                _uiEvents.send(UiEvent.ShowSnackbar("Заказ успешно отправлен!"))
+                _uiEvents.send(UiEvent.NavigateBack) // Возвращаемся на главную
+            }.onFailure { e ->
+                _uiEvents.send(UiEvent.ShowSnackbar("Ошибка создания заказа: ${e.message}"))
+            }
+        }
+    }
+
+    // ==========================================
+    // ЛОГИКА ЗАКАЗОВ (ORDERS)
+    // ==========================================
+
+    /**
+     * Инициализирует подписку на заказы.
+     * Вызывать из UI один раз при входе на экран склада.
+     * @param userId ID текущего пользователя
+     * @param isAdmin Если true (кладовщик), видит ВСЕ заказы. Если false (техник), видит только свои.
+     */
+    fun subscribeToOrders(userId: String, isAdmin: Boolean) {
+        // Отменяем предыдущую подписку, если есть
+        ordersJob?.cancel()
+
+        ordersJob = viewModelScope.launch {
+            val filterId = if (isAdmin) null else userId
+            repository.getActiveOrdersStream(filterId)
+                .catch { e ->
+                    _uiEvents.send(UiEvent.ShowSnackbar("Ошибка загрузки заказов: ${e.message}"))
+                }
+                .collect { activeOrders ->
+                    _orders.value = activeOrders
+                }
+        }
+    }
+
+    // 1. Кладовщик нажимает "Принять" -> Статус "В сборке"
+    fun onAcceptOrder(order: WarehouseOrder) {
+        updateStatus(order, OrderStatus.PROCESSING, "Заказ принят в сборку")
+    }
+
+    // 2. Кладовщик собрал -> Статус "Готов к выдаче"
+    fun onMarkOrderReady(order: WarehouseOrder) {
+        updateStatus(order, OrderStatus.READY, "Заказ готов к выдаче")
+    }
+
+    // 3. Кладовщик отдает -> Статус "Выдан" + Списание со склада
+    fun onFinishOrder(order: WarehouseOrder, warehouseManName: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            val result = repository.completeOrder(order.id, warehouseManName)
+            _isLoading.value = false
+
+            result.onSuccess {
+                _uiEvents.send(UiEvent.ShowSnackbar("Заказ завершен. Товары списаны."))
+            }.onFailure { e ->
+                _uiEvents.send(UiEvent.ShowSnackbar("Ошибка завершения заказа: ${e.message}"))
+            }
+        }
+    }
+
+    // 4. Отмена заказа
+    fun onCancelOrder(order: WarehouseOrder) {
+        updateStatus(order, OrderStatus.CANCELLED, "Заказ отменен")
+    }
+
+    private fun updateStatus(order: WarehouseOrder, status: OrderStatus, successMsg: String) {
+        viewModelScope.launch {
+            val result = repository.updateOrderStatus(order.id, status)
+            result.onSuccess {
+                _uiEvents.send(UiEvent.ShowSnackbar(successMsg))
+            }.onFailure { e ->
+                _uiEvents.send(UiEvent.ShowSnackbar("Ошибка обновления статуса: ${e.message}"))
+            }
+        }
+    }
+
+    // ==========================================
+    // СТАРЫЙ КОД (БЕЗ ИЗМЕНЕНИЙ)
+    // ==========================================
 
     private fun subscribeToWarehouseItems() {
         viewModelScope.launch {
@@ -259,7 +420,6 @@ class WarehouseViewModel : ViewModel() {
         }
     }
 
-    // --- НОВОЕ: Редактирование товара ---
     fun onEditItem(
         originalItem: WarehouseItem,
         fullName: String, shortName: String, sku: String,
@@ -267,8 +427,6 @@ class WarehouseViewModel : ViewModel() {
     ) {
         viewModelScope.launch {
             _isLoading.value = true
-            // Создаем копию с обновленными данными
-            // ВАЖНО: При редактировании мы сбрасываем текущий остаток до полного (stockCount = totalStock)
             val updatedItem = originalItem.copy(
                 fullName = fullName,
                 shortName = shortName,
@@ -290,7 +448,6 @@ class WarehouseViewModel : ViewModel() {
         }
     }
 
-    // --- НОВОЕ: Удаление товара ---
     fun onDeleteItem(item: WarehouseItem) {
         viewModelScope.launch {
             val result = repository.deleteItem(item.id)

@@ -1,25 +1,14 @@
-// Файл: features/profile/domain/model/EmployeeProfileModels.kt
 package com.example.qrscannerapp.features.profile.domain.model
 
-/**
- * Класс производительности устройства на основе общего объема RAM.
- */
 enum class PerformanceClass {
-    LOW,     // Низкая (Ведро)
-    MEDIUM,  // Средняя (Рабочая лошадка)
-    HIGH,    // Высокая (Ракета)
-    UNKNOWN  // Неизвестно (Ошибка)
+    LOW, MEDIUM, HIGH, UNKNOWN
 }
 
-/**
- * Детализированная информация о производительности устройства.
- */
 data class DevicePerformanceDetails(
     val performanceClass: PerformanceClass = PerformanceClass.UNKNOWN,
     val totalRamGb: Double = 0.0
 )
 
-// Data class для личных данных пользователя
 data class UserProfile(
     val name: String = "Загрузка...",
     val username: String = "",
@@ -27,22 +16,19 @@ data class UserProfile(
     val age: Int = 0,
     val deviceInfo: String = "",
     val appVersion: String = "",
-    val lastBatteryLevel: Int = -1
+    val lastBatteryLevel: Int = -1,
+    val isShiftActive: Boolean = false,
+    val isAllowedToWork: Boolean = false,
+    val shiftRequestStatus: String = "NONE"
 )
 
-/**
- * Data class для одной записи в истории активности.
- * Включает в себя метрики сессии и полную телеметрию устройства на тот момент.
- */
 data class UserActivityLog(
     val id: String = "",
     val timestamp: Long = 0,
-    val activityType: String = "UNKNOWN", // Тип действия: "SESSION_SAVED", "COPY_ALL"
-    // Метрики сессии
+    val activityType: String = "UNKNOWN",
     val itemCount: Int = 0,
     val manualEntryCount: Int = 0,
     val durationSeconds: Long = 0,
-    // Телеметрия устройства
     val appVersion: String = "N/A",
     val lastBatteryLevel: Int = -1,
     val isCharging: Boolean = false,
@@ -53,16 +39,30 @@ data class UserActivityLog(
     val batteryHealth: String = "N/A",
     val isPowerSaveMode: Boolean = false,
     val networkPing: String = "N/A",
-    // Добавляем поле для общего RAM, которое может приходить из логов
     val totalRamInGb: Double? = null
 )
 
-// Data class для общего состояния экрана
+// [НОВОЕ] Статистика по одному типу операции
+data class OperationStat(
+    val operationType: String,       // "WASHING", "SANDING", etc.
+    val totalCount: Int,             // суммарно самокатов
+    val sessionCount: Int,           // количество сессий
+    val lastTimestamp: Long          // когда последний раз
+)
+
+// [НОВОЕ] Полная статистика взаимодействий сотрудника
+data class InteractionStats(
+    val stats: List<OperationStat> = emptyList(),
+    val totalAllTime: Int = 0        // всего самокатов за всё время
+)
+
 data class EmployeeProfileUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
     val userProfile: UserProfile = UserProfile(),
     val activityHistory: List<UserActivityLog> = emptyList(),
-    // Новый контейнер для данных о производительности
-    val performanceDetails: DevicePerformanceDetails = DevicePerformanceDetails()
+    val performanceDetails: DevicePerformanceDetails = DevicePerformanceDetails(),
+    // [НОВОЕ]
+    val interactionStats: InteractionStats = InteractionStats(),
+    val isStatsLoading: Boolean = true
 )

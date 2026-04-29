@@ -1,11 +1,11 @@
-// Полное содержимое для ИСПРАВЛЕННОГО файла AppModule.kt
-
 package com.example.qrscannerapp
 
 import android.content.Context
-import coil.ImageLoader // <-- НОВЫЙ ИМПОРТ
+import coil.ImageLoader
 import com.example.qrscannerapp.features.electrician.data.local.dao.RepairLogDao
 import com.example.qrscannerapp.features.electrician.data.repository.RepairLogRepository
+import com.example.qrscannerapp.features.interaction.data.local.dao.InteractionDao
+import com.example.qrscannerapp.features.interaction.data.repository.InteractionRepository
 import com.example.qrscannerapp.features.inventory.data.local.dao.StorageCellDao
 import com.example.qrscannerapp.features.inventory.data.local.dao.StoragePalletDao
 import com.example.qrscannerapp.features.profile.data.repository.EmployeeProfileRepository
@@ -13,6 +13,7 @@ import com.example.qrscannerapp.features.scanner.data.local.dao.ScanSessionDao
 import com.example.qrscannerapp.features.scanner.data.repository.ScanSessionRepository
 import com.example.qrscannerapp.features.tasks.data.local.dao.TaskDao
 import com.example.qrscannerapp.features.vehicle_report.data.local.dao.VehicleReportHistoryDao
+import com.example.qrscannerapp.performance.DevicePerformanceManager
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.Module
 import dagger.Provides
@@ -20,7 +21,6 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
-import com.example.qrscannerapp.performance.DevicePerformanceManager
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -28,8 +28,14 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideAuthManager(@ApplicationContext context: Context): AuthManager {
-        return AuthManager(context)
+    fun provideAuthManager(
+        @ApplicationContext context: Context,
+        telemetryManager: TelemetryManager
+    ): AuthManager {
+        // Передаём telemetryManager через лямбду — это позволяет избежать
+        // циклических зависимостей если они появятся в будущем,
+        // и TelemetryManager создаётся только при первом heartbeat
+        return AuthManager(context) { telemetryManager }
     }
 
     @Provides
@@ -76,6 +82,12 @@ object AppModule {
         return database.vehicleReportHistoryDao()
     }
 
+    @Provides
+    @Singleton
+    fun provideInteractionDao(database: AppDatabase): InteractionDao {
+        return database.interactionDao()
+    }
+
     // --- FIREBASE & MANAGERS ---
 
     @Provides
@@ -115,6 +127,15 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideInteractionRepository(
+        interactionDao: InteractionDao,
+        firestore: FirebaseFirestore
+    ): InteractionRepository {
+        return InteractionRepository(interactionDao, firestore)
+    }
+
+    @Provides
+    @Singleton
     fun provideSyncManager(
         @ApplicationContext context: Context,
         repairLogRepository: RepairLogRepository,
@@ -123,7 +144,7 @@ object AppModule {
         return SyncManager(context, repairLogRepository, scanSessionRepository)
     }
 
-    // V-- НАЧАЛО НОВЫХ ПРОВАЙДЕРОВ ДЛЯ ПРЕДЗАГРУЗКИ --V
+    // V-- ПРОВАЙДЕРЫ ДЛЯ ПРЕДЗАГРУЗКИ --V
 
     @Singleton
     @Provides
@@ -135,9 +156,8 @@ object AppModule {
     @Provides
     fun provideImageLoader(@ApplicationContext context: Context): ImageLoader {
         return ImageLoader.Builder(context)
-            // ИСПРАВЛЕНИЕ: Убран лишний параметр "enable ="
-            .respectCacheHeaders(false) // Важно для корректной работы кэша с GitHub
+            .respectCacheHeaders(false)
             .build()
     }
-    // ^-- КОНЕЦ НОВЫХ ПРОВАЙДЕРОВ --^
+    // ^-- КОНЕЦ ПРОВАЙДЕРОВ --^
 }

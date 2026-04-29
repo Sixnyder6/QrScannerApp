@@ -4,7 +4,11 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.core.content.FileProvider
-import com.example.qrscannerapp.StorageCell // <-- Предполагаем, что StorageCell пока остается в корневом пакете
+import com.example.qrscannerapp.StorageCell
+import org.apache.poi.ss.usermodel.BorderStyle
+import org.apache.poi.ss.usermodel.FillPatternType
+import org.apache.poi.ss.usermodel.HorizontalAlignment
+import org.apache.poi.ss.usermodel.IndexedColors
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import java.io.File
 import java.io.FileOutputStream
@@ -14,6 +18,150 @@ import java.util.Locale
 
 class StorageExportManager(private val context: Context) {
 
+    // ========================================================================================
+    // РЕЖИМ БЕЗ СОРТИРОВКИ
+    // Экспортирует одну ячейку в одну колонку, порядок как хранится (новые сверху)
+    // ========================================================================================
+
+    fun exportCellAsIs(cell: StorageCell) {
+        if (cell.items.isEmpty()) {
+            Toast.makeText(context, "Ячейка пуста, нечего экспортировать.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val workbook = XSSFWorkbook()
+            val sheetName = sanitizeSheetName(cell.name)
+            val sheet = workbook.createSheet(sheetName)
+
+            val orderedItems = cell.items.reversed()
+
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                fontHeightInPoints = 13.toShort()
+                color = IndexedColors.WHITE.index
+            }
+            val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THICK
+                fillForegroundColor = IndexedColors.DARK_BLUE.index
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+            }
+            val itemStyle = workbook.createCellStyle().apply {
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THIN
+                borderLeft = BorderStyle.THIN
+                borderRight = BorderStyle.THIN
+                borderTop = BorderStyle.THIN
+            }
+
+            sheet.setColumnWidth(0, 22 * 256)
+
+            val headerRow = sheet.createRow(0)
+            val headerCell = headerRow.createCell(0)
+            headerCell.setCellValue("${cell.name} — ${cell.description}")
+            headerCell.cellStyle = headerStyle
+
+            orderedItems.forEachIndexed { index, scooterId ->
+                val row = sheet.createRow(index + 1)
+                val dataCell = row.createCell(0)
+                dataCell.setCellValue(scooterId)
+                dataCell.cellStyle = itemStyle
+            }
+
+            shareExcelFile(workbook, "raw_${sanitizeFileName(cell.name)}")
+
+        } catch (e: Exception) {
+            handleError(e)
+        }
+    }
+
+    // ========================================================================================
+    // РЕЖИМ ПЕЧАТИ
+    // Одна ячейка, список разбит на столбцы по 50 штук. Данные сортируются.
+    // Столбцы через один (A, C, E) — удобно резать бумагу
+    // ========================================================================================
+
+    fun exportCellForPrinting(cell: StorageCell) {
+        if (cell.items.isEmpty()) {
+            Toast.makeText(context, "Ячейка пуста, нечего печатать.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val workbook = XSSFWorkbook()
+            val sheetName = sanitizeSheetName(cell.name)
+            val sheet = workbook.createSheet(sheetName)
+
+            val sortedItems = cell.items.sorted()
+            val rowsPerColumn = 50
+            val chunks = sortedItems.chunked(rowsPerColumn)
+
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                fontHeightInPoints = 12.toShort()
+                color = IndexedColors.WHITE.index
+            }
+            val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THICK
+                fillForegroundColor = IndexedColors.DARK_BLUE.index
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+            }
+            val itemStyle = workbook.createCellStyle().apply {
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THIN
+                borderLeft = BorderStyle.THIN
+                borderRight = BorderStyle.THIN
+                borderTop = BorderStyle.THIN
+            }
+            // Чётные строки — лёгкая заливка для читаемости при печати
+            val itemStyleAlt = workbook.createCellStyle().apply {
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THIN
+                borderLeft = BorderStyle.THIN
+                borderRight = BorderStyle.THIN
+                borderTop = BorderStyle.THIN
+                fillForegroundColor = IndexedColors.LIGHT_CORNFLOWER_BLUE.index
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+            }
+
+            chunks.forEachIndexed { chunkIndex, chunkItems ->
+                val colIndex = chunkIndex * 2
+                sheet.setColumnWidth(colIndex, 16 * 256)
+                if (chunkIndex > 0) {
+                    // Разделитель между столбцами
+                    sheet.setColumnWidth(colIndex - 1, 2 * 256)
+                }
+
+                val headerRow = sheet.getRow(0) ?: sheet.createRow(0)
+                val headerCell = headerRow.createCell(colIndex)
+                headerCell.setCellValue("${cell.name} (${chunkIndex + 1}/${chunks.size})")
+                headerCell.cellStyle = headerStyle
+
+                chunkItems.forEachIndexed { itemIndex, scooterId ->
+                    val rowIndex = itemIndex + 1
+                    val row = sheet.getRow(rowIndex) ?: sheet.createRow(rowIndex)
+                    val dataCell = row.createCell(colIndex)
+                    dataCell.setCellValue(scooterId)
+                    dataCell.cellStyle = if (itemIndex % 2 == 0) itemStyle else itemStyleAlt
+                }
+            }
+
+            shareExcelFile(workbook, "print_${sanitizeFileName(cell.name)}")
+
+        } catch (e: Exception) {
+            handleError(e)
+        }
+    }
+
+    // ========================================================================================
+    // ОБЩИЙ ЭКСПОРТ (БЭКАП)
+    // Все ячейки, каждая в своём столбце
+    // ========================================================================================
+
     fun exportAllCellsToExcel(cells: List<StorageCell>) {
         if (cells.isEmpty()) {
             Toast.makeText(context, "Нет ячеек для экспорта.", Toast.LENGTH_SHORT).show()
@@ -22,65 +170,137 @@ class StorageExportManager(private val context: Context) {
 
         try {
             val workbook = XSSFWorkbook()
-            val sheet = workbook.createSheet("Хранение самокатов")
+            val sheet = workbook.createSheet("Весь склад")
 
-            // Создаем стили для заголовков
+            val headerFont = workbook.createFont().apply {
+                bold = true
+                color = IndexedColors.WHITE.index
+            }
             val headerStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                alignment = HorizontalAlignment.CENTER
+                fillForegroundColor = IndexedColors.DARK_BLUE.index
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                borderBottom = BorderStyle.THICK
+            }
+            val descStyle = workbook.createCellStyle().apply {
                 val font = workbook.createFont().apply {
-                    // *** ИСПРАВЛЕНИЕ: Правильное свойство - 'bold', а не 'isBold' ***
-                    this.bold = true
+                    italic = true
+                    color = IndexedColors.GREY_50_PERCENT.index
                 }
-                this.setFont(font)
+                setFont(font)
+                alignment = HorizontalAlignment.CENTER
+            }
+            val itemStyle = workbook.createCellStyle().apply {
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THIN
+                borderLeft = BorderStyle.THIN
+                borderRight = BorderStyle.THIN
+                borderTop = BorderStyle.THIN
             }
 
-            // Определяем максимальное количество строк, которое нам понадобится
-            val maxRows = cells.maxOfOrNull { it.items.size } ?: 0
-
-            // Проходим по каждой ячейке, чтобы создать свой столбец
             cells.forEachIndexed { colIndex, cell ->
-                // Устанавливаем ширину столбца
-                sheet.setColumnWidth(colIndex, 20 * 256)
+                sheet.setColumnWidth(colIndex, 22 * 256)
 
-                // Строка 0: Имя ячейки (Ячейка 1, Ячейка 2...)
-                val headerRow = sheet.getRow(0) ?: sheet.createRow(0)
-                headerRow.createCell(colIndex).apply {
+                val row0 = sheet.getRow(0) ?: sheet.createRow(0)
+                row0.createCell(colIndex).apply {
                     setCellValue(cell.name)
                     cellStyle = headerStyle
                 }
 
-                // Строка 1: Описание ячейки
-                val descriptionRow = sheet.getRow(1) ?: sheet.createRow(1)
-                descriptionRow.createCell(colIndex).setCellValue(cell.description)
+                val row1 = sheet.getRow(1) ?: sheet.createRow(1)
+                row1.createCell(colIndex).apply {
+                    setCellValue(cell.description)
+                    cellStyle = descStyle
+                }
 
-                // Заполняем номера самокатов, начиная со 2-й строки
-                cell.items.forEachIndexed { itemIndex, scooterId ->
-                    val itemRowIndex = itemIndex + 2
-                    val itemRow = sheet.getRow(itemRowIndex) ?: sheet.createRow(itemRowIndex)
-                    itemRow.createCell(colIndex).setCellValue(scooterId)
+                // Счётчик: "12 / 600"
+                val row2 = sheet.getRow(2) ?: sheet.createRow(2)
+                row2.createCell(colIndex).apply {
+                    setCellValue("${cell.items.size} / ${cell.capacity}")
+                    cellStyle = descStyle
+                }
+
+                val sortedItems = cell.items.sorted()
+                sortedItems.forEachIndexed { itemIndex, scooterId ->
+                    val rIndex = itemIndex + 3
+                    val row = sheet.getRow(rIndex) ?: sheet.createRow(rIndex)
+                    row.createCell(colIndex).apply {
+                        setCellValue(scooterId)
+                        cellStyle = itemStyle
+                    }
                 }
             }
 
-            // Генерируем имя файла и сохраняем
-            val sdf = SimpleDateFormat("ddMMyyyy_HHmm", Locale.getDefault())
-            val timestamp = sdf.format(Date())
-            val fileName = "storage_export_$timestamp.xlsx"
-
-            val file = File(context.cacheDir, fileName)
-            FileOutputStream(file).use { workbook.write(it) }
-            workbook.close()
-
-            // Создаем Intent для шаринга файла
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" // <-- ИСПРАВЛЕНО
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(Intent.createChooser(shareIntent, "Экспорт склада"))
+            shareExcelFile(workbook, "full_storage_backup")
 
         } catch (e: Exception) {
-            Toast.makeText(context, "Ошибка экспорта: ${e.message}", Toast.LENGTH_LONG).show()
-            e.printStackTrace()
+            handleError(e)
         }
+    }
+
+    // ========================================================================================
+    // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+    // ========================================================================================
+
+    /**
+     * Санирует имя листа Excel:
+     * - убирает запрещённые символы: : \ / * ? [ ] '
+     * - обрезает до 31 символа (лимит Excel)
+     */
+    private fun sanitizeSheetName(name: String): String {
+        return name
+            .replace(Regex("[:\\\\/*?\\[\\]']"), " ")
+            .trim()
+            .take(31)
+            .ifBlank { "Лист" }
+    }
+
+    /**
+     * Санирует имя файла для файловой системы:
+     * - убирает все символы кроме букв, цифр, дефиса, подчёркивания
+     * - обрезает до 50 символов
+     */
+    private fun sanitizeFileName(name: String): String {
+        return name
+            .replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ_\\-]"), "_")
+            .trim('_')
+            .take(50)
+            .ifBlank { "cell" }
+    }
+
+    private fun shareExcelFile(workbook: XSSFWorkbook, fileNamePrefix: String) {
+        val sdf = SimpleDateFormat("ddMM_HHmm", Locale.getDefault())
+        val timestamp = sdf.format(Date())
+        val safePrefix = sanitizeFileName(fileNamePrefix)
+        val fileName = "${safePrefix}_$timestamp.xlsx"
+
+        val outputDir = File(context.cacheDir, "exports").also { it.mkdirs() }
+        val file = File(outputDir, fileName)
+
+        FileOutputStream(file).use { fos ->
+            workbook.write(fos)
+            fos.flush()
+        }
+        workbook.close()
+
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, fileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Сохранить / Отправить"))
+    }
+
+    private fun handleError(e: Exception) {
+        e.printStackTrace()
+        val msg = when {
+            e.message?.contains("ENOSPC") == true -> "Недостаточно места на устройстве"
+            e.message?.contains("permission") == true -> "Нет прав доступа к файлу"
+            else -> "Ошибка экспорта: ${e.message}"
+        }
+        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
     }
 }

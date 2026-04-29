@@ -1,57 +1,59 @@
 package com.example.qrscannerapp.ui.theme
 
-import android.app.Activity
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
+// =================================================================================
+// ЦВЕТОВАЯ СХЕМА — на базе Stardust палитры
+// =================================================================================
 
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    engine_background.agsl = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
+private val StardustDarkColorScheme = darkColorScheme(
+    primary = Color(0xFF7B61FF),          // StardustPrimary
     onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+    primaryContainer = Color(0xFF3D2E80),
+    onPrimaryContainer = Color(0xFFE0D9FF),
+
+    secondary = Color(0xFFFF9800),        // StardustSecondary
+    onSecondary = Color.Black,
+    secondaryContainer = Color(0xFF4D3000),
+    onSecondaryContainer = Color(0xFFFFDDB3),
+
+    tertiary = Color(0xFF00BFA5),
+    onTertiary = Color.Black,
+
+    error = Color(0xFFFF5252),            // StardustError
+    onError = Color.White,
+    errorContainer = Color(0xFF4D1515),
+    onErrorContainer = Color(0xFFFFB4AB),
+
+    background = Color(0xFF0A0A0F),       // Почти чёрный, как AppBackground
+    onBackground = Color(0xFFEAEAF0),     // StardustTextPrimary
+
+    surface = Color(0xFF121218),          // Чуть светлее фона
+    onSurface = Color(0xFFEAEAF0),
+    surfaceVariant = Color(0xFF1A1A24),
+    onSurfaceVariant = Color(0xFFA0A0B0), // StardustTextSecondary
+
+    outline = Color(0xFF2A2A3A),          // StardustItemBg
+    outlineVariant = Color(0xFF1E1E2A),
+
+    inverseSurface = Color(0xFFEAEAF0),
+    inverseOnSurface = Color(0xFF0A0A0F),
+    inversePrimary = Color(0xFF5A40CC)
 )
+
+// =================================================================================
+// ТЕМА — всегда тёмная (приложение тёмное по дизайну)
+// =================================================================================
 
 @Composable
 fun QrScannerAppTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = StardustDarkColorScheme,
         typography = Typography,
         content = content
     )

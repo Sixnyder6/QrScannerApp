@@ -11,33 +11,13 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.util.Log
-import android.util.Size
 import android.view.View
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.Camera
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-// --- ИСПРАВЛЕННЫЕ ИМПОРТЫ АНИМАЦИИ ---
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState // Находится здесь
-import androidx.compose.animation.core.animateFloatAsState // Находится здесь
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-// -------------------------------------
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -48,52 +28,80 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
-import androidx.compose.material3.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import androidx.compose.runtime.*
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.hilt.navigation.compose.hiltViewModel // <-- ИЗМЕНЕНИЕ: Добавлен импорт Hilt
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.core.model.ActiveTab
 import com.example.qrscannerapp.core.model.ScanEvent
-import com.example.qrscannerapp.core.model.SessionType
 import com.example.qrscannerapp.core.model.UiEffect
-import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseScreen // <-- ИЗМЕНЕНИЕ: Импорт нового экрана
-import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseViewModel // <-- ИЗМЕНЕНИЕ: Импорт новой ViewModel
+import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseScreen
+import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseViewModel
 import com.example.qrscannerapp.features.scanner.domain.model.ScanItem
-import com.example.qrscannerapp.features.scanner.domain.model.ScanSession
+import com.example.qrscannerapp.features.scanner.ui.components.BatchProgressBar
+import com.example.qrscannerapp.features.scanner.ui.components.BatchSetupSheet
+import com.example.qrscannerapp.features.scanner.ui.components.CameraView
+import com.example.qrscannerapp.features.scanner.ui.components.EmptyState
+import com.example.qrscannerapp.features.scanner.ui.components.ExportSheet
+import com.example.qrscannerapp.features.scanner.ui.components.SaveSessionDialog
+import com.example.qrscannerapp.features.scanner.ui.components.ScanListItem
 import com.example.qrscannerapp.features.scanner.ui.components.ScooterSearchResultDialog
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
+import com.example.qrscannerapp.features.scanner.ui.components.SearchResultDialog
+import com.example.qrscannerapp.features.scanner.ui.components.SessionSavedDialog
+import com.example.qrscannerapp.features.scanner.ui.components.SessionStatsRow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
-import java.util.concurrent.Executors
 
 // --- ЦВЕТА ---
 val StardustGlassBg = Color(0xBF1A1A1D)
@@ -108,15 +116,11 @@ val StardustSuccess = Color(0xFF4CAF50)
 val StardustError = Color(0xFFF44336)
 val StardustWarning = Color(0xFFFFC107)
 
-// Цвета производителей
 val ColorFujian = Color(0xFFFF8A65)
 val ColorByd = Color(0xFF4FC3F7)
-
-
-// <-- ИЗМЕНЕНИЕ: ВАЖНО! Не забудьте обновить сам enum class ActiveTab
-// в файле com/example/qrscannerapp/core/model/CoreEnums.kt
-// enum class ActiveTab { SCOOTERS, WAREHOUSE, BATTERIES }
-
+val ColorWind50 = Color(0xFF69F0AE)
+val ColorWind50Old = Color(0xFFFFAB40)
+val ColorWind40 = Color(0xFF7C8AFF)
 
 @Composable
 fun StardustScreen(
@@ -130,28 +134,23 @@ fun StardustScreen(
     onNavigateToVisualRepair: (String) -> Unit = {}
 ) {
     var hasCameraPermission by remember { mutableStateOf(false) }
-    val launcher = rememberLauncherForActivityResult(contract = ActivityResultContracts.RequestPermission()) { granted ->
-        hasCameraPermission = granted
-    }
-    LaunchedEffect(key1 = true) {
-        launcher.launch(Manifest.permission.CAMERA)
-    }
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted: Boolean -> hasCameraPermission = granted }
+
+    LaunchedEffect(key1 = true) { launcher.launch(Manifest.permission.CAMERA) }
 
     val isSearchMode by viewModel.isSearchMode.collectAsState()
     val searchResult by viewModel.searchResult.collectAsState()
     val scooterSearchResult by viewModel.scooterSearchResult.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
     val scanEventFlow = viewModel.scanEvent
-
-    // <-- ИЗМЕНЕНИЕ: Получаем ViewModel для склада и текущую активную вкладку здесь
     val warehouseViewModel: WarehouseViewModel = hiltViewModel()
     val activeTab by viewModel.activeTab.collectAsState()
 
-    Column(modifier = Modifier
-        .fillMaxSize()
-        .background(StardustSolidBg)) {
+    var isTorchOn by remember { mutableStateOf(false) }
 
-        // 1. ВЕРХНИЙ БЛОК: КАМЕРА (40% высоты)
+    Column(modifier = Modifier.fillMaxSize().background(StardustSolidBg)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -163,14 +162,15 @@ fun StardustScreen(
                 isSearchMode = isSearchMode,
                 hasPermission = hasCameraPermission,
                 scanEventFlow = scanEventFlow,
-                // <-- ИЗМЕНЕНИЕ: Теперь мы решаем, какую ViewModel вызвать, на основе активной вкладки
-                onCodeScanned = { code ->
+                isTorchOn = isTorchOn,
+                onTorchChange = { torch: Boolean -> isTorchOn = torch },
+                onCodeScanned = { code: String ->
                     when (activeTab) {
                         ActiveTab.WAREHOUSE -> warehouseViewModel.onPartScanned(code)
                         else -> viewModel.onCodeScanned(code)
                     }
                 },
-                onStatusUpdate = { msg, isErr -> viewModel.updateStatus(msg, isErr) }
+                onStatusUpdate = { msg: String, isErr: Boolean -> viewModel.updateStatus(msg, isErr) }
             )
 
             IconButton(
@@ -188,12 +188,32 @@ fun StardustScreen(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
-                    .background(if(isSearchMode) StardustWarning else Color.Black.copy(alpha = 0.3f), CircleShape)
+                    .background(
+                        if (isSearchMode) StardustWarning else Color.Black.copy(alpha = 0.3f),
+                        CircleShape
+                    )
             ) {
                 Icon(
                     Icons.Default.Search,
                     "Поиск",
-                    tint = if(isSearchMode) Color.Black else Color.White
+                    tint = if (isSearchMode) Color.Black else Color.White
+                )
+            }
+
+            IconButton(
+                onClick = { isTorchOn = !isTorchOn },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .background(
+                        if (isTorchOn) StardustWarning.copy(alpha = 0.9f) else Color.Black.copy(alpha = 0.3f),
+                        CircleShape
+                    )
+            ) {
+                Icon(
+                    imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                    contentDescription = "Фонарик",
+                    tint = if (isTorchOn) Color.Black else Color.White
                 )
             }
 
@@ -209,7 +229,6 @@ fun StardustScreen(
             }
         }
 
-        // 2. НИЖНИЙ БЛОК: ИНТЕРФЕЙС (60% высоты)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -218,7 +237,7 @@ fun StardustScreen(
         ) {
             ScannerOverlayUi(
                 viewModel = viewModel,
-                warehouseViewModel = warehouseViewModel, // <-- ИЗМЕНЕНИЕ: Передаем ViewModel склада
+                warehouseViewModel = warehouseViewModel,
                 hapticManager = hapticManager,
                 view = view,
                 isSearchMode = isSearchMode,
@@ -248,22 +267,17 @@ fun StardustScreen(
             locationName = scooterSearchResult!!.second,
             lastUser = "Система",
             onDismiss = { viewModel.clearScooterSearchResult() },
-            onNavigate = {
-                viewModel.clearScooterSearchResult()
-                onNavigateToStorage()
-            },
-            onOpen3D = {
-                onNavigateToVisualRepair(number)
-            }
+            onNavigate = { viewModel.clearScooterSearchResult(); onNavigateToStorage() },
+            onOpen3D = { onNavigateToVisualRepair(number) }
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScannerOverlayUi(
     viewModel: QrScannerViewModel,
-    warehouseViewModel: WarehouseViewModel, // <-- ИЗМЕНЕНИЕ: Принимаем ViewModel склада
+    warehouseViewModel: WarehouseViewModel,
     hapticManager: HapticFeedbackManager,
     view: View,
     isSearchMode: Boolean,
@@ -283,43 +297,65 @@ fun ScannerOverlayUi(
     val activeTab by viewModel.activeTab.collectAsState()
     val newItems by viewModel.newItems.collectAsState()
 
+    val scooterCount = viewModel.scooterCodes.size
+    val batteryCount = viewModel.batteryCodes.size
+    val newBatteryCount = viewModel.newBatteryCodes.size
+    val statusMessage by viewModel.statusMessage.collectAsState()
+
+    val duplicateCount by viewModel.duplicateCount.collectAsState()
+    val scanRate by viewModel.scanRate.collectAsState()
+    val batchConfig by viewModel.batchConfig.collectAsState()
+
+    var sessionSeconds by remember { mutableLongStateOf(0L) }
+    val hasItems = scooterCount > 0 || batteryCount > 0 || newBatteryCount > 0
+    LaunchedEffect(hasItems) {
+        if (hasItems) {
+            while (true) { delay(1000); sessionSeconds++ }
+        } else { sessionSeconds = 0L }
+    }
+
+    var showBatchSetupSheet by remember { mutableStateOf(false) }
+    val batchSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     var isManualInputExpanded by remember { mutableStateOf(false) }
     val isInputVisible = isManualInputExpanded || isSearchMode
 
-    // <-- ИЗМЕНЕНИЕ: Эта переменная теперь используется только для старых вкладок
-    val currentList = when (activeTab) {
+    val currentList: List<ScanItem> = when (activeTab) {
         ActiveTab.SCOOTERS -> viewModel.scooterCodes
         ActiveTab.BATTERIES -> viewModel.batteryCodes
-        else -> emptyList() // Для WAREHOUSE список будет браться из его ViewModel
+        ActiveTab.NEW_BATTERIES -> viewModel.newBatteryCodes
+        else -> emptyList()
     }
 
     val exportSheetState = rememberModalBottomSheetState()
     var showExportSheet by remember { mutableStateOf(false) }
     var showSaveSessionDialog by remember { mutableStateOf(false) }
-
     val recentlySavedSession by viewModel.recentlySavedSession.collectAsState()
 
-    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-        vibratorManager.defaultVibrator
-    } else {
-        @Suppress("DEPRECATION") context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-    }
-    val toneGen = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 100) }
-
-    val listState = rememberLazyListState()
-
-    var manualInputText by remember { mutableStateOf("") }
-    var selectedManufacturer by remember { mutableStateOf("FUJIAN") }
-
-    LaunchedEffect(key1 = currentList.firstOrNull()) {
-        if (currentList.isNotEmpty()) {
-            listState.animateScrollToItem(0)
+    val vibrator = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
     }
 
+    val toneGen = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 100) }
+    DisposableEffect(Unit) { onDispose { toneGen.release() } }
+
+    val listState = rememberLazyListState()
+    var manualInputText by remember { mutableStateOf("") }
+    var selectedManufacturer by remember { mutableStateOf("FUJIAN") }
+    var selectedWind50Subtype by remember { mutableStateOf("NEW") }
+
+    LaunchedEffect(key1 = currentList.firstOrNull()) {
+        if (currentList.isNotEmpty()) listState.animateScrollToItem(0)
+    }
+    LaunchedEffect(activeTab) { manualInputText = "" }
+
     LaunchedEffect(Unit) {
-        viewModel.scanEffect.collect { effect ->
+        viewModel.scanEffect.collect { effect: UiEffect ->
             when (effect) {
                 is UiEffect.ScanSuccess -> {
                     if (isSoundEnabled) toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
@@ -337,21 +373,96 @@ fun ScannerOverlayUi(
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.batchEvent.collect { event: BatchEvent ->
+            when (event) {
+                is BatchEvent.Completed -> {
+                    if (isVibrationEnabled) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            vibrator.vibrate(
+                                VibrationEffect.createWaveform(
+                                    longArrayOf(0, 100, 100, 100, 100, 300),
+                                    intArrayOf(0, 255, 0, 255, 0, 255), -1
+                                )
+                            )
+                        } else {
+                            @Suppress("DEPRECATION") vibrator.vibrate(500)
+                        }
+                    }
+                    if (isSoundEnabled) toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 400)
+                }
+                is BatchEvent.NearlyDone -> {
+                    if (isVibrationEnabled) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            vibrator.vibrate(
+                                VibrationEffect.createWaveform(
+                                    longArrayOf(0, 80, 80, 80),
+                                    intArrayOf(0, 200, 0, 200), -1
+                                )
+                            )
+                        } else {
+                            @Suppress("DEPRECATION") vibrator.vibrate(200)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.scanEvent.collect { event: ScanEvent ->
+            if (event is ScanEvent.Duplicate && isSoundEnabled) {
+                toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                delay(150)
+                toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // <-- ИЗМЕНЕНИЕ: Добавлена вкладка "Склад"
-        val tabs = listOf("Самокаты", "Склад", "АКБ")
-        TabRow(
+
+        AnimatedVisibility(
+            visible = batchConfig.isActive,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            BatchProgressBar(
+                config = batchConfig,
+                currentCount = viewModel.getBatchProgress().first,
+                onCancelBatch = { viewModel.clearBatchMode() }
+            )
+        }
+
+        // ============================================================================================
+        // ВКЛАДКИ: Самокаты | Склад | WIND 4.0 | WIND 5.0
+        // ============================================================================================
+        val tabs = listOf(
+            "Самокаты${if (scooterCount > 0) " · $scooterCount" else ""}",
+            "Склад",
+            "WIND 4.0${if (batteryCount > 0) " · $batteryCount" else ""}",
+            "WIND 5.0${if (newBatteryCount > 0) " · $newBatteryCount" else ""}"
+        )
+
+        ScrollableTabRow(
             selectedTabIndex = activeTab.ordinal,
             containerColor = Color.Transparent,
             contentColor = StardustTextPrimary,
+            edgePadding = 0.dp,
             indicator = { tabPositions ->
-                // <-- ИЗМЕНЕНИЕ: Добавлена проверка, чтобы избежать IndexOutOfBoundsException
                 if (activeTab.ordinal < tabPositions.size) {
+                    val indicatorColor = when (activeTab) {
+                        ActiveTab.NEW_BATTERIES -> ColorWind50
+                        ActiveTab.BATTERIES -> ColorWind40
+                        else -> StardustPrimary
+                    }
                     Box(
                         modifier = Modifier
                             .tabIndicatorOffset(tabPositions[activeTab.ordinal])
                             .height(3.dp)
-                            .background(StardustPrimary, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                            .background(
+                                indicatorColor,
+                                RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)
+                            )
                     )
                 }
             },
@@ -365,37 +476,69 @@ fun ScannerOverlayUi(
                         viewModel.onTabSelected(ActiveTab.values()[index])
                         manualInputText = ""
                     },
-                    text = { Text(title) }
+                    text = { Text(title, fontSize = 13.sp) }
                 )
             }
         }
 
-        // 2. ВСТРОЕННАЯ ПАНЕЛЬ ВВОДА (СКРЫВАЕМАЯ)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(StardustSolidBg)
+        AnimatedVisibility(
+            visible = statusMessage != "Наведите камеру на QR-код" && statusMessage != "РЕЖИМ ПОИСКА",
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
         ) {
-            if (!isSearchMode) {
-                // <-- ИЗМЕНЕНИЕ: Панель ручного ввода скрыта на вкладке Склад (пока что)
-                val manualInputAvailable = activeTab != ActiveTab.WAREHOUSE
+            val isErrorStatus = statusMessage.startsWith("Ошибка") ||
+                    statusMessage.contains("уже в списке") || statusMessage.contains("не найден")
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (isErrorStatus) StardustError.copy(alpha = 0.15f)
+                        else StardustSuccess.copy(alpha = 0.15f)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = statusMessage,
+                    color = if (isErrorStatus) StardustError else StardustSuccess,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
 
+        if (activeTab != ActiveTab.WAREHOUSE) {
+            SessionStatsRow(
+                sessionSeconds = sessionSeconds,
+                duplicateCount = duplicateCount,
+                scanRate = scanRate,
+                isBatchActive = batchConfig.isActive,
+                onBatchClick = { showBatchSetupSheet = true }
+            )
+        }
+
+        Column(modifier = Modifier.fillMaxWidth().background(StardustSolidBg)) {
+            if (!isSearchMode) {
+                val manualInputAvailable = activeTab != ActiveTab.WAREHOUSE
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = manualInputAvailable) { isManualInputExpanded = !isManualInputExpanded }
+                        .clickable(enabled = manualInputAvailable) {
+                            isManualInputExpanded = !isManualInputExpanded
+                        }
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val color = if (manualInputAvailable) StardustTextSecondary else StardustTextSecondary.copy(alpha = 0.3f)
+                        val color = if (manualInputAvailable) StardustTextSecondary
+                        else StardustTextSecondary.copy(alpha = 0.3f)
                         Icon(Icons.Outlined.Keyboard, null, tint = color)
                         Spacer(modifier = Modifier.width(12.dp))
                         Text("Ручной ввод", color = color, fontWeight = FontWeight.Medium)
                     }
                     Icon(
-                        imageVector = if(isManualInputExpanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                        imageVector = if (isManualInputExpanded) Icons.Outlined.KeyboardArrowUp
+                        else Icons.Outlined.KeyboardArrowDown,
                         contentDescription = null,
                         tint = StardustTextSecondary
                     )
@@ -403,7 +546,7 @@ fun ScannerOverlayUi(
             }
 
             AnimatedVisibility(
-                visible = isInputVisible && activeTab != ActiveTab.WAREHOUSE, // <-- ИЗМЕНЕНИЕ: Скрываем для склада
+                visible = isInputVisible && activeTab != ActiveTab.WAREHOUSE,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut()
             ) {
@@ -413,16 +556,44 @@ fun ScannerOverlayUi(
                         .padding(horizontal = 16.dp)
                         .padding(bottom = 12.dp)
                 ) {
+                    // WIND 4.0: чипы FUJIAN / BYD
                     if (activeTab == ActiveTab.BATTERIES && !isSearchMode) {
-                        Row(modifier = Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             listOf("FUJIAN", "BYD").forEach { brand ->
                                 FilterChip(
                                     selected = selectedManufacturer == brand,
                                     onClick = { selectedManufacturer = brand },
                                     label = { Text(brand) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = StardustPrimary,
-                                        selectedLabelColor = Color.White,
+                                        selectedContainerColor = if (brand == "BYD") ColorByd else ColorFujian,
+                                        selectedLabelColor = Color.Black,
+                                        containerColor = StardustItemBg,
+                                        labelColor = StardustTextSecondary
+                                    ),
+                                    border = null,
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // WIND 5.0: чипы Новые (5BB) / Старые (SF)
+                    if (activeTab == ActiveTab.NEW_BATTERIES && !isSearchMode) {
+                        Row(
+                            modifier = Modifier.padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("NEW" to "Новые (5BB)", "OLD" to "Старые (SF)").forEach { (type, label) ->
+                                FilterChip(
+                                    selected = selectedWind50Subtype == type,
+                                    onClick = { selectedWind50Subtype = type },
+                                    label = { Text(label) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = if (type == "NEW") ColorWind50 else ColorWind50Old,
+                                        selectedLabelColor = Color.Black,
                                         containerColor = StardustItemBg,
                                         labelColor = StardustTextSecondary
                                     ),
@@ -434,31 +605,93 @@ fun ScannerOverlayUi(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val prefix = if (activeTab == ActiveTab.BATTERIES) {
-                            if (selectedManufacturer == "FUJIAN") "4BB" else "4BZ"
-                        } else ""
-
-                        val activeColor = if (isSearchMode) StardustWarning else StardustPrimary
-                        val containerColor = if (isSearchMode) StardustWarning.copy(alpha = 0.1f) else StardustItemBg
+                        val prefix = when {
+                            isSearchMode -> ""
+                            activeTab == ActiveTab.BATTERIES -> when (selectedManufacturer) {
+                                "FUJIAN" -> "4BB"
+                                "BYD" -> "4BZ"
+                                else -> ""
+                            }
+                            activeTab == ActiveTab.NEW_BATTERIES -> when (selectedWind50Subtype) {
+                                "NEW" -> "5BB"
+                                "OLD" -> "SF"
+                                else -> ""
+                            }
+                            else -> ""
+                        }
+                        val activeColor = when {
+                            isSearchMode -> StardustWarning
+                            activeTab == ActiveTab.NEW_BATTERIES && selectedWind50Subtype == "OLD" -> ColorWind50Old
+                            activeTab == ActiveTab.NEW_BATTERIES -> ColorWind50
+                            activeTab == ActiveTab.BATTERIES -> ColorWind40
+                            else -> StardustPrimary
+                        }
+                        val containerColor = when {
+                            isSearchMode -> StardustWarning.copy(alpha = 0.1f)
+                            activeTab == ActiveTab.NEW_BATTERIES && selectedWind50Subtype == "OLD" -> ColorWind50Old.copy(alpha = 0.08f)
+                            activeTab == ActiveTab.NEW_BATTERIES -> ColorWind50.copy(alpha = 0.08f)
+                            activeTab == ActiveTab.BATTERIES -> ColorWind40.copy(alpha = 0.08f)
+                            else -> StardustItemBg
+                        }
 
                         OutlinedTextField(
                             value = manualInputText,
-                            onValueChange = { manualInputText = it.filter { char -> char.isDigit() } },
+                            onValueChange = { newValue: String ->
+                                manualInputText = when {
+                                    activeTab == ActiveTab.SCOOTERS ->
+                                        newValue.filter { c: Char -> c.isLetterOrDigit() }.uppercase()
+                                    activeTab == ActiveTab.NEW_BATTERIES && selectedWind50Subtype == "OLD" ->
+                                        newValue.filter { c: Char -> c.isLetterOrDigit() }.uppercase()
+                                    else ->
+                                        newValue.filter { c: Char -> c.isDigit() || c.isLetter() }.uppercase()
+                                }
+                            },
                             modifier = Modifier.weight(1f),
                             placeholder = {
                                 Text(
-                                    if (isSearchMode) "Поиск по номеру..."
-                                    else if (activeTab == ActiveTab.SCOOTERS) "Номер самоката..."
-                                    else "Введите цифры..."
+                                    when {
+                                        isSearchMode -> "Поиск по номеру..."
+                                        activeTab == ActiveTab.SCOOTERS -> "Номер (напр. HE600A)..."
+                                        activeTab == ActiveTab.NEW_BATTERIES && selectedWind50Subtype == "OLD" ->
+                                            "Буквы + цифры (AEQ24A5A0175)..."
+                                        activeTab == ActiveTab.NEW_BATTERIES -> "11 цифр после 5BB..."
+                                        activeTab == ActiveTab.BATTERIES -> "11 цифр после префикса..."
+                                        else -> "Введите код..."
+                                    }
                                 )
                             },
-                            prefix = if (prefix.isNotEmpty() && !isSearchMode) { { Text(prefix, color = StardustTextSecondary, fontWeight = FontWeight.Bold) } } else null,
+                            prefix = if (prefix.isNotEmpty() && !isSearchMode) {
+                                {
+                                    Text(
+                                        prefix,
+                                        color = activeColor.copy(alpha = 0.8f),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            } else null,
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = when {
+                                    activeTab == ActiveTab.SCOOTERS -> KeyboardType.Text
+                                    activeTab == ActiveTab.NEW_BATTERIES && selectedWind50Subtype == "OLD" -> KeyboardType.Text
+                                    else -> KeyboardType.Number
+                                },
+                                imeAction = ImeAction.Done,
+                                capitalization = when {
+                                    activeTab == ActiveTab.SCOOTERS -> KeyboardCapitalization.Characters
+                                    activeTab == ActiveTab.NEW_BATTERIES && selectedWind50Subtype == "OLD" -> KeyboardCapitalization.Characters
+                                    else -> KeyboardCapitalization.None
+                                },
+                                autoCorrect = false
+                            ),
                             keyboardActions = KeyboardActions(onDone = {
                                 if (manualInputText.isNotBlank()) {
-                                    val fullCode = if (prefix.isNotEmpty() && !isSearchMode) prefix + manualInputText else manualInputText
-                                    viewModel.addManualCode(fullCode) // <-- ИЗМЕНЕНИЕ: В будущем здесь тоже понадобится роутинг
+                                    val fullCode = if (prefix.isNotEmpty() && !isSearchMode) {
+                                        prefix + manualInputText
+                                    } else {
+                                        manualInputText
+                                    }
+                                    viewModel.addManualCode(fullCode)
                                     focusManager.clearFocus()
                                 }
                             }),
@@ -467,7 +700,7 @@ fun ScannerOverlayUi(
                                 focusedBorderColor = activeColor,
                                 unfocusedBorderColor = Color.Transparent,
                                 focusedContainerColor = containerColor,
-                                unfocusedContainerColor = StardustItemBg,
+                                unfocusedContainerColor = containerColor.copy(alpha = 0.5f),
                                 cursorColor = activeColor,
                                 focusedTextColor = StardustTextPrimary,
                                 unfocusedTextColor = StardustTextPrimary
@@ -479,8 +712,12 @@ fun ScannerOverlayUi(
                         FilledIconButton(
                             onClick = {
                                 if (manualInputText.isNotBlank()) {
-                                    val fullCode = if (prefix.isNotEmpty() && !isSearchMode) prefix + manualInputText else manualInputText
-                                    viewModel.addManualCode(fullCode) // <-- ИЗМЕНЕНИЕ: В будущем здесь тоже понадобится роутинг
+                                    val fullCode = if (prefix.isNotEmpty() && !isSearchMode) {
+                                        prefix + manualInputText
+                                    } else {
+                                        manualInputText
+                                    }
+                                    viewModel.addManualCode(fullCode)
                                     focusManager.clearFocus()
                                 }
                             },
@@ -492,7 +729,7 @@ fun ScannerOverlayUi(
                             Icon(
                                 imageVector = if (isSearchMode) Icons.Default.Search else Icons.Default.Add,
                                 contentDescription = if (isSearchMode) "Найти" else "Добавить",
-                                tint = if (isSearchMode) Color.Black else Color.White
+                                tint = Color.Black
                             )
                         }
                     }
@@ -502,23 +739,34 @@ fun ScannerOverlayUi(
 
         HorizontalDivider(color = StardustItemBg)
 
-        // 3. СПИСОК СКАНИРОВАНИЯ
         Box(modifier = Modifier.weight(1f)) {
-            // <-- ИЗМЕНЕНИЕ: Главный роутер контента
             when (activeTab) {
-                ActiveTab.SCOOTERS, ActiveTab.BATTERIES -> {
-                    // --- Старая логика для самокатов и АКБ ---
+                ActiveTab.SCOOTERS, ActiveTab.BATTERIES, ActiveTab.NEW_BATTERIES -> {
                     if (currentList.isEmpty()) {
-                        EmptyState(text = if (isSearchMode) "Введите код для поиска" else "Список пуст")
+                        EmptyState(
+                            text = if (isSearchMode) "Введите код для поиска" else "Список пуст"
+                        )
                     } else {
                         LazyColumn(
                             state = listState,
                             contentPadding = PaddingValues(bottom = 80.dp)
                         ) {
-                            items(items = currentList, key = { it.id }) { item ->
+                            items(items = currentList, key = { item: ScanItem -> item.id }) { item: ScanItem ->
                                 val dismissState = rememberSwipeToDismissBoxState(
-                                    confirmValueChange = {
-                                        if (it == SwipeToDismissBoxValue.EndToStart) {
+                                    confirmValueChange = { dismissValue: SwipeToDismissBoxValue ->
+                                        if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
+                                            if (isVibrationEnabled) {
+                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                                    vibrator.vibrate(
+                                                        VibrationEffect.createOneShot(
+                                                            30,
+                                                            VibrationEffect.DEFAULT_AMPLITUDE
+                                                        )
+                                                    )
+                                                } else {
+                                                    @Suppress("DEPRECATION") vibrator.vibrate(30)
+                                                }
+                                            }
                                             viewModel.removeCode(item)
                                             true
                                         } else false
@@ -528,7 +776,12 @@ fun ScannerOverlayUi(
                                     state = dismissState,
                                     backgroundContent = {
                                         val color by animateColorAsState(
-                                            if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) StardustError else Color.Transparent, label = ""
+                                            if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) {
+                                                StardustError
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                            label = ""
                                         )
                                         Box(
                                             Modifier
@@ -537,7 +790,11 @@ fun ScannerOverlayUi(
                                                 .padding(horizontal = 20.dp),
                                             contentAlignment = Alignment.CenterEnd
                                         ) {
-                                            Icon(Icons.Outlined.Delete, contentDescription = null, tint = Color.White)
+                                            Icon(
+                                                Icons.Outlined.Delete,
+                                                contentDescription = null,
+                                                tint = Color.White
+                                            )
                                         }
                                     },
                                     content = {
@@ -553,15 +810,25 @@ fun ScannerOverlayUi(
                     }
 
                     if (!isSearchMode && currentList.isNotEmpty()) {
+                        val fabColor = when (activeTab) {
+                            ActiveTab.NEW_BATTERIES -> ColorWind50
+                            ActiveTab.BATTERIES -> ColorWind40
+                            else -> StardustPrimary
+                        }
                         ExtendedFloatingActionButton(
-                            text = { Text("Действия (${currentList.size})", fontWeight = FontWeight.Bold) },
+                            text = {
+                                Text(
+                                    "Действия (${currentList.size})",
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
                             icon = { Icon(Icons.Default.Share, null) },
                             onClick = { showExportSheet = true },
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .padding(16.dp),
-                            containerColor = StardustPrimary,
-                            contentColor = Color.White
+                            containerColor = fabColor,
+                            contentColor = Color.Black
                         )
                     }
 
@@ -578,12 +845,27 @@ fun ScannerOverlayUi(
                         }
                     }
                 }
-                ActiveTab.WAREHOUSE -> {
-                    // --- Новый контент для склада ---
-                    WarehouseScreen(viewModel = warehouseViewModel)
-                }
+                ActiveTab.WAREHOUSE -> WarehouseScreen(viewModel = warehouseViewModel)
             }
         }
+    }
+
+    if (showBatchSetupSheet) {
+        BatchSetupSheet(
+            currentConfig = batchConfig,
+            sheetState = batchSheetState,
+            onDismiss = {
+                scope.launch { batchSheetState.hide() }.invokeOnCompletion {
+                    showBatchSetupSheet = false
+                }
+            },
+            onConfirm = { config: BatchConfig ->
+                viewModel.setBatchConfig(config)
+                scope.launch { batchSheetState.hide() }.invokeOnCompletion {
+                    showBatchSetupSheet = false
+                }
+            }
+        )
     }
 
     if (showExportSheet) {
@@ -592,24 +874,28 @@ fun ScannerOverlayUi(
             sheetState = exportSheetState,
             activeTab = activeTab,
             onDismiss = { showExportSheet = false },
-            onCopyAll = { list ->
+            onCopyAll = { list: List<ScanItem> ->
                 viewModel.logActivity("COPY_ALL")
-                val allCodes = list.joinToString("\n") { it.code }
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val allCodes = list.joinToString("\n") { scanItem: ScanItem -> scanItem.code }
+                val clipboard =
+                    context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("All Codes", allCodes))
                 Toast.makeText(context, "Код скопирован!", Toast.LENGTH_SHORT).show()
-                scope.launch { exportSheetState.hide() }.invokeOnCompletion { if (!exportSheetState.isVisible) showExportSheet = false }
+                scope.launch { exportSheetState.hide() }.invokeOnCompletion {
+                    if (!exportSheetState.isVisible) showExportSheet = false
+                }
             },
-            onShare = { list ->
-                val allCodes = list.joinToString("\n") { it.code }
+            onShare = { list: List<ScanItem> ->
+                val allCodes = list.joinToString("\n") { scanItem: ScanItem -> scanItem.code }
                 val sendIntent = Intent().apply {
                     action = Intent.ACTION_SEND
                     putExtra(Intent.EXTRA_TEXT, allCodes)
                     type = "text/plain"
                 }
-                val shareIntent = Intent.createChooser(sendIntent, null)
-                context.startActivity(shareIntent)
-                scope.launch { exportSheetState.hide() }.invokeOnCompletion { if (!exportSheetState.isVisible) showExportSheet = false }
+                context.startActivity(Intent.createChooser(sendIntent, null))
+                scope.launch { exportSheetState.hide() }.invokeOnCompletion {
+                    if (!exportSheetState.isVisible) showExportSheet = false
+                }
             },
             onSaveSession = {
                 scope.launch { exportSheetState.hide() }.invokeOnCompletion {
@@ -617,6 +903,12 @@ fun ScannerOverlayUi(
                         showExportSheet = false
                         showSaveSessionDialog = true
                     }
+                }
+            },
+            onSort = {
+                viewModel.sortCurrentList()
+                scope.launch { exportSheetState.hide() }.invokeOnCompletion {
+                    if (!exportSheetState.isVisible) showExportSheet = false
                 }
             },
             onNavigateToPalletDistribution = {
@@ -643,482 +935,18 @@ fun ScannerOverlayUi(
         SaveSessionDialog(
             isSaving = isSaving,
             onDismissRequest = { if (!isSaving) showSaveSessionDialog = false },
-            onSave = { sessionName ->
-                viewModel.saveCurrentSession(sessionName)
-            }
+            onSave = { sessionName: String? -> viewModel.saveCurrentSession(sessionName) }
         )
     }
 
     recentlySavedSession?.let { savedSession ->
         SessionSavedDialog(
             savedSession = savedSession,
-            onDismiss = {
-                viewModel.onSessionSaveDialogDismissed()
-            },
+            onDismiss = { viewModel.onSessionSaveDialogDismissed() },
             onNavigateToHistory = {
                 viewModel.onSessionSaveDialogDismissed()
                 onNavigateToHistory()
             }
         )
-    }
-}
-
-@Composable
-fun CameraView(
-    isSearchMode: Boolean,
-    hasPermission: Boolean,
-    scanEventFlow: Flow<ScanEvent>,
-    onCodeScanned: (String) -> Unit,
-    onStatusUpdate: (String, Boolean) -> Unit
-) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-
-    var camera by remember { mutableStateOf<Camera?>(null) }
-    var isTorchOn by remember { mutableStateOf(false) }
-
-    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            cameraExecutor.shutdown()
-        }
-    }
-
-    var borderColorTarget by remember { mutableStateOf(Color.White.copy(alpha = 0.8f)) }
-    var scaleTarget by remember { mutableStateOf(1f) }
-
-    val targetBorderColor = if (isSearchMode) StardustWarning else borderColorTarget
-
-    val borderColor by animateColorAsState(
-        targetValue = targetBorderColor,
-        animationSpec = tween(durationMillis = 400),
-        label = "Border Color Animation"
-    )
-    val scale by animateFloatAsState(
-        targetValue = scaleTarget,
-        animationSpec = tween(durationMillis = 200),
-        label = "Border Scale Animation"
-    )
-
-    LaunchedEffect(Unit) {
-        scanEventFlow.collect { event ->
-            launch {
-                val (color, newScale) = when (event) {
-                    ScanEvent.Success -> StardustSuccess to 1.05f
-                    ScanEvent.Duplicate -> StardustError to 1.05f
-                }
-                borderColorTarget = color
-                scaleTarget = newScale
-                delay(250)
-                borderColorTarget = Color.White.copy(alpha = 0.8f)
-                scaleTarget = 1f
-            }
-        }
-    }
-
-    LaunchedEffect(isTorchOn, camera) {
-        try {
-            if (camera?.cameraInfo?.hasFlashUnit() == true) {
-                camera?.cameraControl?.enableTorch(isTorchOn)
-            }
-        } catch (e: Exception) {
-            Log.e("CameraView", "Torch error", e)
-        }
-    }
-
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .background(Color.Black)) {
-        if (hasPermission) {
-            AndroidView(
-                factory = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
-                    previewView.setOnTouchListener { _, event ->
-                        val point = previewView.meteringPointFactory.createPoint(event.x, event.y)
-                        val action = FocusMeteringAction.Builder(point).build()
-                        camera?.cameraControl?.startFocusAndMetering(action)
-                        true
-                    }
-                    previewView
-                },
-                modifier = Modifier.fillMaxSize(),
-                update = { previewView ->
-                    val cameraProvider = cameraProviderFuture.get()
-                    try {
-                        cameraProvider.unbindAll()
-                        val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
-                        val imageAnalyzer = ImageAnalysis.Builder()
-                            .setTargetResolution(Size(1280, 720))
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-                            .also {
-                                val analyzer = QrCodeAnalyzer(
-                                    onCodeScanned = { code -> onCodeScanned(code) },
-                                    onStatusUpdate = { message -> onStatusUpdate(message, true) }
-                                )
-                                it.setAnalyzer(cameraExecutor, analyzer)
-                            }
-                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                        camera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalyzer)
-
-                        if (camera!!.cameraInfo.hasFlashUnit()) {
-                            camera!!.cameraControl.enableTorch(isTorchOn)
-                        }
-
-                    } catch (e: Exception) {
-                        Log.e("CameraView", "Camera bind error", e)
-                    }
-                }
-            )
-
-            Box(modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f)))
-
-            Box(
-                modifier = Modifier
-                    .size(240.dp)
-                    .align(Alignment.Center)
-                    .scale(scale)
-                    .border(3.dp, borderColor, RoundedCornerShape(24.dp))
-                    .background(Color.Transparent)
-            )
-
-            if (isSearchMode) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 80.dp)
-                        .background(StardustWarning.copy(alpha = 0.9f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Text("РЕЖИМ ПОИСКА", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            IconButton(
-                onClick = { isTorchOn = !isTorchOn },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.FlashOn,
-                    contentDescription = "Flashlight",
-                    tint = if (isTorchOn) StardustWarning else Color.White,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-        } else {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Нет доступа к камере", color = StardustTextPrimary)
-            }
-        }
-    }
-}
-
-// ИСПРАВЛЕННЫЙ ЭЛЕМЕНТ СПИСКА: Бейдж перенесен влево
-@Composable
-fun ScanListItem(
-    item: ScanItem,
-    isNew: Boolean,
-    modifier: Modifier = Modifier,
-    onItemShown: () -> Unit
-) {
-    val backgroundColor by animateColorAsState(
-        targetValue = if (isNew) StardustPrimary.copy(alpha = 0.3f) else StardustSolidBg,
-        animationSpec = tween(durationMillis = 500),
-        label = "BgAnim"
-    )
-
-    LaunchedEffect(isNew) {
-        if (isNew) {
-            delay(1500L)
-            onItemShown()
-        }
-    }
-
-    val manufacturer = when {
-        item.code.startsWith("4BB") -> "FUJIAN"
-        item.code.startsWith("4BZ") -> "BYD"
-        else -> null
-    }
-
-    Column(modifier = modifier
-        .fillMaxWidth()
-        .background(backgroundColor)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp, horizontal = 24.dp),
-            verticalAlignment = Alignment.CenterVertically
-            // Убрали Arrangement.SpaceBetween, чтобы все элементы шли подряд слева направо
-        ) {
-            Icon(Icons.Default.QrCode2, null, tint = StardustSecondary, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = item.code,
-                color = StardustTextPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium
-            )
-
-            // Бейдж теперь здесь, сразу после текста
-            if (manufacturer != null) {
-                Spacer(modifier = Modifier.width(12.dp)) // Отступ от номера
-                val badgeColor = if (manufacturer == "FUJIAN") ColorFujian else ColorByd
-                Box(
-                    modifier = Modifier
-                        .background(badgeColor.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = manufacturer,
-                        color = badgeColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-        HorizontalDivider(color = StardustItemBg, thickness = 1.dp, modifier = Modifier.padding(horizontal = 24.dp))
-    }
-}
-
-@Composable
-fun EmptyState(text: String = "Ожидание сканирования...", modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Default.QrCodeScanner, null, tint = StardustItemBg, modifier = Modifier.size(64.dp))
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(text, color = StardustTextSecondary, fontSize = 16.sp)
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ExportSheet(
-    listToExport: List<ScanItem>,
-    sheetState: SheetState,
-    activeTab: ActiveTab,
-    onDismiss: () -> Unit,
-    onCopyAll: (List<ScanItem>) -> Unit,
-    onShare: (List<ScanItem>) -> Unit,
-    onSaveSession: () -> Unit,
-    onNavigateToPalletDistribution: () -> Unit,
-    onNavigateToStorage: () -> Unit
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = StardustModalBg,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
-    ) {
-        Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Экспорт данных", color = StardustTextPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(24.dp))
-
-            if (activeTab == ActiveTab.BATTERIES) {
-                Button(
-                    onClick = onNavigateToPalletDistribution,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = StardustSuccess.copy(alpha = 0.3f), contentColor = StardustSuccess)
-                ) {
-                    Text("Приемка на склад", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            if (activeTab == ActiveTab.SCOOTERS) {
-                Button(
-                    onClick = onNavigateToStorage,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = StardustSuccess.copy(alpha = 0.3f), contentColor = StardustSuccess)
-                ) {
-                    Icon(Icons.Default.Inventory2, contentDescription = "Хранение")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Отправить на хранение", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Button(onClick = onSaveSession, modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp), shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = StardustSecondary)) {
-                Text("Сохранить сессию в историю", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Button(onClick = { onCopyAll(listToExport) }, modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp), shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) {
-                Text("Копировать в буфер обмена", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(onClick = { onShare(listToExport) }, modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp), shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) {
-                Text("Поделиться (как текст)", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = StardustItemBg)
-            ) {
-                Text("Отмена", color = StardustTextSecondary, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@Composable
-fun SearchResultDialog(
-    result: BatterySearchResult,
-    onDismiss: () -> Unit,
-    onNavigateToPallet: () -> Unit
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = StardustModalBg),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(Icons.Default.CheckCircle, null, tint = StardustSuccess, modifier = Modifier.size(56.dp))
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("АКБ Найден!", style = MaterialTheme.typography.headlineSmall, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(24.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(StardustItemBg, RoundedCornerShape(16.dp))
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    InfoRow(label = "Серийный номер", value = result.batteryCode)
-                    HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.2f))
-                    InfoRow(label = "Производитель", value = result.manufacturer)
-                    HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.2f))
-                    InfoRow(label = "Палет №", value = result.palletNumber.toString(), valueColor = StardustPrimary)
-                }
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(
-                    onClick = onNavigateToPallet,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Перейти к палету", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                TextButton(onClick = onDismiss) { Text("Закрыть", color = StardustTextSecondary) }
-            }
-        }
-    }
-}
-
-@Composable
-fun InfoRow(label: String, value: String, valueColor: Color = StardustTextPrimary) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = StardustTextSecondary, fontSize = 14.sp)
-        Text(value, color = valueColor, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-    }
-}
-
-@Composable
-fun SaveSessionDialog(isSaving: Boolean, onDismissRequest: () -> Unit, onSave: (name: String?) -> Unit) {
-    var text by remember { mutableStateOf("") }
-    Dialog(onDismissRequest = onDismissRequest) {
-        Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg)) {
-            Column(modifier = Modifier.padding(24.dp)) {
-                Text("Сохранить сессию", color = StardustTextPrimary, style = MaterialTheme.typography.titleLarge)
-                Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Название...") }, singleLine = true, enabled = !isSaving,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = StardustItemBg, unfocusedContainerColor = StardustItemBg,
-                        focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary,
-                        cursorColor = StardustPrimary, focusedIndicatorColor = StardustPrimary, unfocusedIndicatorColor = Color.Transparent
-                    ),
-                    shape = RoundedCornerShape(10.dp)
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = onDismissRequest, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = StardustItemBg)) {
-                        Text("Отмена", color = StardustTextSecondary)
-                    }
-                    Button(onClick = { onSave(text) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) {
-                        Text("Сохранить")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun SessionSavedDialog(savedSession: ScanSession, onDismiss: () -> Unit, onNavigateToHistory: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { Button(onClick = onNavigateToHistory, colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) { Text("В историю") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Закрыть", color = StardustTextSecondary) } },
-        title = { Text("Сохранено!", color = StardustTextPrimary) },
-        text = { Text("Сессия успешно сохранена.", color = StardustTextSecondary) },
-        containerColor = StardustModalBg
-    )
-}
-
-class QrCodeAnalyzer(
-    private val onCodeScanned: (String) -> Unit,
-    private val onStatusUpdate: (String) -> Unit
-) : ImageAnalysis.Analyzer {
-    private var isProcessing = false
-    private var lastAnalyzedTimestamp = 0L
-    private val THROTTLE_DURATION = 300L
-
-    @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
-    override fun analyze(imageProxy: ImageProxy) {
-        val currentTimestamp = System.currentTimeMillis()
-        if (isProcessing || (currentTimestamp - lastAnalyzedTimestamp < THROTTLE_DURATION)) {
-            imageProxy.close(); return
-        }
-        isProcessing = true
-        val mediaImage = imageProxy.image
-        if (mediaImage != null) {
-            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-            val options = BarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
-            BarcodeScanning.getClient(options).process(image)
-                .addOnSuccessListener { barcodes ->
-                    barcodes.firstNotNullOfOrNull { it.rawValue }?.let {
-                        onCodeScanned(it)
-                        lastAnalyzedTimestamp = System.currentTimeMillis()
-                    }
-                }
-                .addOnFailureListener { Log.e("QrCodeAnalyzer", "Error", it) }
-                .addOnCompleteListener { isProcessing = false; imageProxy.close() }
-        } else { isProcessing = false; imageProxy.close() }
     }
 }

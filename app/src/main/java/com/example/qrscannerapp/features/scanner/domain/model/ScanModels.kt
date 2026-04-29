@@ -1,8 +1,10 @@
 package com.example.qrscannerapp.features.scanner.domain.model
 
-import com.example.qrscannerapp.core.model.SessionType // <-- ИСПРАВЛЕНО
+import androidx.annotation.Keep // <-- ДОБАВИЛИ ИМПОРТ ДЛЯ ЩИТА
+import com.example.qrscannerapp.core.model.SessionType
 import java.util.UUID
 
+@Keep // <-- ЩИТ ДЛЯ ПЕРВОГО КЛАССА
 data class ScanItem(
     val id: String = UUID.randomUUID().toString(),
     val code: String = "",
@@ -10,9 +12,10 @@ data class ScanItem(
     val thumbnail: ByteArray? = null
 ) {
     constructor() : this("", "", 0L, null)
-    // equals и hashCode...
+    // equals и hashCode... (оставь тут свой код, если он был)
 }
 
+@Keep // <-- ЩИТ ДЛЯ ВТОРОГО КЛАССА
 data class ScanSession(
     val id: String = UUID.randomUUID().toString(),
     val name: String? = null,

@@ -88,6 +88,7 @@ private fun SessionListItem(session: ScanSession, onClick: () -> Unit) {
                 val sessionType = when (session.type) {
                     SessionType.SCOOTERS -> "Самокаты"
                     SessionType.BATTERIES -> "АКБ"
+                    SessionType.NEW_BATTERIES -> "Новые АКБ"
                 }
                 val title = session.name?.takeIf { it.isNotBlank() } ?: "$sessionType (${session.items.size} шт.)"
                 Text(

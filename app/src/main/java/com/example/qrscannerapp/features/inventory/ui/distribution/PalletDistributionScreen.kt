@@ -64,6 +64,7 @@ import com.example.qrscannerapp.StardustTextSecondary
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.features.inventory.data.export.PalletExportManager
 import com.example.qrscannerapp.features.inventory.data.export.PalletSummaryPdfGenerator
+import com.example.qrscannerapp.features.inventory.domain.model.CellType
 import com.example.qrscannerapp.features.inventory.domain.model.StoragePallet
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -104,7 +105,8 @@ fun PalletDistributionScreen(
     val isAdmin = authState.isAdmin
     val currentUser = if (isAdmin) "Администратор" else "Сотрудник"
 
-    var palletToEditManufacturer by remember { mutableStateOf<StoragePallet?>(null) }
+    var palletToEditCellType by remember { mutableStateOf<StoragePallet?>(null) }
+    var showCreateCellDialog by remember { mutableStateOf(false) }
     val gridState = rememberLazyGridState()
 
     // Лаунчеры
@@ -182,8 +184,18 @@ fun PalletDistributionScreen(
                         // 1. СВОДКА (Дашборд)
                         val totalInPallets = uiState.pallets.sumOf { it.items.size }
                         val totalOnStock = totalInPallets + uiState.undistributedItemCount
-                        val fujianCount = uiState.pallets.filter { it.manufacturer == "FUJIAN" }.sumOf { it.items.size }
-                        val bydCount = uiState.pallets.filter { it.manufacturer == "BYD" }.sumOf { it.items.size }
+                        val fujianCount = uiState.pallets
+                            .filter { it.resolvedCellType == CellType.FUJIAN }
+                            .sumOf { it.items.size }
+                        val bydCount = uiState.pallets
+                            .filter { it.resolvedCellType == CellType.BYD }
+                            .sumOf { it.items.size }
+                        val ninebotNewCount = uiState.pallets
+                            .filter { it.resolvedCellType == CellType.NINEBOT_NEW }
+                            .sumOf { it.items.size }
+                        val ninebotOldCount = uiState.pallets
+                            .filter { it.resolvedCellType == CellType.NINEBOT_OLD }
+                            .sumOf { it.items.size }
 
                         InventorySummaryCard(
                             totalCount = totalOnStock,
@@ -191,17 +203,18 @@ fun PalletDistributionScreen(
                             todayCount = 0,
                             fujianCount = fujianCount,
                             bydCount = bydCount,
+                            ninebotNewCount = ninebotNewCount,
+                            ninebotOldCount = ninebotOldCount,
                             onBufferClick = { showBufferDialog = true }
                         )
 
-                        // 2. ПАНЕЛЬ ИНСТРУМЕНТОВ (Вместо плавающих кнопок)
+                        // 2. ПАНЕЛЬ ИНСТРУМЕНТОВ
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // Кнопка "Анализ" (Самая важная)
                             OutlinedButton(
                                 onClick = { viewModel.runPalletAnalysis() },
                                 modifier = Modifier
@@ -219,7 +232,6 @@ fun PalletDistributionScreen(
                                 Text("Анализ", fontWeight = FontWeight.Bold)
                             }
 
-                            // Кнопка "Обновить" (Квадратная)
                             FilledIconButton(
                                 onClick = {
                                     viewModel.onNavigateToPalletDistribution()
@@ -235,7 +247,6 @@ fun PalletDistributionScreen(
                                 Icon(Icons.Default.Refresh, "Обновить")
                             }
 
-                            // Кнопка "Экспорт" (Цветная, Акцентная)
                             Button(
                                 onClick = {
                                     if (uiState.pallets.any { it.items.isNotEmpty() }) showExportOptions = true
@@ -267,7 +278,7 @@ fun PalletDistributionScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // 4. СЕТКА ПАЛЕТ
+                        // 4. СЕТКА ЯЧЕЕК
                         LazyVerticalGrid(
                             state = gridState,
                             columns = GridCells.Adaptive(minSize = 165.dp),
@@ -275,7 +286,7 @@ fun PalletDistributionScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.height(500.dp)
                         ) {
-                            item { NewPalletTile(onClick = { viewModel.createNewPallet() }) }
+                            item { NewPalletTile(onClick = { showCreateCellDialog = true }) }
 
                             items(
                                 items = uiState.pallets.sortedByDescending { it.palletNumber },
@@ -300,7 +311,7 @@ fun PalletDistributionScreen(
                                             scope.launch { bottomSheetState.show() }
                                         },
                                         onDeleteClick = { palletToDelete = pallet },
-                                        onEditManufacturerClick = { palletToEditManufacturer = pallet }
+                                        onEditManufacturerClick = { palletToEditCellType = pallet }
                                     )
 
                                     if (errorCount > 0) {
@@ -403,13 +414,13 @@ fun PalletDistributionScreen(
         )
     }
 
-    if (palletToEditManufacturer != null) {
-        ManufacturerSelectionDialog(
-            pallet = palletToEditManufacturer!!,
-            onDismiss = { palletToEditManufacturer = null },
-            onManufacturerSelected = { pallet, manufacturer ->
-                viewModel.setPalletManufacturer(pallet.id, manufacturer)
-                palletToEditManufacturer = null
+    if (palletToEditCellType != null) {
+        CellTypeSelectionDialog(
+            pallet = palletToEditCellType!!,
+            onDismiss = { palletToEditCellType = null },
+            onCellTypeSelected = { pallet, cellType ->
+                viewModel.setCellType(pallet.id, cellType)
+                palletToEditCellType = null
             }
         )
     }
@@ -421,6 +432,21 @@ fun PalletDistributionScreen(
             onSaveExcel = { showExportOptions = false; saveExcelLauncher.launch("master_pallet_export.xlsx") },
             onSharePdf = { showExportOptions = false; PalletSummaryPdfGenerator.generateAndShare(context, uiState.pallets, currentUser) },
             onSavePdf = { showExportOptions = false; savePdfLauncher.launch("Svodniy_Otchet.pdf") }
+        )
+    }
+
+    if (showCreateCellDialog) {
+        CreateCellDialog(
+            onDismiss = { showCreateCellDialog = false },
+            onCreate = { data ->
+                showCreateCellDialog = false
+                viewModel.createNewBatteryCell(
+                    cellType = data.cellType,
+                    capacity = data.capacity,
+                    displayName = data.displayName,
+                    address = data.address
+                )
+            }
         )
     }
 }
@@ -453,8 +479,8 @@ fun AnalysisResultDialog(
                     Card(colors = CardDefaults.cardColors(containerColor = StardustSecondary.copy(alpha = 0.1f)), modifier = Modifier.fillMaxWidth().clickable { onPalletClick(pallet) }) {
                         Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                             Column {
-                                Text("Палет №${pallet.palletNumber}", fontWeight = FontWeight.Bold, color = StardustTextPrimary)
-                                Text("Производитель: ${pallet.manufacturer ?: "Н/Д"}", style = MaterialTheme.typography.bodySmall, color = StardustTextSecondary)
+                                Text("Ячейка №${pallet.palletNumber}", fontWeight = FontWeight.Bold, color = StardustTextPrimary)
+                                Text("Тип: ${pallet.resolvedCellType?.displayName ?: "Н/Д"}", style = MaterialTheme.typography.bodySmall, color = StardustTextSecondary)
                             }
                             Box(modifier = Modifier.background(StardustError.copy(alpha = 0.2f), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
                                 Text("$errorCount чужих", color = StardustError, fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -468,111 +494,26 @@ fun AnalysisResultDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
-@Composable
-fun PalletDetailsSheet(
-    pallet: StoragePallet,
-    sheetState: SheetState,
-    viewModel: QrScannerViewModel,
-    userName: String,
-    errorItems: List<String> = emptyList(),
-    initialFilterErrors: Boolean = false,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
-    var isExportMenuExpanded by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    var showErrorsOnly by remember { mutableStateOf(initialFilterErrors) }
-
-    val filteredItems = remember(pallet.items, searchQuery, showErrorsOnly, errorItems) {
-        var items = pallet.items.asReversed()
-        if (showErrorsOnly) items = items.filter { it in errorItems }
-        if (searchQuery.isNotEmpty()) items = items.filter { it.contains(searchQuery, ignoreCase = true) }
-        items
-    }
-
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = StardustModalBg, shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)) {
-        Scaffold(containerColor = Color.Transparent, snackbarHost = { SnackbarHost(snackbarHostState) }, bottomBar = { Spacer(modifier = Modifier.height(32.dp)) }) { innerPadding ->
-            Column(Modifier.padding(innerPadding).verticalScroll(rememberScrollState())) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Палет №${pallet.palletNumber}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = StardustTextPrimary)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            pallet.manufacturer?.let {
-                                Text("Производитель: $it", style = MaterialTheme.typography.bodyMedium, color = StardustTextSecondary)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Box(modifier = Modifier.size(4.dp).background(StardustTextSecondary, CircleShape))
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            Text("Всего: ${pallet.items.size} шт.", style = MaterialTheme.typography.bodyMedium, color = StardustPrimary, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Box {
-                        IconButton(onClick = { isExportMenuExpanded = true }, modifier = Modifier.background(StardustGlassBg, CircleShape)) { Icon(Icons.Default.Share, "Экспорт", tint = StardustPrimary) }
-                        DropdownMenu(expanded = isExportMenuExpanded, onDismissRequest = { isExportMenuExpanded = false }, modifier = Modifier.background(StardustGlassBg)) {
-                            DropdownMenuItem(text = { Text("Excel", color = StardustTextPrimary) }, leadingIcon = { Icon(Icons.Default.TableChart, null, tint = StardustSecondary) }, onClick = { isExportMenuExpanded = false; exportPalletToExcel(context, pallet) })
-                            DropdownMenuItem(text = { Text("PDF", color = StardustTextPrimary) }, leadingIcon = { Icon(Icons.Default.Description, null, tint = StardustPrimary) }, onClick = { isExportMenuExpanded = false; PalletSummaryPdfGenerator.generateAndShare(context, listOf(pallet), userName) })
-                        }
-                    }
-                }
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    if (errorItems.isNotEmpty()) {
-                        FilterChip(selected = showErrorsOnly, onClick = { showErrorsOnly = !showErrorsOnly }, label = { Text("Только ошибки (${errorItems.size})") }, leadingIcon = { if (showErrorsOnly) Icon(Icons.Default.FactCheck, null, modifier = Modifier.size(16.dp)) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StardustError.copy(alpha = 0.2f), selectedLabelColor = StardustError, labelColor = StardustTextSecondary))
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                    OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, modifier = Modifier.fillMaxWidth(), placeholder = { Text("Поиск по ID...", color = StardustTextSecondary.copy(alpha = 0.5f)) }, leadingIcon = { Icon(Icons.Default.Search, null, tint = StardustTextSecondary) }, trailingIcon = if (searchQuery.isNotEmpty()) { { IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, null, tint = StardustTextSecondary) } } } else null, singleLine = true, shape = RoundedCornerShape(12.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustSecondary.copy(alpha = 0.3f), cursorColor = StardustPrimary, focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary))
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                if (filteredItems.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) { Text(if (showErrorsOnly) "Ошибок нет" else "Ничего не найдено", color = StardustTextSecondary) }
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
-                        itemsIndexed(filteredItems) { index, batteryId ->
-                            val displayIndex = if (searchQuery.isEmpty() && !showErrorsOnly) pallet.items.size - index else index + 1
-                            val backgroundColor = if (index % 2 == 0) Color.Transparent else StardustTextSecondary.copy(alpha = 0.05f)
-                            val isErrorItem = batteryId in errorItems
-                            val textColor = if (isErrorItem) StardustError else StardustTextPrimary
-                            val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = {
-                                if (it == SwipeToDismissBoxValue.EndToStart) { viewModel.removeItemFromPallet(pallet.id, batteryId); scope.launch { val res = snackbarHostState.showSnackbar("АКБ удален", "ВЕРНУТЬ"); if (res == SnackbarResult.ActionPerformed) viewModel.distributeSpecificItemToPallet(pallet, batteryId) }; true } else false
-                            })
-                            SwipeToDismissBox(state = dismissState, backgroundContent = {
-                                val color by animateColorAsState(if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) StardustError else Color.Transparent)
-                                Box(modifier = Modifier.fillMaxSize().background(color).padding(horizontal = 24.dp), contentAlignment = Alignment.CenterEnd) { Icon(Icons.Default.Delete, "Удалить", tint = Color.White) }
-                            }, content = {
-                                Row(modifier = Modifier.fillMaxWidth().background(StardustModalBg).background(backgroundColor).combinedClickable(onClick = {}, onLongClick = { clipboardManager.setText(AnnotatedString(batteryId)); Toast.makeText(context, "ID скопирован", Toast.LENGTH_SHORT).show() }).padding(horizontal = 24.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("#$displayIndex", color = StardustTextSecondary, fontSize = 12.sp, modifier = Modifier.width(40.dp))
-                                    Column(modifier = Modifier.weight(1f)) { Text(batteryId, color = textColor, fontSize = 16.sp, fontWeight = if(isErrorItem) FontWeight.Bold else FontWeight.Medium); if (isErrorItem) Text("Чужой АКБ", color = StardustError, fontSize = 10.sp) }
-                                    if (isErrorItem) Icon(Icons.Default.Warning, null, tint = StardustError, modifier = Modifier.size(20.dp).padding(end = 8.dp))
-                                    IconButton(onClick = { viewModel.removeItemFromPallet(pallet.id, batteryId); scope.launch { val res = snackbarHostState.showSnackbar("АКБ удален", "ВЕРНУТЬ"); if (res == SnackbarResult.ActionPerformed) viewModel.distributeSpecificItemToPallet(pallet, batteryId) } }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.Close, null, tint = StardustError.copy(alpha = 0.7f)) }
-                                }
-                                HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f), thickness = 0.5.dp)
-                            })
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 fun exportPalletToExcel(context: Context, pallet: StoragePallet) {
     try {
         val workbook = XSSFWorkbook()
-        val sheet = workbook.createSheet("Палет №${pallet.palletNumber}")
+        val sheet = workbook.createSheet("Ячейка №${pallet.palletNumber}")
         var rowIndex = 0
-        pallet.manufacturer?.let { val manufacturerRow = sheet.createRow(rowIndex++); manufacturerRow.createCell(0).setCellValue("Производитель: $it"); rowIndex++ }
+        pallet.resolvedCellType?.let { type ->
+            val typeRow = sheet.createRow(rowIndex++)
+            typeRow.createCell(0).setCellValue("Тип: ${type.displayName}")
+            rowIndex++
+        }
         val headerRow = sheet.createRow(rowIndex++); headerRow.createCell(0).setCellValue("ID Аккумулятора")
         pallet.items.forEachIndexed { index, batteryId -> val row = sheet.createRow(rowIndex + index); row.createCell(0).setCellValue(batteryId) }
-        sheet.autoSizeColumn(0)
-        val fileName = "pallet_${pallet.palletNumber}_export.xlsx"
+        sheet.setColumnWidth(0, 20 * 256)
+
+        val fileName = "cell_${pallet.palletNumber}_export.xlsx"
         val file = File(context.cacheDir, fileName)
         FileOutputStream(file).use { workbook.write(it) }
         workbook.close()
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
         val shareIntent = Intent(Intent.ACTION_SEND).apply { type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-        context.startActivity(Intent.createChooser(shareIntent, "Экспорт палета"))
+        context.startActivity(Intent.createChooser(shareIntent, "Экспорт ячейки"))
     } catch (e: Exception) { Toast.makeText(context, "Ошибка экспорта: ${e.message}", Toast.LENGTH_LONG).show(); e.printStackTrace() }
 }

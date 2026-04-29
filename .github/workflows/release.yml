@@ -18,22 +18,25 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/keystore.jks
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build with Gradle
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
-      - name: Create Advanced release_notes.json
+      - name: Create release_notes.json
         run: |
-          # Читаем versionCode и versionName из build.gradle.kts
           VERSION_CODE=$(grep -o 'versionCode = [0-9]*' app/build.gradle.kts | awk '{print $3}')
           VERSION_NAME=$(grep -o 'versionName = "[^"]*"' app/build.gradle.kts | sed 's/versionName = "//;s/"//')
 
-          # Формируем URL для APK
           APK_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-release.apk"
 
-          # Формируем URLы для картинок (если они есть)
           IMAGE_URLS=""
           if ls release-assets/image*.png 1> /dev/null 2>&1; then
             for img in release-assets/image*.png; do
@@ -47,11 +50,9 @@ jobs:
             done
           fi
 
-          # Читаем кастомные поля из release_notes.json
           APK_SIZE=$(jq -r '.apkSize' release-assets/release_notes.json)
           RELEASE_ITEMS=$(jq -c '.releaseItems' release-assets/release_notes.json)
 
-          # Собираем финальный JSON
           echo "{" > app/build/outputs/apk/release/update.json
           echo "  \"latestVersionCode\": $VERSION_CODE," >> app/build/outputs/apk/release/update.json
           echo "  \"latestVersionName\": \"$VERSION_NAME\"," >> app/build/outputs/apk/release/update.json
@@ -65,7 +66,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           token: ${{ secrets.GH_TOKEN }}
-          # Теперь загружаем APK, JSON и все картинки
           files: |
             app/build/outputs/apk/release/app-release.apk
             app/build/outputs/apk/release/update.json

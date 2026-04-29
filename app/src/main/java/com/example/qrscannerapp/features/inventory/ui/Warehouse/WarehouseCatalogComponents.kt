@@ -1,6 +1,3 @@
-// Полное содержимое для WarehouseCatalogComponents.kt
-// ИСПРАВЛЕНИЕ: Добавлен импорт UserRole и логика прав доступа для Кладовщика
-
 package com.example.qrscannerapp.features.inventory.ui.Warehouse.components
 
 import androidx.compose.animation.*
@@ -12,6 +9,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -26,13 +24,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AddShoppingCart
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.ShoppingCart
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,11 +54,15 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -63,8 +70,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.qrscannerapp.*
-// ИМПОРТ НАШЕГО ENUM
 import com.example.qrscannerapp.UserRole
+import com.example.qrscannerapp.features.inventory.data.OrderItem
 import com.example.qrscannerapp.features.inventory.data.WarehouseItem
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseViewModel
 import kotlinx.coroutines.delay
@@ -79,7 +86,7 @@ fun constructImageUrl(path: String?): String? {
     return GITHUB_IMAGE_BASE_URL + imageName
 }
 
-// --- ВЕРНУЛ ЭТОТ КЛАСС, ТАК КАК ОН ИСПОЛЬЗУЕТСЯ В AppNavigation ---
+// Data classes for Navigation
 data class NewItemData(
     val fullName: String,
     val shortName: String,
@@ -132,7 +139,6 @@ fun UploadConfirmationDialog(
     )
 }
 
-// --- НОВОЕ: Диалог подтверждения удаления ---
 @Composable
 fun DeleteItemDialog(
     item: WarehouseItem,
@@ -166,7 +172,6 @@ fun DeleteItemDialog(
     )
 }
 
-// --- НОВОЕ: Диалог редактирования товара ---
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditItemDialog(
@@ -473,24 +478,29 @@ fun CategoryChip(
 @Composable
 fun WarehouseCatalogScreen(
     items: List<WarehouseItem>,
+    // --- Параметры для корзины ---
+    cart: List<OrderItem>,
+    onAddToCart: (WarehouseItem, Int) -> Unit,
+    onRemoveFromCart: (String) -> Unit,
+    onSubmitOrder: () -> Unit,
+    // ----------------------------
     onNavigateToAddItem: () -> Unit,
-    onTakeItem: (WarehouseItem, Int) -> Unit,
+    onTakeItem: (WarehouseItem, Int) -> Unit, // Взять сразу (для всех теперь)
     isAdmin: Boolean,
-    userRole: UserRole = UserRole.USER, // ДОБАВЛЕНО: Роль пользователя (по дефолту USER для совместимости)
+    userRole: UserRole = UserRole.USER,
     onNavigateBack: () -> Unit
 ) {
-    // --- ПРАВА ДОСТУПА ---
-    // Управлять складом могут Админ и Кладовщик
     val canManage = isAdmin || userRole == UserRole.INVENTORY_MANAGER
 
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showUploadDialog by remember { mutableStateOf(false) }
 
-    // Состояния для диалогов
     var itemToTake by remember { mutableStateOf<WarehouseItem?>(null) }
     var itemToEdit by remember { mutableStateOf<WarehouseItem?>(null) }
     var itemToDelete by remember { mutableStateOf<WarehouseItem?>(null) }
+
+    var showCartSheet by remember { mutableStateOf(false) }
 
     var selectedCategory by remember { mutableStateOf("Все") }
 
@@ -534,13 +544,36 @@ fun WarehouseCatalogScreen(
                 },
                 onNavigateBack = onNavigateBack,
                 onUploadClicked = { showUploadDialog = true },
-                isAdmin = canManage // Передаем права управления
+                isAdmin = canManage
             )
         },
         floatingActionButton = {
-            if (canManage) { // Кнопка добавления доступна и Кладовщику
-                FloatingActionButton(onClick = onNavigateToAddItem) {
-                    Icon(Icons.Default.Add, "Добавить новую запчасть")
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                // Корзина (дополнительная функция для НЕ кладовщиков)
+                if (!canManage) {
+                    AnimatedVisibility(
+                        visible = cart.isNotEmpty(),
+                        enter = scaleIn() + fadeIn(),
+                        exit = scaleOut() + fadeOut()
+                    ) {
+                        ExtendedFloatingActionButton(
+                            onClick = { showCartSheet = true },
+                            containerColor = StardustPrimary,
+                            contentColor = Color.Black,
+                            icon = { Icon(Icons.Rounded.ShoppingCart, null) },
+                            text = { Text("Корзина (${cart.sumOf { it.quantity }})") }
+                        )
+                    }
+                }
+
+                // Кнопка добавления нового товара (только для админа)
+                if (canManage) {
+                    FloatingActionButton(onClick = onNavigateToAddItem) {
+                        Icon(Icons.Default.Add, "Добавить новую запчасть")
+                    }
                 }
             }
         }
@@ -586,7 +619,7 @@ fun WarehouseCatalogScreen(
 
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = padding.calculateBottomPadding() + 16.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = padding.calculateBottomPadding() + 80.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -594,22 +627,30 @@ fun WarehouseCatalogScreen(
                     CatalogGridItem(
                         item = item,
                         onClick = { itemToTake = item },
-                        onQuickAdd = { onTakeItem(item, 1) }
+                        onQuickAdd = {
+                            // ИЗМЕНЕНИЕ: Быстрое добавление = Взять сразу (для ВСЕХ)
+                            onTakeItem(item, 1)
+                        }
                     )
                 }
             }
         }
     }
 
-    // --- ЛОГИКА ОТОБРАЖЕНИЯ ДИАЛОГОВ ---
-
+    // ДИАЛОГ ВЫБОРА КОЛИЧЕСТВА
     if (itemToTake != null) {
         QuantityPickerDialog(
             item = itemToTake!!,
-            isAdmin = canManage, // Передаем права в диалог, чтобы отобразить кнопки Edit/Delete
+            isAdmin = canManage,
             onDismiss = { itemToTake = null },
-            onConfirm = { item, quantity ->
+            // В onConfirm передаем действие "Взять"
+            onTake = { item, quantity ->
                 onTakeItem(item, quantity)
+                itemToTake = null
+            },
+            // В onAddToCart передаем действие "В заказ"
+            onAddToCart = { item, quantity ->
+                onAddToCart(item, quantity)
                 itemToTake = null
             },
             onEdit = {
@@ -643,6 +684,114 @@ fun WarehouseCatalogScreen(
             },
             onDismiss = { itemToDelete = null }
         )
+    }
+
+    // BOTTOM SHEET КОРЗИНЫ
+    if (showCartSheet) {
+        CartBottomSheet(
+            cartItems = cart,
+            onDismiss = { showCartSheet = false },
+            onRemoveItem = onRemoveFromCart,
+            onSubmitOrder = {
+                onSubmitOrder()
+                showCartSheet = false
+            }
+        )
+    }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CartBottomSheet(
+    cartItems: List<OrderItem>,
+    onDismiss: () -> Unit,
+    onRemoveItem: (String) -> Unit,
+    onSubmitOrder: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = StardustModalBg,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = StardustTextSecondary) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Text(
+                "Ваш заказ",
+                style = MaterialTheme.typography.headlineSmall,
+                color = StardustTextPrimary,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (cartItems.isEmpty()) {
+                Text("Корзина пуста", color = StardustTextSecondary)
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    items(cartItems) { item ->
+                        CartItemRow(item, onRemove = { onRemoveItem(item.itemId) })
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = onSubmitOrder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary),
+                enabled = cartItems.isNotEmpty()
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.Black)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Отправить заказ", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+fun CartItemRow(item: OrderItem, onRemove: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(StardustItemBg, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (item.itemImageUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current).data(item.itemImageUrl).crossfade(true).build(),
+                contentDescription = null,
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier.size(48.dp).background(StardustTextSecondary.copy(alpha = 0.2f), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(item.itemName.take(1), color = StardustTextSecondary)
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(item.itemName, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
+            Text("${item.quantity} ${item.unit}", color = StardustPrimary)
+        }
+        IconButton(onClick = onRemove) {
+            Icon(Icons.Outlined.Delete, "Удалить", tint = StardustError)
+        }
     }
 }
 
@@ -892,6 +1041,10 @@ fun CatalogGridItem(
     }
 }
 
+// ==========================================
+// УЛУЧШЕННЫЕ КОМПОНЕНТЫ UI (STOCK & DIALOG)
+// ==========================================
+
 @Composable
 fun StockLevelIndicator(
     currentStock: Int,
@@ -904,20 +1057,22 @@ fun StockLevelIndicator(
         0f
     }
 
+    val targetColor = when {
+        stockPercentage > 0.5f -> StardustSuccess
+        stockPercentage > 0.2f -> StardustWarning
+        else -> StardustError
+    }
+
     val barColor by animateColorAsState(
-        targetValue = when {
-            stockPercentage > 0.5f -> StardustSuccess
-            stockPercentage > 0.15f -> StardustWarning
-            else -> StardustError
-        },
+        targetValue = targetColor,
         animationSpec = tween(500),
         label = "stockColor"
     )
 
     Box(
         modifier = modifier
-            .fillMaxWidth(0.6f)
-            .height(8.dp)
+            .fillMaxWidth(0.8f)
+            .height(10.dp)
             .clip(CircleShape)
             .background(StardustItemBg)
     ) {
@@ -931,13 +1086,13 @@ fun StockLevelIndicator(
     }
 }
 
-// --- ОБНОВЛЕННЫЙ КОМПОНЕНТ: С кнопками редактирования и удаления ---
 @Composable
 fun QuantityPickerDialog(
     item: WarehouseItem,
-    isAdmin: Boolean = false, // Этот флаг теперь означает "Есть права управления" (Админ или Кладовщик)
+    isAdmin: Boolean = false,
     onDismiss: () -> Unit,
-    onConfirm: (WarehouseItem, Int) -> Unit,
+    onTake: (WarehouseItem, Int) -> Unit, // Callback для "Взять сразу"
+    onAddToCart: (WarehouseItem, Int) -> Unit, // Callback для "В заказ"
     onEdit: () -> Unit = {},
     onDelete: () -> Unit = {}
 ) {
@@ -946,23 +1101,22 @@ fun QuantityPickerDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
-            modifier = Modifier.fillMaxWidth(0.9f),
-            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth(0.95f),
+            shape = RoundedCornerShape(28.dp),
             colors = CardDefaults.cardColors(containerColor = StardustModalBg)
         ) {
             Box {
-                // Кнопки управления (редактирование/удаление) показываем, если есть права
                 if (isAdmin) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(8.dp)
+                            .padding(12.dp)
                     ) {
                         IconButton(onClick = onEdit) {
-                            Icon(Icons.Outlined.Edit, contentDescription = "Редактировать", tint = StardustPrimary)
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = StardustTextSecondary)
                         }
                         IconButton(onClick = onDelete) {
-                            Icon(Icons.Outlined.Delete, contentDescription = "Удалить", tint = StardustError)
+                            Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = StardustError.copy(alpha = 0.7f))
                         }
                     }
                 }
@@ -974,26 +1128,31 @@ fun QuantityPickerDialog(
                     val finalImageUrl = constructImageUrl(item.imageUrl)
 
                     if (finalImageUrl != null) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current).data(finalImageUrl).crossfade(true).build(),
-                            contentDescription = item.fullName,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(120.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, StardustTextSecondary.copy(alpha = 0.2f)),
+                            color = Color.White,
+                            modifier = Modifier.size(140.dp)
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(finalImageUrl).crossfade(true).build(),
+                                contentDescription = item.fullName,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
                     } else {
                         val seedColor = generateColorFromName(item.fullName)
                         Box(
                             modifier = Modifier
-                                .size(120.dp)
+                                .size(140.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(seedColor),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = item.shortName.take(1).uppercase(),
-                                fontSize = 40.sp,
+                                fontSize = 50.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White.copy(alpha = 0.4f)
                             )
@@ -1001,34 +1160,62 @@ fun QuantityPickerDialog(
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
+
                     Text(
-                        text = item.fullName,
+                        text = item.shortName,
                         style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
                         color = StardustTextPrimary,
                         textAlign = TextAlign.Center
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = item.fullName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = StardustTextSecondary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
                     if (!item.sku.isNullOrBlank()) {
-                        Text(
-                            text = "Артикул: ${item.sku}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = StardustTextSecondary,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            color = StardustTextSecondary.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "SKU: ${item.sku}",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                style = TextStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = StardustTextSecondary
+                                )
+                            )
+                        }
                     }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(Icons.Outlined.Inventory2, "В наличии", modifier = Modifier.size(16.dp), tint = StardustTextSecondary)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Icon(Icons.Outlined.Inventory2, null, modifier = Modifier.size(18.dp).padding(bottom = 2.dp), tint = StardustTextSecondary)
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "В наличии: ${item.stockCount} из ${item.totalStock} ${item.unit}",
-                            color = StardustTextSecondary,
-                            fontSize = 14.sp
+                            buildAnnotatedString {
+                                withStyle(SpanStyle(color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)) {
+                                    append("${item.stockCount}")
+                                }
+                                withStyle(SpanStyle(color = StardustTextSecondary, fontSize = 14.sp)) {
+                                    append(" из ${item.totalStock} ${item.unit}")
+                                }
+                            }
                         )
                     }
+
                     Spacer(modifier = Modifier.height(8.dp))
                     StockLevelIndicator(currentStock = item.stockCount, maxStock = item.totalStock)
 
@@ -1043,42 +1230,103 @@ fun QuantityPickerDialog(
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = StardustPrimary,
-                                unfocusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = StardustTextSecondary.copy(alpha = 0.5f),
                                 focusedContainerColor = StardustItemBg,
-                                unfocusedContainerColor = StardustItemBg
-                            )
+                                unfocusedContainerColor = StardustItemBg,
+                                focusedTextColor = StardustTextPrimary,
+                                unfocusedTextColor = StardustTextPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         )
                     } else {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(24.dp)
+                            horizontalArrangement = Arrangement.spacedBy(20.dp)
                         ) {
-                            OutlinedIconButton(onClick = { if (stepperQuantity > 1) stepperQuantity-- }, modifier = Modifier.size(56.dp)) {
-                                Icon(Icons.Default.Remove, "Уменьшить")
+                            Surface(
+                                onClick = { if (stepperQuantity > 1) stepperQuantity-- },
+                                shape = CircleShape,
+                                color = StardustItemBg,
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.Remove, "Меньше", tint = StardustTextPrimary)
+                                }
                             }
-                            Text(stepperQuantity.toString(), fontSize = 48.sp, fontWeight = FontWeight.Bold, color = StardustTextPrimary)
-                            OutlinedIconButton(onClick = { stepperQuantity++ }, modifier = Modifier.size(56.dp)) {
-                                Icon(Icons.Default.Add, "Увеличить")
+
+                            Text(
+                                text = stepperQuantity.toString(),
+                                fontSize = 42.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = StardustTextPrimary,
+                                modifier = Modifier.widthIn(min = 60.dp),
+                                textAlign = TextAlign.Center
+                            )
+
+                            Surface(
+                                onClick = { stepperQuantity++ },
+                                shape = CircleShape,
+                                color = StardustItemBg,
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.Add, "Больше", tint = StardustTextPrimary)
+                                }
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(32.dp))
 
-                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
+                    // --- КНОПКИ ДЕЙСТВИЯ ---
+
+                    // 1. Кнопка "Взять" (Доступна ВСЕМ)
+                    Button(
+                        onClick = {
+                            val finalQuantity = if (item.unit == "грамм") textQuantity.toIntOrNull() ?: 0 else stepperQuantity
+                            if (finalQuantity > 0) onTake(item, finalQuantity)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = StardustPrimary,
+                            contentColor = Color.Black
+                        ),
+                        enabled = (item.unit == "грамм" && textQuantity.isNotBlank()) || (item.unit != "грамм")
+                    ) {
+                        Text(
+                            text = "Взять ${if(item.unit == "грамм") textQuantity else stepperQuantity} ${item.unit}",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // 2. Кнопка "В заказ" (Дополнительно, только для НЕ кладовщиков)
+                    if (!isAdmin) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedButton(
                             onClick = {
                                 val finalQuantity = if (item.unit == "грамм") textQuantity.toIntOrNull() ?: 0 else stepperQuantity
-                                if (finalQuantity > 0) onConfirm(item, finalQuantity)
+                                if (finalQuantity > 0) onAddToCart(item, finalQuantity)
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(50.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            enabled = (item.unit == "грамм" && textQuantity.isNotBlank()) || (item.unit != "грамм")
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = StardustPrimary
+                            )
                         ) {
-                            val quantityText = if (item.unit == "грамм") textQuantity else stepperQuantity.toString()
-                            Text("Взять ${quantityText} ${item.unit}", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Outlined.AddShoppingCart, null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Добавить в заказ",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }
@@ -1089,7 +1337,6 @@ fun QuantityPickerDialog(
 
 fun generateColorFromName(name: String): Color {
     val hash = name.hashCode()
-    // ИСПРАВЛЕНО: было val r =, стало val red =
     val red = (hash and 0xFF0000 shr 16) / 255f
     val green = (hash and 0x00FF00 shr 8) / 255f
     val blue = (hash and 0x0000FF) / 255f

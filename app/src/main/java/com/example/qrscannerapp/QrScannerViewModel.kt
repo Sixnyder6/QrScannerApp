@@ -1,5 +1,3 @@
-// File: features/scanner/ui/QrScannerViewModel.kt
-
 package com.example.qrscannerapp
 
 import android.app.Application
@@ -16,19 +14,16 @@ import com.example.qrscannerapp.core.model.ActiveTab
 import com.example.qrscannerapp.core.model.ScanEvent
 import com.example.qrscannerapp.core.model.SessionType
 import com.example.qrscannerapp.core.model.UiEffect
-
-// --- ИМПОРТЫ ИЗ INVENTORY ---
 import com.example.qrscannerapp.features.inventory.data.repository.StorageRepository
 import com.example.qrscannerapp.features.inventory.domain.model.*
 import com.example.qrscannerapp.features.inventory.ui.*
-// -----------------------------
-
 import com.example.qrscannerapp.features.scanner.data.local.entity.ScanSessionEntity
 import com.example.qrscannerapp.features.scanner.data.repository.ScanSessionRepository
 import com.example.qrscannerapp.features.scanner.domain.model.ScanItem
 import com.example.qrscannerapp.features.scanner.domain.model.ScanSession
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ktx.firestore
@@ -51,22 +46,20 @@ data class ActivityLogMetrics(
     val durationSeconds: Long
 )
 
-// --- НОВЫЙ КЛАСС ДЛЯ ОТЧЕТА ---
 data class DistributionReport(
     val successCount: Int,
     val errorCount: Int,
     val duplicateCount: Int,
-    val excludedItems: List<ExcludedItem>, // Список исключенных с номерами
+    val excludedItems: List<ExcludedItem>,
     val targetPalletNumber: Int,
     val targetManufacturer: String?
 )
 
 data class ExcludedItem(
-    val indexInList: Int, // Номер по порядку (1, 2, 3...)
+    val indexInList: Int,
     val code: String,
-    val reason: String // "Чужой производитель"
+    val reason: String
 )
-// ------------------------------
 
 data class StorageUiState(
     val isLoading: Boolean = true,
@@ -86,6 +79,18 @@ data class BatterySearchResult(
     val timestamp: Long? = null
 )
 
+data class BatchConfig(
+    val isActive: Boolean = false,
+    val targetCount: Int = 50,
+    val sessionType: ActiveTab = ActiveTab.BATTERIES,
+    val batteryType: String = "FUJIAN"
+)
+
+sealed interface BatchEvent {
+    object Completed : BatchEvent
+    object NearlyDone : BatchEvent
+}
+
 @HiltViewModel
 class QrScannerViewModel @Inject constructor(
     private val application: Application,
@@ -100,6 +105,8 @@ class QrScannerViewModel @Inject constructor(
     val scooterCodes: List<ScanItem> = _scooterCodes
     private val _batteryCodes = mutableStateListOf<ScanItem>()
     val batteryCodes: List<ScanItem> = _batteryCodes
+    private val _newBatteryCodes = mutableStateListOf<ScanItem>()
+    val newBatteryCodes: List<ScanItem> = _newBatteryCodes
 
     private val _scanSessions = MutableStateFlow<List<ScanSession>>(emptyList())
     val scanSessions: StateFlow<List<ScanSession>> = _scanSessions.asStateFlow()
@@ -119,32 +126,36 @@ class QrScannerViewModel @Inject constructor(
     private var _sessionStartTimeMillis: Long = 0L
     private var _manualEntryCount: Int = 0
 
+    private val _duplicateCount = MutableStateFlow(0)
+    val duplicateCount: StateFlow<Int> = _duplicateCount.asStateFlow()
+
+    private val _scanRate = MutableStateFlow(0)
+    val scanRate: StateFlow<Int> = _scanRate.asStateFlow()
+    private val _lastScanTimestamps = ArrayDeque<Long>()
+
+    private val _batchConfig = MutableStateFlow(BatchConfig())
+    val batchConfig: StateFlow<BatchConfig> = _batchConfig.asStateFlow()
+
+    private val _batchEventChannel = Channel<BatchEvent>(Channel.BUFFERED)
+    val batchEvent = _batchEventChannel.receiveAsFlow()
+
     private val _palletDistributionState = MutableStateFlow(PalletDistributionUiState())
     val palletDistributionState = _palletDistributionState.asStateFlow()
 
-    // --- StateFlow для Диалога Отчета ---
     private val _distributionReport = MutableStateFlow<DistributionReport?>(null)
     val distributionReport = _distributionReport.asStateFlow()
-    // ------------------------------------
 
     private val _todayAddedCount = MutableStateFlow(0)
     val todayAddedCount = _todayAddedCount.asStateFlow()
 
-    // --- АНАЛИЗ ПАЛЕТ (QUALITY CONTROL) ---
     private val _palletAnalysisResults = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     val palletAnalysisResults = _palletAnalysisResults.asStateFlow()
 
     private val _showAnalysisReport = MutableStateFlow(false)
     val showAnalysisReport = _showAnalysisReport.asStateFlow()
 
-    fun dismissAnalysisReport() {
-        _showAnalysisReport.value = false
-    }
-
-    fun dismissDistributionReport() {
-        _distributionReport.value = null
-    }
-    // --------------------------------------
+    fun dismissAnalysisReport() { _showAnalysisReport.value = false }
+    fun dismissDistributionReport() { _distributionReport.value = null }
 
     private val _storageState = MutableStateFlow(StorageUiState())
     val storageState = _storageState.asStateFlow()
@@ -164,42 +175,91 @@ class QrScannerViewModel @Inject constructor(
     private val _isSearching = MutableStateFlow(false)
     val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
 
-    // ==========================================
-    // V-- НОВЫЕ ПЕРЕМЕННЫЕ ДЛЯ ПОИСКА САМОКАТОВ --V
     private val _isSearchingForScooter = MutableStateFlow(false)
     val isSearchingForScooter: StateFlow<Boolean> = _isSearchingForScooter.asStateFlow()
 
     private val _scooterSearchResult = MutableStateFlow<Pair<String, String>?>(null)
     val scooterSearchResult: StateFlow<Pair<String, String>?> = _scooterSearchResult.asStateFlow()
-    // ==========================================
 
     private val _highlightedPalletId = MutableStateFlow<String?>(null)
     val highlightedPalletId = _highlightedPalletId.asStateFlow()
 
-    private var lastScannedValue: String = ""
-    private var lastProcessedTime: Long = 0L
-    private val DEBOUNCE_DELAY = 1500L
+    @Volatile private var lastScannedValue: String = ""
+    @Volatile private var lastProcessedTime: Long = 0L
+    private val SCAN_DEBOUNCE_DELAY = 1500L
+    private val SEARCH_DEBOUNCE_DELAY = 500L
 
     init {
         listenForSharedHistory()
         listenForLocalInventoryChanges()
     }
 
-    // --- ЛОГИКА АНАЛИЗА ПАЛЕТ ---
+    // ============================================================================================
+    // РЕЖИМ ПАРТИИ
+    // ============================================================================================
+
+    fun setBatchConfig(config: BatchConfig) {
+        _batchConfig.value = config
+        if (config.isActive) {
+            _activeTab.value = config.sessionType
+        }
+    }
+
+    fun clearBatchMode() {
+        _batchConfig.value = BatchConfig(isActive = false)
+    }
+
+    fun getBatchProgress(): Pair<Int, Int> {
+        val config = _batchConfig.value
+        val current = when (config.sessionType) {
+            ActiveTab.SCOOTERS -> _scooterCodes.size
+            ActiveTab.BATTERIES -> _batteryCodes.size
+            ActiveTab.NEW_BATTERIES -> _newBatteryCodes.size
+            else -> 0
+        }
+        return current to config.targetCount
+    }
+
+    private suspend fun checkBatchProgress() {
+        val config = _batchConfig.value
+        if (!config.isActive) return
+        val (current, target) = getBatchProgress()
+        when {
+            current >= target -> _batchEventChannel.send(BatchEvent.Completed)
+            current == target - 5 -> _batchEventChannel.send(BatchEvent.NearlyDone)
+        }
+    }
+
+    // ============================================================================================
+    // СКОРОСТЬ СКАНИРОВАНИЯ
+    // ============================================================================================
+
+    private fun updateScanRate() {
+        val now = System.currentTimeMillis()
+        _lastScanTimestamps.addLast(now)
+        while (_lastScanTimestamps.size > 30) _lastScanTimestamps.removeFirst()
+        val windowStart = now - 60_000L
+        val scansInWindow = _lastScanTimestamps.count { it >= windowStart }
+        _scanRate.value = scansInWindow
+    }
+
+    // ============================================================================================
+    // АНАЛИЗ ЯЧЕЕК (БЫВШИЙ АНАЛИЗ ПАЛЕТ)
+    // ============================================================================================
+
     fun runPalletAnalysis() {
         viewModelScope.launch {
             _palletDistributionState.update { it.copy(isLoading = true) }
             delay(500)
-
             val currentPallets = _palletDistributionState.value.pallets
             val results = mutableMapOf<String, List<String>>()
             var totalErrors = 0
-
             currentPallets.forEach { pallet ->
-                val manufacturer = pallet.manufacturer?.uppercase()
-                if (manufacturer != null) {
+                // Используем resolvedCellType — сначала cellType, fallback на manufacturer
+                val cellTypeStr = pallet.cellType ?: pallet.manufacturer?.uppercase()
+                if (cellTypeStr != null) {
                     val errorItems = pallet.items.filter { itemCode ->
-                        isBatteryAlienToManufacturer(itemCode, manufacturer)
+                        isBatteryAlienToCell(itemCode, cellTypeStr)
                     }
                     if (errorItems.isNotEmpty()) {
                         results[pallet.id] = errorItems
@@ -207,41 +267,40 @@ class QrScannerViewModel @Inject constructor(
                     }
                 }
             }
-
             _palletAnalysisResults.value = results
-
             if (totalErrors > 0) {
                 _showAnalysisReport.value = true
                 _palletDistributionState.update { it.copy(isLoading = false) }
             } else {
                 _palletDistributionState.update {
-                    it.copy(
-                        isLoading = false,
-                        distributionResult = "Анализ завершен. Ошибок не найдено."
-                    )
+                    it.copy(isLoading = false, distributionResult = "Анализ завершен. Ошибок не найдено.")
                 }
             }
         }
     }
 
-    private fun isBatteryAlienToManufacturer(code: String, manufacturer: String): Boolean {
-        val cleanCode = code.uppercase().trim()
-        val cleanManuf = manufacturer.uppercase().trim()
-        return when (cleanManuf) {
-            "FUJIAN" -> cleanCode.startsWith("4BZ")
-            "BYD" -> cleanCode.startsWith("4BB")
-            else -> false
-        }
+    /**
+     * Проверяет, является ли АКБ "чужим" для данного типа ячейки.
+     * Использует CellType enum для надёжного маппинга.
+     */
+    private fun isBatteryAlienToCell(code: String, cellTypeStr: String): Boolean {
+        val cellType = CellType.entries.find { it.name.equals(cellTypeStr, ignoreCase = true) }
+            ?: CellType.fromLegacyManufacturer(cellTypeStr)
+            ?: return false // Тип не распознан — не считаем чужим
+
+        val batteryType = CellType.fromBatteryCode(code) ?: return true // Код не распознан — чужой
+        return batteryType != cellType
     }
-    // ----------------------------
+
+    // ============================================================================================
+    // ПОИСК
+    // ============================================================================================
 
     fun setHighlightedPallet(palletId: String) {
         _highlightedPalletId.value = palletId
         viewModelScope.launch {
             delay(5000)
-            if (_highlightedPalletId.value == palletId) {
-                _highlightedPalletId.value = null
-            }
+            if (_highlightedPalletId.value == palletId) _highlightedPalletId.value = null
         }
     }
 
@@ -249,52 +308,34 @@ class QrScannerViewModel @Inject constructor(
         _isSearchMode.update { !it }
         if (!_isSearchMode.value) {
             _searchResult.value = null
-            // ДОБАВЛЕНО: очистка поиска самокатов
             clearScooterSearchResult()
         }
-        val modeMsg = if (_isSearchMode.value) "РЕЖИМ ПОИСКА" else "Наведите камеру на QR-код"
-        updateStatus(modeMsg)
+        updateStatus(if (_isSearchMode.value) "РЕЖИМ ПОИСКА" else "Наведите камеру на QR-код")
     }
 
-    fun clearSearchResult() {
-        _searchResult.value = null
-    }
-
-    // ДОБАВЛЕНО: Метод очистки поиска самокатов
-    fun clearScooterSearchResult() {
-        _scooterSearchResult.value = null
-    }
+    fun clearSearchResult() { _searchResult.value = null }
+    fun clearScooterSearchResult() { _scooterSearchResult.value = null }
 
     private fun searchBatteryInFirestore(code: String) {
         if (_isSearching.value) return
         _isSearching.value = true
         updateStatus("Поиск АКБ в базе...", isError = false)
-
         viewModelScope.launch {
             try {
                 val querySnapshot = firestore.collection("storage_pallets")
-                    .whereArrayContains("items", code)
-                    .get()
-                    .await()
-
+                    .whereArrayContains("items", code).get().await()
                 if (!querySnapshot.isEmpty) {
                     val doc = querySnapshot.documents.first()
                     val pallet = doc.toObject(StoragePallet::class.java)
-
                     if (pallet != null) {
-                        val manufacturer = when {
-                            code.startsWith("4BB") -> "FUJIAN"
-                            code.startsWith("4BZ") -> "BYD"
-                            else -> "Неизвестно"
-                        }
-                        val creator = "Склад"
-
+                        val detectedType = CellType.fromBatteryCode(code)
+                        val manufacturer = detectedType?.displayName ?: "Неизвестно"
                         _searchResult.value = BatterySearchResult(
                             batteryCode = code,
                             palletNumber = pallet.palletNumber,
                             palletId = pallet.id,
                             manufacturer = manufacturer,
-                            creatorName = creator,
+                            creatorName = "Склад",
                             timestamp = System.currentTimeMillis()
                         )
                         _scanEffectChannel.send(UiEffect.ScanSuccess)
@@ -312,15 +353,11 @@ class QrScannerViewModel @Inject constructor(
         }
     }
 
-    // ==========================================
-    // V-- НОВАЯ ФУНКЦИЯ ПОИСКА САМОКАТА --V
     private fun searchForScooter(code: String) {
         if (_isSearchingForScooter.value) return
         _isSearchingForScooter.value = true
         updateStatus("Поиск самоката на складе...", isError = false)
         viewModelScope.launch {
-            // Предполагается, что метод findScooterInCell есть в StorageRepository (как обсуждали ранее)
-            // Если его там нет, его нужно добавить в интерфейс репозитория
             val result = storageRepository.findScooterInCell(code)
             if (result != null) {
                 _scooterSearchResult.value = result
@@ -333,19 +370,13 @@ class QrScannerViewModel @Inject constructor(
             _isSearchingForScooter.value = false
         }
     }
-    // ==========================================
 
     private fun listenForLocalInventoryChanges() {
         storageRepository.getCellsFlow()
-            .onEach { cells ->
-                _storageState.update { it.copy(isLoading = false, cells = cells) }
-            }
+            .onEach { cells -> _storageState.update { it.copy(isLoading = false, cells = cells) } }
             .launchIn(viewModelScope)
-
         storageRepository.getPalletsFlow()
-            .onEach { pallets ->
-                _palletDistributionState.update { it.copy(isLoading = false, pallets = pallets) }
-            }
+            .onEach { pallets -> _palletDistributionState.update { it.copy(isLoading = false, pallets = pallets) } }
             .launchIn(viewModelScope)
     }
 
@@ -353,78 +384,345 @@ class QrScannerViewModel @Inject constructor(
         viewModelScope.launch {
             _storageState.update { it.copy(isLoading = true) }
             storageRepository.bulkAddScootersToCell(cellId, text)
-                .onSuccess {
-                    _storageState.update { it.copy(
-                        isLoading = false,
-                        distributionResult = "Номера добавлены. Синхронизация с сервером начнется в фоне."
-                    ) }
-                }
-                .onFailure { error ->
-                    _storageState.update { it.copy(
-                        isLoading = false,
-                        error = "Ошибка добавления: ${error.message}"
-                    ) }
-                }
+                .onSuccess { _storageState.update { it.copy(isLoading = false, distributionResult = "Номера добавлены.") } }
+                .onFailure { error -> _storageState.update { it.copy(isLoading = false, error = "Ошибка добавления: ${error.message}") } }
         }
     }
 
-    fun setPalletManufacturer(palletId: String, manufacturer: String?) {
+    // ============================================================================================
+    // УПРАВЛЕНИЕ ЯЧЕЙКАМИ (БЫВШЕЕ УПРАВЛЕНИЕ ПАЛЕТАМИ)
+    // ============================================================================================
+
+    /**
+     * Устанавливает тип ячейки. Пишет в оба поля для обратной совместимости:
+     * - cellType (новое) — имя CellType enum
+     * - manufacturer (старое) — legacy значение
+     */
+    fun setCellType(palletId: String, cellType: CellType?) {
         viewModelScope.launch {
-            storageRepository.setPalletManufacturer(palletId, manufacturer)
-                .onFailure {
-                    Log.e("ViewModel", "Failed to set manufacturer locally", it)
+            try {
+                val updates = mutableMapOf<String, Any?>()
+                if (cellType != null) {
+                    updates["cellType"] = cellType.name
+                    // Обратная совместимость: пишем и в manufacturer
+                    updates["manufacturer"] = when (cellType) {
+                        CellType.FUJIAN -> "FUJIAN"
+                        CellType.BYD -> "BYD"
+                        CellType.NINEBOT_NEW -> "NEW"
+                        CellType.NINEBOT_OLD -> "OLD"
+                    }
+                } else {
+                    updates["cellType"] = null
+                    updates["manufacturer"] = null
                 }
+                firestore.collection("storage_pallets")
+                    .document(palletId)
+                    .update(updates)
+                    .await()
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Failed to set cell type", e)
+            }
         }
     }
 
-    // --- ГЛАВНЫЙ МЕТОД СКАНИРОВАНИЯ (ИСПРАВЛЕН: ПАРСИНГ ПРИМЕНЯЕТСЯ К ПОИСКУ) ---
+    /**
+     * Обновляет ёмкость ячейки.
+     */
+    fun setCellCapacity(palletId: String, capacity: Int) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("storage_pallets")
+                    .document(palletId)
+                    .update("capacity", capacity)
+                    .await()
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Failed to set capacity", e)
+            }
+        }
+    }
+
+    /**
+     * Обновляет статус ячейки.
+     */
+    fun setCellStatus(palletId: String, status: CellStatus) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("storage_pallets")
+                    .document(palletId)
+                    .update("status", status.name)
+                    .await()
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Failed to set cell status", e)
+            }
+        }
+    }
+
+    /**
+     * Обновляет отображаемое имя ячейки.
+     */
+    fun setCellDisplayName(palletId: String, name: String?) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("storage_pallets")
+                    .document(palletId)
+                    .update("displayName", name)
+                    .await()
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Failed to set display name", e)
+            }
+        }
+    }
+
+    /**
+     * Обновляет адрес ячейки.
+     */
+    fun setCellAddress(palletId: String, address: String?) {
+        viewModelScope.launch {
+            try {
+                firestore.collection("storage_pallets")
+                    .document(palletId)
+                    .update("address", address)
+                    .await()
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Failed to set cell address", e)
+            }
+        }
+    }
+
+    // ============================================================================================
+    // ИНДИВИДУАЛЬНЫЙ ЛОГ ЯЧЕЙКИ
+    // ============================================================================================
+
+    private val _cellActivityLog = MutableStateFlow<List<PalletActivityLogEntry>>(emptyList())
+    val cellActivityLog: StateFlow<List<PalletActivityLogEntry>> = _cellActivityLog.asStateFlow()
+
+    private val _isCellLogLoading = MutableStateFlow(false)
+    val isCellLogLoading: StateFlow<Boolean> = _isCellLogLoading.asStateFlow()
+
+    private var cellLogListener: ListenerRegistration? = null
+
+    /**
+     * Загружает лог операций для конкретной ячейки (по palletId).
+     * Использует realtime listener для живого обновления.
+     */
+    fun loadCellActivityLog(palletId: String) {
+        cellLogListener?.remove()
+        _isCellLogLoading.value = true
+        _cellActivityLog.value = emptyList()
+
+        cellLogListener = firestore.collection("pallet_activity_log")
+            .whereEqualTo("palletId", palletId)
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { snapshot, e ->
+                _isCellLogLoading.value = false
+                if (e != null) {
+                    Log.e("CellLog", "Listen failed for $palletId", e)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    _cellActivityLog.value = snapshot.documents.mapNotNull {
+                        it.toObject(PalletActivityLogEntry::class.java)
+                    }
+                }
+            }
+    }
+
+    /** Останавливает слушатель лога ячейки */
+    fun stopCellActivityLog() {
+        cellLogListener?.remove()
+        cellLogListener = null
+        _cellActivityLog.value = emptyList()
+    }
+
+    // ============================================================================================
+    // РАСПОЗНАВАНИЕ ТИПА БАТАРЕИ ПО QR-КОДУ
+    // ============================================================================================
+
+    /**
+     * Распознаёт тип батареи по QR-коду
+     * Возвращает пару: (тип батареи, полный код)
+     *
+     * WIND 5.0:
+     * - NEW: 5BB + 11 цифр (5BB32501113863) — формат: 1 цифра + 2 буквы + 11 цифр
+     * - OLD: SF + 2 буквы + 11 символов (SFAEQ24A5A0175)
+     *
+     * WIND 4.0:
+     * - FUJIAN: 4BB + 11 цифр
+     * - BYD: 4BZ + 11 цифр
+     */
+    private fun processBatteryCodeType(rawCode: String): Pair<String, String>? {
+        val code = rawCode.trim().uppercase()
+
+        return when {
+            // WIND 5.0 — НОВЫЕ АКБ: 5BB + 11 цифр
+            code.startsWith("5BB") && code.length == 14 && code.substring(3).all { it.isDigit() } -> {
+                "NEW" to code
+            }
+
+            // WIND 5.0 — СТАРЫЕ АКБ: SF + 2 буквы + 11 символов (буквы/цифры)
+            code.startsWith("SF") && code.length >= 14 && code.length <= 16 -> {
+                val afterSF = code.substring(2)
+                if (afterSF.length >= 12 &&
+                    afterSF.substring(0, 2).all { it.isLetter() } &&
+                    afterSF.substring(2).all { it.isLetterOrDigit() }) {
+                    "OLD" to code
+                } else {
+                    null
+                }
+            }
+
+            // WIND 4.0 — FUJIAN: 4BB + 11 цифр
+            code.startsWith("4BB") && code.length == 14 && code.substring(3).all { it.isDigit() } -> {
+                "FUJIAN" to code
+            }
+
+            // WIND 4.0 — BYD: 4BZ + 11 цифр
+            code.startsWith("4BZ") && code.length == 14 && code.substring(3).all { it.isDigit() } -> {
+                "BYD" to code
+            }
+
+            else -> null
+        }
+    }
+
+    // ============================================================================================
+    // СКАНИРОВАНИЕ (ОБНОВЛЁННАЯ ЛОГИКА)
+    // ============================================================================================
+
     fun onCodeScanned(rawCode: String) {
         val currentTime = System.currentTimeMillis()
-        if (rawCode == lastScannedValue && (currentTime - lastProcessedTime) < DEBOUNCE_DELAY) {
-            return
-        }
+        val debounceDelay = if (_isSearchMode.value) SEARCH_DEBOUNCE_DELAY else SCAN_DEBOUNCE_DELAY
+        if (rawCode == lastScannedValue && (currentTime - lastProcessedTime) < debounceDelay) return
 
         lastScannedValue = rawCode
         lastProcessedTime = currentTime
 
         viewModelScope.launch {
-            // --- ПАРСИНГ КОДА (ВЫНЕСЕН НАВЕРХ ДЛЯ ПОИСКА) ---
             var extractedScooterCode: String? = null
-            if (rawCode.contains("number=")) { try { extractedScooterCode = rawCode.substringAfter("number=").split('&', '?', '#').firstOrNull() } catch (e: Exception) { Log.e("VM_SCAN", "Parse error", e) } }
-            if (extractedScooterCode == null && rawCode.contains('/')) { try { val segment = rawCode.split('/').lastOrNull { it.isNotEmpty() }; if (segment?.all { it.isDigit() } == true) { extractedScooterCode = segment } } catch (e: Exception) { Log.e("VM_SCAN", "Parse error", e) } }
-            if (extractedScooterCode == null && rawCode.all { it.isDigit() }) { extractedScooterCode = rawCode }
-            // ------------------------------------------------
 
+            if (rawCode.contains("number=")) {
+                try { extractedScooterCode = rawCode.substringAfter("number=").split('&', '?', '#').firstOrNull() }
+                catch (e: Exception) { Log.e("VM_SCAN", "Parse error", e) }
+            }
+
+            if (extractedScooterCode == null && rawCode.contains('/')) {
+                try {
+                    val segment = rawCode.split('/').lastOrNull { it.isNotEmpty() }
+                    if (segment != null && segment.matches(Regex("[A-Za-z0-9]{2,10}"))) extractedScooterCode = segment
+                } catch (e: Exception) { Log.e("VM_SCAN", "Parse error", e) }
+            }
+
+            if (extractedScooterCode == null
+                && rawCode.matches(Regex("[A-Za-z0-9]{2,10}"))
+                && !rawCode.startsWith("4BB") && !rawCode.startsWith("4BZ")
+                && !rawCode.startsWith("5BB") && !rawCode.startsWith("SF")) {
+                extractedScooterCode = rawCode
+            }
+
+            // РЕЖИМ ПОИСКА
             if (_isSearchMode.value) {
-                // ИЗМЕНЕНО: Добавлена проверка вкладки для выбора типа поиска
                 when (_activeTab.value) {
                     ActiveTab.SCOOTERS -> {
                         if (_isSearchingForScooter.value || _scooterSearchResult.value != null) return@launch
-                        // ИСПОЛЬЗУЕМ ПАРСЕННЫЙ КОД (extractedScooterCode), ЕСЛИ ОН ЕСТЬ, ИНАЧЕ rawCode
                         searchForScooter(extractedScooterCode ?: rawCode)
                     }
-                    ActiveTab.BATTERIES -> {
-                        if (_searchResult.value != null) return@launch
-                        if (_isSearching.value) return@launch
+                    ActiveTab.BATTERIES, ActiveTab.NEW_BATTERIES -> {
+                        if (_searchResult.value != null || _isSearching.value) return@launch
                         searchBatteryInFirestore(rawCode)
                     }
-                    ActiveTab.WAREHOUSE -> { /* Логика для склада обрабатывается в StardustScreen, здесь ничего не делаем */ } // <-- ИЗМЕНЕНИЕ
+                    ActiveTab.WAREHOUSE -> {}
                 }
                 return@launch
             }
 
             startSessionTimerIfNeeded()
 
-            if (extractedScooterCode != null && extractedScooterCode.length < 10) {
-                processScooterCode(extractedScooterCode)
-            } else {
-                processBatteryCode(rawCode)
+            // Сначала пробуем распознать как батарею
+            val batteryType = processBatteryCodeType(rawCode)
+
+            when {
+                batteryType != null -> {
+                    val (type, fullCode) = batteryType
+                    processBatteryByType(type, fullCode)
+                }
+                extractedScooterCode != null && extractedScooterCode.length < 10 -> {
+                    processScooterCode(extractedScooterCode)
+                }
+                else -> {
+                    updateStatus("❌ Неизвестный формат: $rawCode", isError = true)
+                }
             }
         }
     }
 
+    // ============================================================================================
+    // ОБРАБОТКА БАТАРЕЙ ПО ТИПУ
+    // ============================================================================================
+
+    private suspend fun processBatteryByType(type: String, code: String) {
+        // WIND 5.0 (NEW + OLD) → NEW_BATTERIES tab
+        // WIND 4.0 (FUJIAN + BYD) → BATTERIES tab
+        val targetTab = when (type) {
+            "NEW", "OLD" -> ActiveTab.NEW_BATTERIES
+            "FUJIAN", "BYD" -> ActiveTab.BATTERIES
+            else -> ActiveTab.BATTERIES
+        }
+
+        val isDuplicate = when (targetTab) {
+            ActiveTab.NEW_BATTERIES -> _newBatteryCodes.any { it.code == code }
+            ActiveTab.BATTERIES -> _batteryCodes.any { it.code == code }
+            else -> false
+        }
+
+        if (isDuplicate) {
+            _duplicateCount.update { it + 1 }
+            updateStatus("⚠️ АКБ $code уже в списке!", isError = true)
+            _scanEventChannel.send(ScanEvent.Duplicate)
+            return
+        }
+
+        if (_activeTab.value != targetTab) {
+            _activeTab.value = targetTab
+        }
+
+        val newItem = ScanItem(
+            id = UUID.randomUUID().toString(),
+            code = code,
+            timestamp = System.currentTimeMillis()
+        )
+
+        when (targetTab) {
+            ActiveTab.NEW_BATTERIES -> {
+                _newBatteryCodes.add(0, newItem)
+                _newItems.update { it + newItem.id }
+            }
+            ActiveTab.BATTERIES -> {
+                _batteryCodes.add(0, newItem)
+                _newItems.update { it + newItem.id }
+            }
+            else -> {}
+        }
+
+        _scanEffectChannel.send(UiEffect.ScanSuccess)
+        _scanEventChannel.send(ScanEvent.Success)
+
+        val label = when (type) {
+            "NEW" -> "WIND 5.0 (Новый)"
+            "OLD" -> "WIND 5.0 (Старый)"
+            "FUJIAN" -> "WIND 4.0 FUJIAN"
+            "BYD" -> "WIND 4.0 BYD"
+            else -> "АКБ"
+        }
+
+        updateStatus("✓ $label: $code", isError = false)
+        updateScanRate()
+        checkBatchProgress()
+    }
+
     private suspend fun processScooterCode(code: String) {
         if (_scooterCodes.any { it.code == code }) {
+            _duplicateCount.update { it + 1 }
             updateStatus("Самокат $code уже в списке.", isError = true)
             _scanEventChannel.send(ScanEvent.Duplicate)
         } else {
@@ -432,101 +730,66 @@ class QrScannerViewModel @Inject constructor(
             _scooterCodes.add(0, newItem)
             _newItems.update { it + newItem.id }
             updateStatus("Самокат $code добавлен!")
-            if (_activeTab.value == ActiveTab.BATTERIES) {
+            if (_activeTab.value == ActiveTab.BATTERIES || _activeTab.value == ActiveTab.NEW_BATTERIES) {
                 _activeTab.value = ActiveTab.SCOOTERS
             }
             _scanEffectChannel.send(UiEffect.ScanSuccess)
             _scanEventChannel.send(ScanEvent.Success)
+            updateScanRate()
+            checkBatchProgress()
         }
     }
 
-    private suspend fun processBatteryCode(code: String) {
-        if (_batteryCodes.any { it.code == code }) {
-            updateStatus("АКБ $code уже в списке.", isError = true)
-            _scanEventChannel.send(ScanEvent.Duplicate)
-        } else {
-            val newItem = ScanItem(code = code)
-            _batteryCodes.add(0, newItem)
-            _newItems.update { it + newItem.id }
-            updateStatus("АКБ $code добавлен!")
-            if (_activeTab.value == ActiveTab.SCOOTERS) {
-                _activeTab.value = ActiveTab.BATTERIES
-            }
-            _scanEffectChannel.send(UiEffect.ScanSuccess)
-            _scanEventChannel.send(ScanEvent.Success)
-        }
-    }
+    // ============================================================================================
+    // ИСТОРИЯ
+    // ============================================================================================
 
     private fun listenForSharedHistory() {
         historyListener?.remove()
-
         historyListener = firestore.collection("scan_sessions")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .limit(100)
+            .orderBy("timestamp", Query.Direction.DESCENDING).limit(100)
             .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.w("ViewModel", "History listen failed.", error)
-                    return@addSnapshotListener
-                }
-
-                if (snapshot != null) {
-                    val sessionsList = snapshot.toObjects(ScanSession::class.java)
-                    _scanSessions.value = sessionsList
-                }
+                if (error != null) { Log.w("ViewModel", "History listen failed.", error); return@addSnapshotListener }
+                if (snapshot != null) _scanSessions.value = snapshot.toObjects(ScanSession::class.java)
             }
     }
 
+    // ============================================================================================
+    // СОХРАНЕНИЕ СЕССИИ
+    // ============================================================================================
+
     fun saveCurrentSession(name: String?) {
         if (_isSavingSession.value) return
-
         val currentUser = authManager.authState.value
-        if (currentUser.userId == null) {
-            updateStatus("Ошибка: Ты не залогинен, чувак", isError = true)
-            return
-        }
+        if (currentUser.userId == null) { updateStatus("Ошибка: Ты не залогинен, чувак", isError = true); return }
 
         viewModelScope.launch {
             _isSavingSession.value = true
-
             val (listToSave, sessionType) = when (_activeTab.value) {
                 ActiveTab.SCOOTERS -> _scooterCodes.toList() to SessionType.SCOOTERS
                 ActiveTab.BATTERIES -> _batteryCodes.toList() to SessionType.BATTERIES
-                ActiveTab.WAREHOUSE -> emptyList<ScanItem>() to null // <-- ИЗМЕНЕНИЕ
+                ActiveTab.NEW_BATTERIES -> _newBatteryCodes.toList() to SessionType.NEW_BATTERIES
+                ActiveTab.WAREHOUSE -> emptyList<ScanItem>() to null
             }
-
-            if (listToSave.isEmpty() || sessionType == null) { // <-- ИЗМЕНЕНИЕ
+            if (listToSave.isEmpty() || sessionType == null) {
                 updateStatus("Сохранять нечего, список пустой.", isError = true)
                 _isSavingSession.value = false
                 return@launch
             }
-
-            delay(1500)
-
             val sessionToUpload = ScanSession(
-                id = UUID.randomUUID().toString(),
-                name = name?.takeIf { it.isNotBlank() },
-                type = sessionType,
-                items = listToSave,
-                timestamp = System.currentTimeMillis(),
-                creatorId = currentUser.userId,
-                creatorName = currentUser.userName ?: "Анонимус"
+                id = UUID.randomUUID().toString(), name = name?.takeIf { it.isNotBlank() },
+                type = sessionType, items = listToSave, timestamp = System.currentTimeMillis(),
+                creatorId = currentUser.userId, creatorName = currentUser.userName ?: "Анонимус"
             )
-
             try {
                 firestore.collection("scan_sessions").document(sessionToUpload.id).set(sessionToUpload).await()
-                Log.d("ViewModel", "Сессия ${sessionToUpload.id} успешно улетела в облако.")
             } catch (e: Exception) {
-                Log.w("ViewModel", "Пиздец, в облако не улетело. Сохраняем локально.", e)
-                val newLocalSession = ScanSessionEntity(
-                    id = sessionToUpload.id,
-                    name = sessionToUpload.name,
-                    type = sessionToUpload.type,
-                    items = sessionToUpload.items,
-                    timestamp = sessionToUpload.timestamp,
-                    creatorId = sessionToUpload.creatorId,
-                    creatorName = sessionToUpload.creatorName
-                )
-                sessionRepository.saveSessionLocally(newLocalSession)
+                Log.w("ViewModel", "В облако не улетело. Сохраняем локально.", e)
+                sessionRepository.saveSessionLocally(ScanSessionEntity(
+                    id = sessionToUpload.id, name = sessionToUpload.name, type = sessionToUpload.type,
+                    items = sessionToUpload.items, timestamp = sessionToUpload.timestamp,
+                    creatorId = sessionToUpload.creatorId, creatorName = sessionToUpload.creatorName
+                ))
             } finally {
                 logActivity("SESSION_SAVED")
                 _scanEffectChannel.send(UiEffect.SessionSaved)
@@ -541,15 +804,10 @@ class QrScannerViewModel @Inject constructor(
         _recentlySavedSession.value = null
     }
 
-
     fun deleteSession(sessionId: String) {
         viewModelScope.launch {
-            try {
-                firestore.collection("scan_sessions").document(sessionId).delete().await()
-            } catch (e: Exception) {
-                Log.e("ViewModel", "Failed to delete session $sessionId from Firestore", e)
-                updateStatus("Ошибка удаления сессии из облака", isError = true)
-            }
+            try { firestore.collection("scan_sessions").document(sessionId).delete().await() }
+            catch (e: Exception) { Log.e("ViewModel", "Failed to delete session $sessionId", e); updateStatus("Ошибка удаления сессии из облака", isError = true) }
         }
     }
 
@@ -559,16 +817,10 @@ class QrScannerViewModel @Inject constructor(
             try {
                 firestore.runTransaction { transaction ->
                     val snapshot = transaction.get(sessionRef)
-                    val session = snapshot.toObject(ScanSession::class.java)
-                        ?: throw Exception("Сессия не найдена")
-
+                    val session = snapshot.toObject(ScanSession::class.java) ?: throw Exception("Сессия не найдена")
                     val updatedItems = session.items.filter { it.id != itemToDelete.id }
-
-                    if (updatedItems.isEmpty()) {
-                        transaction.delete(sessionRef)
-                    } else {
-                        transaction.update(sessionRef, "items", updatedItems)
-                    }
+                    if (updatedItems.isEmpty()) transaction.delete(sessionRef)
+                    else transaction.update(sessionRef, "items", updatedItems)
                 }.await()
             } catch (e: Exception) {
                 Log.e("ViewModel", "Failed to delete item from session $sessionId", e)
@@ -581,69 +833,100 @@ class QrScannerViewModel @Inject constructor(
         super.onCleared()
         historyListener?.remove()
         storageActivityListener?.remove()
+        storageRepository.stopCellsRealtimeSync()
         storageRepository.stopPalletsRealtimeSync()
     }
 
+    // ============================================================================================
+    // РУЧНОЙ ВВОД (ОБНОВЛЁННАЯ ЛОГИКА)
+    // ============================================================================================
+
     fun addManualCode(code: String) {
         if (_isSearchMode.value) {
-            when(_activeTab.value) {
+            when (_activeTab.value) {
                 ActiveTab.SCOOTERS -> searchForScooter(code)
-                ActiveTab.BATTERIES -> searchBatteryInFirestore(code)
-                ActiveTab.WAREHOUSE -> { /* Аналогично onCodeScanned, обработка вне этого ViewModel */ } // <-- ИЗМЕНЕНИЕ
+                ActiveTab.BATTERIES, ActiveTab.NEW_BATTERIES -> searchBatteryInFirestore(code)
+                ActiveTab.WAREHOUSE -> {}
             }
             return
         }
 
         startSessionTimerIfNeeded()
         _manualEntryCount++
-        Log.d("Metrics", "Manual entry count is now $_manualEntryCount")
 
-        when (_activeTab.value) {
-            ActiveTab.SCOOTERS -> {
-                if (code.isBlank() || !code.all { it.isDigit() }) {
-                    updateStatus("Ошибка: Код самоката должен состоять только из цифр.", isError = true)
-                    return
+        val cleanCode = code.trim().uppercase()
+        val batteryType = processBatteryCodeType(cleanCode)
+
+        viewModelScope.launch {
+            when {
+                batteryType != null -> {
+                    val (type, fullCode) = batteryType
+                    processBatteryByType(type, fullCode)
                 }
-                if (_scooterCodes.any { it.code == code }) {
-                    updateStatus("Самокат $code уже в списке.", isError = true)
-                    return
+                _activeTab.value == ActiveTab.SCOOTERS -> {
+                    if (cleanCode.isBlank() || !cleanCode.all { it.isLetterOrDigit() }) {
+                        updateStatus("Ошибка: Недопустимые символы.", isError = true)
+                        return@launch
+                    }
+                    processScooterCode(cleanCode)
                 }
-                val newItem = ScanItem(code = code)
-                _scooterCodes.add(0, newItem)
-                _newItems.update { it + newItem.id }
-                updateStatus("Самокат $code успешно добавлен!")
+                _activeTab.value == ActiveTab.BATTERIES -> {
+                    if (cleanCode.isBlank()) {
+                        updateStatus("Ошибка: Код не может быть пустым.", isError = true)
+                        return@launch
+                    }
+                    if (_batteryCodes.any { it.code == cleanCode }) {
+                        _duplicateCount.update { it + 1 }
+                        updateStatus("АКБ $cleanCode уже в списке.", isError = true)
+                        return@launch
+                    }
+                    val newItem = ScanItem(code = cleanCode)
+                    _batteryCodes.add(0, newItem)
+                    _newItems.update { it + newItem.id }
+                    updateStatus("АКБ $cleanCode успешно добавлен!")
+                    updateScanRate()
+                    checkBatchProgress()
+                }
+                _activeTab.value == ActiveTab.NEW_BATTERIES -> {
+                    if (cleanCode.isBlank()) {
+                        updateStatus("Ошибка: Код не может быть пустым.", isError = true)
+                        return@launch
+                    }
+                    if (_newBatteryCodes.any { it.code == cleanCode }) {
+                        _duplicateCount.update { it + 1 }
+                        updateStatus("АКБ $cleanCode уже в списке.", isError = true)
+                        return@launch
+                    }
+                    val newItem = ScanItem(code = cleanCode)
+                    _newBatteryCodes.add(0, newItem)
+                    _newItems.update { it + newItem.id }
+                    updateStatus("WIND 5.0 АКБ $cleanCode добавлен!")
+                    updateScanRate()
+                    checkBatchProgress()
+                }
+                else -> {
+                    updateStatus("❌ Неизвестный формат: $cleanCode", isError = true)
+                }
             }
-            ActiveTab.BATTERIES -> {
-                if (code.isBlank()) {
-                    updateStatus("Ошибка: Код АКБ не может быть пустым.", isError = true)
-                    return
-                }
-                if (_batteryCodes.any { it.code == code }) {
-                    updateStatus("АКБ $code уже в списке.", isError = true)
-                    return
-                }
-                val newItem = ScanItem(code = code)
-                _batteryCodes.add(0, newItem)
-                _newItems.update { it + newItem.id }
-                updateStatus("АКБ $code успешно добавлен!")
-            }
-            ActiveTab.WAREHOUSE -> { /* Список склада в WarehouseViewModel */ } // <-- ИЗМЕНЕНИЕ
         }
     }
 
-    fun markAsOld(item: ScanItem) {
-        _newItems.update { it - item.id }
-    }
+    fun markAsOld(item: ScanItem) { _newItems.update { it - item.id } }
 
     fun clearList() {
         _sessionStartTimeMillis = 0L
         _manualEntryCount = 0
         _newItems.update { emptySet() }
-        Log.d("Metrics", "Metrics reset.")
+        lastScannedValue = ""
+        lastProcessedTime = 0L
+        _duplicateCount.value = 0
+        _scanRate.value = 0
+        _lastScanTimestamps.clear()
         when (_activeTab.value) {
             ActiveTab.SCOOTERS -> _scooterCodes.clear()
             ActiveTab.BATTERIES -> _batteryCodes.clear()
-            ActiveTab.WAREHOUSE -> { /* Список склада в WarehouseViewModel */ } // <-- ИЗМЕНЕНИЕ
+            ActiveTab.NEW_BATTERIES -> _newBatteryCodes.clear()
+            ActiveTab.WAREHOUSE -> {}
         }
         updateStatus("Список очищен")
     }
@@ -651,22 +934,20 @@ class QrScannerViewModel @Inject constructor(
     fun removeCode(item: ScanItem) {
         _scooterCodes.remove(item)
         _batteryCodes.remove(item)
+        _newBatteryCodes.remove(item)
     }
 
     fun sortCurrentList() {
         when (_activeTab.value) {
-            ActiveTab.SCOOTERS -> {
-                _scooterCodes.sortBy { it.code.toLongOrNull() ?: Long.MAX_VALUE }
-            }
-            ActiveTab.BATTERIES -> {
-                _batteryCodes.sortBy { it.code }
-            }
-            ActiveTab.WAREHOUSE -> { /* Список склада в WarehouseViewModel */ } // <-- ИЗМЕНЕНИЕ
+            ActiveTab.SCOOTERS -> _scooterCodes.sortBy { it.code.toLongOrNull() ?: Long.MAX_VALUE }
+            ActiveTab.BATTERIES -> _batteryCodes.sortBy { it.code }
+            ActiveTab.NEW_BATTERIES -> _newBatteryCodes.sortBy { it.code }
+            ActiveTab.WAREHOUSE -> {}
         }
     }
 
     private fun startSessionTimerIfNeeded() {
-        if (_scooterCodes.isEmpty() && _batteryCodes.isEmpty()) {
+        if (_scooterCodes.isEmpty() && _batteryCodes.isEmpty() && _newBatteryCodes.isEmpty()) {
             _sessionStartTimeMillis = System.currentTimeMillis()
             _manualEntryCount = 0
         }
@@ -677,27 +958,22 @@ class QrScannerViewModel @Inject constructor(
     fun updateStatus(message: String, isError: Boolean = false) {
         viewModelScope.launch {
             _statusMessage.value = message
-            delay(if(isError) 2000 else 1500)
+            delay(if (isError) 2000 else 1500)
             val defaultMessage = if (_isSearchMode.value) "РЕЖИМ ПОИСКА" else "Наведите камеру на QR-код"
-            if (_statusMessage.value == message) {
-                _statusMessage.value = defaultMessage
-            }
+            if (_statusMessage.value == message) _statusMessage.value = defaultMessage
         }
     }
-
 
     fun getCurrentMetrics(): ActivityLogMetrics {
         val currentList = when (_activeTab.value) {
             ActiveTab.SCOOTERS -> scooterCodes
             ActiveTab.BATTERIES -> batteryCodes
-            ActiveTab.WAREHOUSE -> return ActivityLogMetrics(0, 0, 0L) // <-- ИЗМЕНЕНИЕ
+            ActiveTab.NEW_BATTERIES -> newBatteryCodes
+            ActiveTab.WAREHOUSE -> return ActivityLogMetrics(0, 0, 0L)
         }
         val itemCount = currentList.size
-        val durationSeconds = if (_sessionStartTimeMillis != 0L && itemCount > 0) {
-            (System.currentTimeMillis() - _sessionStartTimeMillis) / 1000
-        } else {
-            0L
-        }
+        val durationSeconds = if (_sessionStartTimeMillis != 0L && itemCount > 0)
+            (System.currentTimeMillis() - _sessionStartTimeMillis) / 1000 else 0L
         return ActivityLogMetrics(itemCount, _manualEntryCount, durationSeconds)
     }
 
@@ -705,49 +981,279 @@ class QrScannerViewModel @Inject constructor(
         val currentUserId = authManager.currentUserId
         val currentUserName = authManager.authState.value.userName
         if (currentUserId == null) return
-
         viewModelScope.launch {
             try {
                 val activityMetrics = getCurrentMetrics()
                 val telemetryManager = TelemetryManager(getApplication())
                 val deviceTelemetry = telemetryManager.getAllTelemetry()
                 val networkPing = telemetryManager.getNetworkPing()
-
                 val logData = mutableMapOf<String, Any?>(
-                    "timestamp" to System.currentTimeMillis(),
-                    "activityType" to activityType,
-                    "creatorId" to currentUserId,
-                    "creatorName" to (currentUserName ?: "Unknown"),
-                    "itemCount" to activityMetrics.itemCount,
-                    "manualEntryCount" to activityMetrics.manualEntryCount,
-                    "durationSeconds" to activityMetrics.durationSeconds,
-                    "networkPing" to networkPing
+                    "timestamp" to System.currentTimeMillis(), "activityType" to activityType,
+                    "creatorId" to currentUserId, "creatorName" to (currentUserName ?: "Unknown"),
+                    "itemCount" to activityMetrics.itemCount, "manualEntryCount" to activityMetrics.manualEntryCount,
+                    "durationSeconds" to activityMetrics.durationSeconds, "networkPing" to networkPing
                 )
                 logData.putAll(deviceTelemetry)
                 firestore.collection("activity_log").add(logData).await()
-                Log.d("Metrics", "Activity '$activityType' logged successfully.")
-
             } catch (e: Exception) {
                 Log.e("Metrics", "Failed to log activity '$activityType'", e)
             }
         }
     }
 
-    private fun <T> List<T>.chunkedSafe(size: Int): List<List<T>> {
-        return this.chunked(size).filter { it.isNotEmpty() }
+    private fun <T> List<T>.chunkedSafe(size: Int): List<List<T>> = chunked(size).filter { it.isNotEmpty() }
+
+    // ============================================================================================
+    // РАСПРЕДЕЛЕНИЕ АКБ ПО ЯЧЕЙКАМ
+    // ============================================================================================
+
+    fun distributeBatteriesToPallet(pallet: StoragePallet) {
+        val allItems = when (_activeTab.value) {
+            ActiveTab.NEW_BATTERIES -> _newBatteryCodes.toList()
+            else -> _batteryCodes.toList()
+        }
+        if (allItems.isEmpty()) return
+
+        val cellTypeStr = pallet.cellType ?: pallet.manufacturer?.uppercase()
+        val validItems = mutableListOf<ScanItem>()
+        val excludedItemsList = mutableListOf<ExcludedItem>()
+
+        allItems.forEachIndexed { index, item ->
+            when {
+                // Проверка ёмкости
+                pallet.items.size + validItems.size >= pallet.capacity -> {
+                    excludedItemsList.add(ExcludedItem(index + 1, item.code, "Ячейка заполнена"))
+                }
+                // Проверка типа
+                cellTypeStr != null && isBatteryAlienToCell(item.code, cellTypeStr) -> {
+                    excludedItemsList.add(ExcludedItem(index + 1, item.code, "Чужой тип АКБ"))
+                }
+                else -> validItems.add(item)
+            }
+        }
+
+        if (validItems.isEmpty() && excludedItemsList.isNotEmpty()) {
+            _distributionReport.value = DistributionReport(
+                0, excludedItemsList.size, 0, excludedItemsList,
+                pallet.palletNumber, cellTypeStr
+            )
+            return
+        }
+        executeBatchDistribution(pallet, validItems, excludedItemsList)
     }
+
+    private fun executeBatchDistribution(pallet: StoragePallet, itemsToDistribute: List<ScanItem>, excludedItems: List<ExcludedItem>) {
+        viewModelScope.launch {
+            _palletDistributionState.update { it.copy(isDistributing = true, distributionResult = null) }
+            val batteryCodesList = itemsToDistribute.map { it.code }
+            val batteriesToAdd = mutableListOf<String>()
+            var duplicateCount = 0
+            var successfulCount = 0
+            try {
+                val allBatteryDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+                batteryCodesList.chunkedSafe(10).forEach { chunk ->
+                    firestore.collection("batteries").whereIn(FieldPath.documentId(), chunk).get().await()
+                        .documents.forEach { doc -> doc.id?.let { id -> allBatteryDocs[id] = doc } }
+                }
+                val palletRef = firestore.collection("storage_pallets").document(pallet.id)
+                // Firestore: не больше 500 операций в одном batch. Один batch на тысячи АКБ → отказ записи.
+                val batchChunkSize = 400
+                val chunks = itemsToDistribute.chunked(batchChunkSize)
+                val totalChunks = chunks.size.coerceAtLeast(1)
+                chunks.forEachIndexed { idx, chunk ->
+                    val batch = firestore.batch()
+                    val newOnPallet = mutableListOf<String>()
+                    for (item in chunk) {
+                        val batteryRef = firestore.collection("batteries").document(item.code)
+                        val snapshot = allBatteryDocs[item.code]
+                        if (snapshot != null) {
+                            if (snapshot.getString("status") == "on_storage") duplicateCount++
+                            else {
+                                batch.update(batteryRef, "status", "on_storage", "palletId", pallet.id)
+                                newOnPallet.add(item.code)
+                                successfulCount++
+                            }
+                        } else {
+                            batch.set(
+                                batteryRef,
+                                mapOf(
+                                    "id" to item.code,
+                                    "status" to "on_storage",
+                                    "palletId" to pallet.id,
+                                    "createdAt" to FieldValue.serverTimestamp()
+                                )
+                            )
+                            newOnPallet.add(item.code)
+                            successfulCount++
+                        }
+                    }
+                    if (newOnPallet.isNotEmpty()) {
+                        batch.update(palletRef, "items", FieldValue.arrayUnion(*newOnPallet.toTypedArray()))
+                        batteriesToAdd.addAll(newOnPallet)
+                        Log.d(
+                            "BatteryDistribution",
+                            "storage_pallets: batch ${idx + 1}/$totalChunks, +${newOnPallet.size} АКБ → ячейка №${pallet.palletNumber} (${pallet.id})"
+                        )
+                        batch.commit().await()
+                    }
+                }
+                val successCodes = batteriesToAdd.toSet()
+                _batteryCodes.removeAll { successCodes.contains(it.code) }
+                _newBatteryCodes.removeAll { successCodes.contains(it.code) }
+                if (successfulCount > 0) logPalletActivity(action = "DISTRIBUTED", pallet = pallet, itemCount = successfulCount)
+                val cellTypeStr = pallet.cellType ?: pallet.manufacturer?.uppercase()
+                _distributionReport.value = DistributionReport(successfulCount, excludedItems.size, duplicateCount, excludedItems, pallet.palletNumber, cellTypeStr)
+                _palletDistributionState.update { it.copy(isDistributing = false, undistributedItemCount = _batteryCodes.size + _newBatteryCodes.size) }
+            } catch (e: Exception) {
+                val msg = when (e) {
+                    is FirebaseFirestoreException -> when (e.code) {
+                        FirebaseFirestoreException.Code.INVALID_ARGUMENT ->
+                            "Слишком большой документ или запрос (лимит Firestore ~1 МБ на документ / 500 операций в batch). Разбейте приёмку на части."
+                        FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+                            "Нет прав на запись в Firestore."
+                        FirebaseFirestoreException.Code.UNAVAILABLE ->
+                            "Сеть недоступна. Повторите позже."
+                        else -> e.message ?: e.code.toString()
+                    }
+                    else -> e.message
+                }
+                Log.e("BatteryDistribution", "executeBatchDistribution failed", e)
+                _palletDistributionState.update { it.copy(isDistributing = false, error = "Ошибка записи: $msg") }
+            }
+        }
+    }
+
+    fun distributeSpecificItemToPallet(pallet: StoragePallet, batteryId: String) {
+        viewModelScope.launch {
+            _palletDistributionState.update { it.copy(isDistributing = true) }
+            try {
+                firestore.runTransaction { transaction ->
+                    transaction.set(firestore.collection("batteries").document(batteryId), mapOf("id" to batteryId, "status" to "on_storage", "palletId" to pallet.id, "createdAt" to FieldValue.serverTimestamp()))
+                    transaction.update(firestore.collection("storage_pallets").document(pallet.id), "items", FieldValue.arrayUnion(batteryId))
+                }.await()
+                _batteryCodes.removeAll { it.code == batteryId }
+                _newBatteryCodes.removeAll { it.code == batteryId }
+                logPalletActivity(action = "RESTORED_ITEM", pallet = pallet, itemCount = 1)
+                _palletDistributionState.update { it.copy(isDistributing = false, distributionResult = "АКБ $batteryId восстановлен.") }
+            } catch (e: Exception) {
+                _palletDistributionState.update { it.copy(isDistributing = false, error = "Не удалось восстановить АКБ: ${e.message}") }
+            }
+        }
+    }
+
+    fun removeItemFromPallet(palletId: String, batteryId: String) {
+        viewModelScope.launch {
+            _palletDistributionState.update { it.copy(isDistributing = true, distributionResult = null) }
+            val pallet = _palletDistributionState.value.pallets.find { it.id == palletId }
+            try {
+                firestore.runTransaction { transaction ->
+                    transaction.update(firestore.collection("storage_pallets").document(palletId), "items", FieldValue.arrayRemove(batteryId))
+                    transaction.update(firestore.collection("batteries").document(batteryId), "status", FieldValue.delete(), "palletId", FieldValue.delete())
+                }.await()
+                if (pallet != null) logPalletActivity(action = "REMOVED_ITEM", pallet = pallet, itemCount = 1)
+                _palletDistributionState.update { it.copy(isDistributing = false, distributionResult = "АКБ $batteryId удален с ячейки и его статус сброшен.") }
+            } catch (e: Exception) {
+                _palletDistributionState.update { it.copy(isDistributing = false, error = "Не удалось удалить АКБ: ${e.message}") }
+            }
+        }
+    }
+
+    // ============================================================================================
+    // СОЗДАНИЕ / УДАЛЕНИЕ ЯЧЕЕК
+    // ============================================================================================
+
+    /**
+     * Создаёт новую ячейку для АКБ. Опционально принимает тип и ёмкость.
+     * Пишет через HashMap чтобы Firestore гарантированно записал все поля.
+     */
+    fun createNewBatteryCell(
+        cellType: CellType? = null,
+        capacity: Int = 500,
+        displayName: String? = null,
+        address: String? = null
+    ) {
+        viewModelScope.launch {
+            _palletDistributionState.update { it.copy(isLoading = true) }
+            try {
+                val newNumber = (_palletDistributionState.value.pallets
+                    .maxOfOrNull { it.palletNumber } ?: 0) + 1
+                val newId = UUID.randomUUID().toString()
+
+                val data = hashMapOf<String, Any?>(
+                    "id" to newId,
+                    "palletNumber" to newNumber,
+                    "items" to emptyList<String>(),
+                    "isFull" to false,
+                    // Новые поля
+                    "cellType" to cellType?.name,
+                    "manufacturer" to when (cellType) {
+                        CellType.FUJIAN -> "FUJIAN"
+                        CellType.BYD -> "BYD"
+                        CellType.NINEBOT_NEW -> "NEW"
+                        CellType.NINEBOT_OLD -> "OLD"
+                        null -> null
+                    },
+                    "capacity" to capacity,
+                    "displayName" to displayName,
+                    "address" to address,
+                    "status" to CellStatus.RECEIVING.name,
+                    "creatorId" to authManager.currentUserId,
+                    "creatorName" to authManager.authState.value.userName,
+                    "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                )
+
+                firestore.collection("storage_pallets")
+                    .document(newId)
+                    .set(data)
+                    .await()
+
+                // Для лога создаём объект
+                val newCell = StoragePallet(
+                    id = newId,
+                    palletNumber = newNumber,
+                    cellType = cellType?.name,
+                    capacity = capacity,
+                    displayName = displayName,
+                    address = address
+                )
+                logPalletActivity(action = "CREATED", pallet = newCell)
+            } catch (e: Exception) {
+                _palletDistributionState.update {
+                    it.copy(isLoading = false, error = "Не удалось создать ячейку")
+                }
+            }
+        }
+    }
+
+    fun deletePallet(pallet: StoragePallet) {
+        viewModelScope.launch {
+            _palletDistributionState.update { it.copy(isDistributing = true, distributionResult = null) }
+            try {
+                storageRepository.deletePallet(pallet)
+                    .onSuccess { logPalletActivity(action = "DELETED", pallet = pallet, itemCount = pallet.items.size); _palletDistributionState.update { it.copy(isDistributing = false, distributionResult = "Ячейка №${pallet.palletNumber} удалена.") } }
+                    .onFailure { e -> _palletDistributionState.update { it.copy(isDistributing = false, error = "Ошибка удаления ячейки: ${e.message}") } }
+            } catch (e: Exception) {
+                _palletDistributionState.update { it.copy(isDistributing = false, error = "Ошибка: ${e.message}") }
+            }
+        }
+    }
+
+    fun getPalletsDataForMasterExport(): Map<String, List<String>> =
+        _palletDistributionState.value.pallets.associate { "Ячейка №${it.palletNumber}" to it.items.toList() }
+
+    fun clearDistributionResult() { _palletDistributionState.update { it.copy(distributionResult = null) } }
+
+    // ============================================================================================
+    // ЛОГ ОПЕРАЦИЙ С ЯЧЕЙКАМИ
+    // ============================================================================================
 
     private fun startPalletActivityLogListener() {
         firestore.collection("pallet_activity_log").orderBy("timestamp", Query.Direction.DESCENDING).limit(100)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) { Log.e("PalletLog", "Listen failed.", e); return@addSnapshotListener }
                 if (snapshot != null) {
-                    val logEntries = snapshot.documents.mapNotNull { it.toObject(
-                        PalletActivityLogEntry::class.java) }
-
+                    val logEntries = snapshot.documents.mapNotNull { it.toObject(PalletActivityLogEntry::class.java) }
                     _palletDistributionState.update { it.copy(activityLog = logEntries) }
-
-                    // --- ПЕРЕСЧЕТ "СЕГОДНЯ" ---
                     calculateTodayAddedCount(logEntries)
                 }
             }
@@ -755,52 +1261,38 @@ class QrScannerViewModel @Inject constructor(
 
     private fun calculateTodayAddedCount(logEntries: List<PalletActivityLogEntry>) {
         val calendar = Calendar.getInstance()
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        calendar.set(Calendar.SECOND, 0)
-        calendar.set(Calendar.MILLISECOND, 0)
-        val startOfDay = calendar.timeInMillis
-
-        val todayCount = logEntries
-            .filter { it.timestamp >= startOfDay && it.action == "DISTRIBUTED" }
+        calendar.set(Calendar.HOUR_OF_DAY, 0); calendar.set(Calendar.MINUTE, 0)
+        calendar.set(Calendar.SECOND, 0); calendar.set(Calendar.MILLISECOND, 0)
+        _todayAddedCount.value = logEntries
+            .filter { it.timestamp >= calendar.timeInMillis && it.action == "DISTRIBUTED" }
             .sumOf { it.itemCount ?: 0 }
-
-        _todayAddedCount.value = todayCount
     }
 
     private fun logPalletActivity(action: String, pallet: StoragePallet? = null, itemCount: Int = 0) {
-        val currentUserId = authManager.currentUserId; val currentUserName = authManager.authState.value.userName
-        if (currentUserId == null) { return }
+        val currentUserId = authManager.currentUserId
+        val currentUserName = authManager.authState.value.userName
+        if (currentUserId == null) return
         val logEntry = PalletActivityLogEntry(
-            userId = currentUserId,
-            userName = currentUserName,
-            action = action,
-            palletNumber = pallet?.palletNumber,
-            itemCount = itemCount,
-            palletId = pallet?.id
+            userId = currentUserId, userName = currentUserName, action = action,
+            palletNumber = pallet?.palletNumber, itemCount = itemCount, palletId = pallet?.id
         )
-        viewModelScope.launch { try { firestore.collection("pallet_activity_log").add(logEntry).await() } catch (e: Exception) { Log.e("PalletLog", "Failed to write activity log", e) } }
+        viewModelScope.launch {
+            try { firestore.collection("pallet_activity_log").add(logEntry).await() }
+            catch (e: Exception) { Log.e("PalletLog", "Failed to write activity log", e) }
+        }
     }
 
     fun clearPalletActivityLog() {
         viewModelScope.launch {
-            if (!authManager.authState.value.isAdmin) {
-                _palletDistributionState.update { it.copy(error = "У вас нет прав для выполнения этого действия.") }
-                return@launch
-            }
-
+            if (!authManager.authState.value.isAdmin) { _palletDistributionState.update { it.copy(error = "У вас нет прав.") }; return@launch }
             _palletDistributionState.update { it.copy(isDistributing = true) }
             try {
                 val snapshot = firestore.collection("pallet_activity_log").get().await()
                 val batch = firestore.batch()
-                for (document in snapshot.documents) {
-                    batch.delete(document.reference)
-                }
+                snapshot.documents.forEach { batch.delete(it.reference) }
                 batch.commit().await()
-                Log.d("PalletLog", "Pallet activity log cleared by admin.")
                 _palletDistributionState.update { it.copy(isDistributing = false, distributionResult = "История операций успешно очищена.") }
             } catch (e: Exception) {
-                Log.e("PalletLog", "Failed to clear pallet activity log", e)
                 _palletDistributionState.update { it.copy(isDistributing = false, error = "Не удалось очистить историю: ${e.message}") }
             }
         }
@@ -809,8 +1301,7 @@ class QrScannerViewModel @Inject constructor(
     fun onNavigateToPalletDistribution() {
         _palletAnalysisResults.value = emptyMap()
         _showAnalysisReport.value = false
-        _palletDistributionState.update { it.copy(undistributedItemCount = _batteryCodes.size) }
-
+        _palletDistributionState.update { it.copy(undistributedItemCount = _batteryCodes.size + _newBatteryCodes.size) }
         storageRepository.startPalletsRealtimeSync()
         loadPallets()
         startPalletActivityLogListener()
@@ -823,236 +1314,25 @@ class QrScannerViewModel @Inject constructor(
         }
     }
 
+    // ============================================================================================
+    // ХРАНЕНИЕ САМОКАТОВ (STORAGE)
+    // ============================================================================================
+
     fun loadStorageCells() {
         viewModelScope.launch {
             _storageState.update { it.copy(isLoading = true, error = null) }
             startStorageActivityLogListener()
+            storageRepository.startCellsRealtimeSync()
             storageRepository.refreshDataFromServer()
         }
-    }
-
-    fun createNewPallet() {
-        viewModelScope.launch {
-            _palletDistributionState.update { it.copy(isLoading = true) }
-            try {
-                val newPalletNumber = (_palletDistributionState.value.pallets.maxOfOrNull { it.palletNumber } ?: 0) + 1
-                val newPallet = StoragePallet(palletNumber = newPalletNumber)
-                firestore.collection("storage_pallets").document(newPallet.id).set(newPallet).await()
-                logPalletActivity(action = "CREATED", pallet = newPallet)
-            } catch (e: Exception) {
-                _palletDistributionState.update { it.copy(isLoading = false, error = "Не удалось создать палет") }
-            }
-        }
-    }
-
-    // --- ОБНОВЛЕННЫЙ УМНЫЙ МЕТОД: Формирует отчет и диалог ---
-    fun distributeBatteriesToPallet(pallet: StoragePallet) {
-        val allItems = _batteryCodes.toList()
-        if (allItems.isEmpty()) return
-
-        val manufacturer = pallet.manufacturer?.uppercase()
-        val validItems = mutableListOf<ScanItem>()
-        val excludedItemsList = mutableListOf<ExcludedItem>()
-
-        // Индекс 0 - это последний отсканированный (верхний).
-        // Пользователю удобнее считать с 1 (верхнего).
-        allItems.forEachIndexed { index, item ->
-            val displayIndex = index + 1 // 1, 2, 3...
-            if (manufacturer != null && isBatteryAlienToManufacturer(item.code, manufacturer)) {
-                excludedItemsList.add(ExcludedItem(displayIndex, item.code, "Чужой производитель"))
-            } else {
-                validItems.add(item)
-            }
-        }
-
-        // Если есть ошибки, или если всё ок - мы в любом случае используем общую функцию записи
-        // Но если ВСЕ ошибки - нет смысла писать в базу, сразу отчет
-        if (validItems.isEmpty() && excludedItemsList.isNotEmpty()) {
-            _distributionReport.value = DistributionReport(
-                successCount = 0,
-                errorCount = excludedItemsList.size,
-                duplicateCount = 0,
-                excludedItems = excludedItemsList,
-                targetPalletNumber = pallet.palletNumber,
-                targetManufacturer = manufacturer
-            )
-            return
-        }
-
-        executeBatchDistribution(pallet, validItems, excludedItemsList)
-    }
-
-    private fun executeBatchDistribution(
-        pallet: StoragePallet,
-        itemsToDistribute: List<ScanItem>,
-        excludedItems: List<ExcludedItem>
-    ) {
-        viewModelScope.launch {
-            _palletDistributionState.update { it.copy(isDistributing = true, distributionResult = null) }
-
-            val batteryCodesList = itemsToDistribute.map { it.code }
-            val batteriesToAdd = mutableListOf<String>()
-            var duplicateCount = 0
-            var successfulCount = 0
-
-            try {
-                // Проверка дубликатов (уже на складе)
-                val allBatteryDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
-                val chunks = batteryCodesList.chunkedSafe(10)
-                for (chunk in chunks) {
-                    val snapshots = firestore.collection("batteries").whereIn(FieldPath.documentId(), chunk).get().await()
-                    snapshots.documents.forEach { doc -> doc.id?.let { id -> allBatteryDocs[id] = doc } }
-                }
-
-                val batch = firestore.batch()
-                val palletRef = firestore.collection("storage_pallets").document(pallet.id)
-
-                for (item in itemsToDistribute) {
-                    val batteryId = item.code
-                    val batteryRef = firestore.collection("batteries").document(batteryId)
-                    val snapshot = allBatteryDocs[batteryId]
-
-                    if (snapshot != null) {
-                        // Если уже на складе - считаем дубликатом, не обновляем статус
-                        if (snapshot.getString("status") == "on_storage") {
-                            duplicateCount++
-                        } else {
-                            // Если был в другом месте - забираем
-                            batch.update(batteryRef, "status", "on_storage", "palletId", pallet.id)
-                            batteriesToAdd.add(batteryId); successfulCount++
-                        }
-                    } else {
-                        val newBatteryData = mapOf("id" to batteryId, "status" to "on_storage", "palletId" to pallet.id, "createdAt" to FieldValue.serverTimestamp())
-                        batch.set(batteryRef, newBatteryData); batteriesToAdd.add(batteryId); successfulCount++
-                    }
-                }
-
-                if (batteriesToAdd.isNotEmpty()) {
-                    batch.update(palletRef, "items", FieldValue.arrayUnion(*batteriesToAdd.toTypedArray()))
-                }
-
-                batch.commit().await()
-
-                // Удаляем успешно добавленные из списка на телефоне
-                val successCodes = batteriesToAdd.toSet()
-                _batteryCodes.removeAll { item -> successCodes.contains(item.code) }
-
-                if (successfulCount > 0) {
-                    logPalletActivity(action = "DISTRIBUTED", pallet = pallet, itemCount = successfulCount)
-                }
-
-                // ПОКАЗЫВАЕМ ОТЧЕТ (ДИАЛОГ)
-                _distributionReport.value = DistributionReport(
-                    successCount = successfulCount,
-                    errorCount = excludedItems.size,
-                    duplicateCount = duplicateCount,
-                    excludedItems = excludedItems,
-                    targetPalletNumber = pallet.palletNumber,
-                    targetManufacturer = pallet.manufacturer
-                )
-
-                _palletDistributionState.update {
-                    it.copy(
-                        isDistributing = false,
-                        undistributedItemCount = _batteryCodes.size
-                        // distributionResult больше не используется для Snackbara
-                    )
-                }
-
-            } catch (e: Exception) {
-                _palletDistributionState.update { it.copy(isDistributing = false, error = "Ошибка записи: ${e.message}") }
-            }
-        }
-    }
-    // -------------------------------------------------------------
-
-    // --- ФУНКЦИЯ ДЛЯ ОТМЕНЫ УДАЛЕНИЯ (UNDO) ---
-    fun distributeSpecificItemToPallet(pallet: StoragePallet, batteryId: String) {
-        viewModelScope.launch {
-            _palletDistributionState.update { it.copy(isDistributing = true) }
-            try {
-                val palletRef = firestore.collection("storage_pallets").document(pallet.id)
-                val batteryRef = firestore.collection("batteries").document(batteryId)
-
-                firestore.runTransaction { transaction ->
-                    transaction.set(batteryRef, mapOf(
-                        "id" to batteryId,
-                        "status" to "on_storage",
-                        "palletId" to pallet.id,
-                        "createdAt" to FieldValue.serverTimestamp()
-                    ))
-                    transaction.update(palletRef, "items", FieldValue.arrayUnion(batteryId))
-                }.await()
-
-                _batteryCodes.removeAll { it.code == batteryId }
-
-                logPalletActivity(action = "RESTORED_ITEM", pallet = pallet, itemCount = 1)
-                _palletDistributionState.update { it.copy(isDistributing = false, distributionResult = "АКБ $batteryId восстановлен.") }
-
-            } catch (e: Exception) {
-                _palletDistributionState.update { it.copy(isDistributing = false, error = "Не удалось восстановить АКБ: ${e.message}") }
-            }
-        }
-    }
-
-    fun removeItemFromPallet(palletId: String, batteryId: String) {
-        viewModelScope.launch {
-            _palletDistributionState.update { it.copy(isDistributing = true, distributionResult = null) }
-            val pallet = _palletDistributionState.value.pallets.find { it.id == palletId }
-            try {
-                val palletRef = firestore.collection("storage_pallets").document(palletId)
-                val batteryRef = firestore.collection("batteries").document(batteryId)
-                firestore.runTransaction { transaction ->
-                    transaction.update(palletRef, "items", FieldValue.arrayRemove(batteryId))
-                    transaction.update(batteryRef, "status", FieldValue.delete(), "palletId", FieldValue.delete())
-                }.await()
-                if (pallet != null) { logPalletActivity(action = "REMOVED_ITEM", pallet = pallet, itemCount = 1) }
-                _palletDistributionState.update { it.copy(isDistributing = false, distributionResult = "АКБ $batteryId удален с палета и его статус сброшен.") }
-            } catch (e: Exception) {
-                _palletDistributionState.update { it.copy(isDistributing = false, error = "Не удалось удалить АКБ: ${e.message}") }
-            }
-        }
-    }
-
-    fun deletePallet(pallet: StoragePallet) {
-        viewModelScope.launch {
-            _palletDistributionState.update { it.copy(isDistributing = true, distributionResult = null) }
-            try {
-                storageRepository.deletePallet(pallet)
-                    .onSuccess {
-                        logPalletActivity(action = "DELETED", pallet = pallet, itemCount = pallet.items.size)
-                        _palletDistributionState.update {
-                            it.copy(
-                                isDistributing = false,
-                                distributionResult = "Палет №${pallet.palletNumber} удален. Статусы АКБ сброшены."
-                            )
-                        }
-                    }
-                    .onFailure { e ->
-                        _palletDistributionState.update { it.copy(isDistributing = false, error = "Ошибка удаления палета: ${e.message}") }
-                    }
-            } catch (e: Exception) {
-                _palletDistributionState.update { it.copy(isDistributing = false, error = "Ошибка: ${e.message}") }
-            }
-        }
-    }
-
-    fun getPalletsDataForMasterExport(): Map<String, List<String>> {
-        return _palletDistributionState.value.pallets.associate { "Палет №${it.palletNumber}" to it.items.toList() }
-    }
-
-    fun clearDistributionResult() {
-        _palletDistributionState.update { it.copy(distributionResult = null) }
     }
 
     fun createNewCell(description: String, capacity: Int) {
         viewModelScope.launch {
             _storageState.update { it.copy(isLoading = true) }
             storageRepository.createNewCell(description, capacity)
-                .onSuccess { }
-                .onFailure { error ->
-                    _storageState.update { it.copy(isLoading = false, error = "Не удалось создать ячейку: ${error.message}") }
-                }
+                .onSuccess { _storageState.update { it.copy(isLoading = false, distributionResult = "Ячейка создана") } }
+                .onFailure { error -> _storageState.update { it.copy(isLoading = false, error = "Не удалось создать ячейку: ${error.message}") } }
         }
     }
 
@@ -1060,36 +1340,26 @@ class QrScannerViewModel @Inject constructor(
         viewModelScope.launch {
             _storageState.update { it.copy(isLoading = true) }
             val scooterIds = scooterCodes.map { it.code }
-
             storageRepository.distributeScootersToCell(cell, scooterIds)
                 .onSuccess { addedCount ->
-                    val totalCount = scooterIds.size
-                    val duplicateCount = totalCount - addedCount
-                    var resultMessage = "Успешно добавлено: $addedCount."
-                    if (duplicateCount > 0) {
-                        resultMessage += " Пропущено дубликатов: $duplicateCount."
-                    }
-                    _storageState.update { it.copy(isLoading = false, distributionResult = resultMessage) }
+                    val skipped = scooterIds.size - addedCount
+                    var msg = "Успешно добавлено: $addedCount."
+                    if (skipped > 0) msg += " Пропущено дубликатов: $skipped."
+                    _storageState.update { it.copy(isLoading = false, distributionResult = msg) }
                     _scooterCodes.clear()
                 }
-                .onFailure { error ->
-                    _storageState.update { it.copy(isLoading = false, distributionResult = "Ошибка: ${error.message}") }
-                }
+                .onFailure { error -> _storageState.update { it.copy(isLoading = false, distributionResult = "Ошибка: ${error.message}") } }
         }
     }
 
-    fun clearStorageDistributionResult() {
-        _storageState.update { it.copy(distributionResult = null) }
-    }
+    fun clearStorageDistributionResult() { _storageState.update { it.copy(distributionResult = null) } }
 
     fun updateCell(cellId: String, newDescription: String, newCapacity: Int) {
         viewModelScope.launch {
             _storageState.update { it.copy(isLoading = true) }
             storageRepository.updateCell(cellId, newDescription, newCapacity)
-                .onSuccess { }
-                .onFailure { error ->
-                    _storageState.update { it.copy(isLoading = false, error = "Ошибка обновления: ${error.message}") }
-                }
+                .onSuccess { _storageState.update { it.copy(isLoading = false, distributionResult = "Ячейка обновлена") } }
+                .onFailure { error -> _storageState.update { it.copy(isLoading = false, error = "Ошибка обновления: ${error.message}") } }
         }
     }
 
@@ -1097,10 +1367,8 @@ class QrScannerViewModel @Inject constructor(
         viewModelScope.launch {
             _storageState.update { it.copy(isLoading = true) }
             storageRepository.removeItemFromCell(cell, scooterId)
-                .onSuccess { }
-                .onFailure { error ->
-                    _storageState.update { it.copy(isLoading = false, error = "Ошибка удаления самоката: ${error.message}") }
-                }
+                .onSuccess { _storageState.update { it.copy(isLoading = false, distributionResult = "Самокат удален из ячейки") } }
+                .onFailure { error -> _storageState.update { it.copy(isLoading = false, error = "Ошибка удаления самоката: ${error.message}") } }
         }
     }
 
@@ -1108,63 +1376,44 @@ class QrScannerViewModel @Inject constructor(
         viewModelScope.launch {
             _storageState.update { it.copy(isLoading = true) }
             storageRepository.deleteCell(cell)
-                .onSuccess { }
-                .onFailure { error ->
-                    _storageState.update { it.copy(isLoading = false, error = "Ошибка удаления ячейки: ${error.message}") }
-                }
+                .onSuccess { _storageState.update { it.copy(isLoading = false, distributionResult = "Ячейка удалена") } }
+                .onFailure { error -> _storageState.update { it.copy(isLoading = false, error = "Ошибка удаления ячейки: ${error.message}") } }
+        }
+    }
+
+    fun deleteCells(cells: List<StorageCell>) {
+        if (cells.isEmpty()) return
+        viewModelScope.launch {
+            _storageState.update { it.copy(isLoading = true) }
+            storageRepository.deleteMultipleCells(cells)
+                .onSuccess { _storageState.update { it.copy(isLoading = false, distributionResult = "Успешно удалено ${cells.size} ячеек.") } }
+                .onFailure { error -> _storageState.update { it.copy(isLoading = false, error = "Ошибка массового удаления: ${error.message}") } }
         }
     }
 
     private fun startStorageActivityLogListener() {
         storageActivityListener?.remove()
         storageActivityListener = firestore.collection("storage_activity_log")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .limit(50)
+            .orderBy("timestamp", Query.Direction.DESCENDING).limit(50)
             .addSnapshotListener { snapshot, e ->
-                if (e != null) {
-                    Log.w("ViewModel", "Storage activity log listen failed.", e)
-                    return@addSnapshotListener
-                }
-                if (snapshot != null) {
-                    val logEntries = snapshot.toObjects(StorageActivityLogEntry::class.java)
-                    _storageState.update { it.copy(activityLog = logEntries) }
-                }
+                if (e != null) { Log.w("ViewModel", "Storage activity log listen failed.", e); return@addSnapshotListener }
+                if (snapshot != null) _storageState.update { it.copy(activityLog = snapshot.toObjects(StorageActivityLogEntry::class.java)) }
             }
     }
 
     fun clearStorageActivityLog() {
         viewModelScope.launch {
-            if (!authManager.authState.value.isAdmin) {
-                _storageState.update { it.copy(distributionResult = "У вас нет прав для выполнения этого действия.") }
-                return@launch
-            }
-
+            if (!authManager.authState.value.isAdmin) { _storageState.update { it.copy(distributionResult = "У вас нет прав.") }; return@launch }
             _storageState.update { it.copy(isLoading = true) }
             try {
                 val snapshot = firestore.collection("storage_activity_log").get().await()
-
-                if (snapshot.isEmpty) {
-                    _storageState.update { it.copy(isLoading = false, distributionResult = "История операций уже пуста.") }
-                    return@launch
-                }
-
+                if (snapshot.isEmpty) { _storageState.update { it.copy(isLoading = false, distributionResult = "История операций уже пуста.") }; return@launch }
                 val batch = firestore.batch()
-                for (document in snapshot.documents) {
-                    batch.delete(document.reference)
-                }
-
+                snapshot.documents.forEach { batch.delete(it.reference) }
                 batch.commit().await()
-                Log.d("StorageLog", "Storage activity log cleared by admin.")
                 _storageState.update { it.copy(isLoading = false) }
-
             } catch (e: Exception) {
-                Log.e("StorageLog", "Failed to clear storage activity log", e)
-                _storageState.update {
-                    it.copy(
-                        isLoading = false,
-                        distributionResult = "Не удалось очистить историю: ${e.message}"
-                    )
-                }
+                _storageState.update { it.copy(isLoading = false, distributionResult = "Не удалось очистить историю: ${e.message}") }
             }
         }
     }

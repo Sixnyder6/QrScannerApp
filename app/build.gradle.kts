@@ -16,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 29
-        versionName = "1.3.9"
+        versionName = "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -24,9 +24,19 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("C:/Users/pankr/keystore.jks")
+            storePassword = project.findProperty("KEYSTORE_PASSWORD") as String? ?: ""
+            keyAlias = "appkey"
+            keyPassword = project.findProperty("KEY_PASSWORD") as String? ?: ""
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -36,11 +46,13 @@ android {
             isMinifyEnabled = false
         }
     }
+
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     kotlinOptions {
         jvmTarget = "11"
     }
@@ -48,14 +60,22 @@ android {
     buildFeatures {
         compose = true
         shaders = true
+        buildConfig = true
     }
 
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"
     }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/LICENSE"
+            excludes += "META-INF/LICENSE.txt"
+            excludes += "META-INF/NOTICE"
+            excludes += "META-INF/NOTICE.txt"
+            pickFirsts += "META-INF/versions/9/module-info.class"
         }
     }
 }
@@ -69,8 +89,9 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.2.0")
     implementation("com.google.android.gms:play-services-maps:20.0.0")
     implementation("androidx.compose.material:material-icons-extended:1.6.0")
+
+    // FastExcel (чтение xlsx)
     implementation("org.dhatim:fastexcel-reader:0.16.4")
-    // FastExcel reads XLSX via StAX/Aalto; Android has no javax.xml.stream on the boot classpath.
     implementation("javax.xml.stream:stax-api:1.0-2")
     implementation("org.codehaus.woodstox:stax2-api:4.2.2")
     implementation("com.fasterxml:aalto-xml:1.3.2")
@@ -80,7 +101,6 @@ dependencies {
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
-    // Compose Dependencies
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -93,9 +113,8 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-messaging-ktx")
     implementation("com.google.firebase:firebase-storage-ktx")
-
-    // ✅ НОВОЕ: Firebase Performance Monitoring
     implementation("com.google.firebase:firebase-perf-ktx")
+    implementation("com.google.firebase:firebase-analytics-ktx:21.5.0")
 
     implementation("com.google.android.gms:play-services-auth:21.2.0")
 
@@ -114,7 +133,7 @@ dependencies {
     // Диалоги с календарём
     implementation("io.github.vanpra.compose-material-dialogs:datetime:0.9.0")
 
-    // Excel
+    // Excel — Apache POI (запись xlsx)
     implementation("org.apache.poi:poi-ooxml:5.2.5")
 
     // Тесты
@@ -171,12 +190,17 @@ dependencies {
     // Coil
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    // 3D Visualization
-    implementation("io.github.sceneview:sceneview:2.2.1")
+    // Безопасное хранилище
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // OkHttp
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // ✅ НОВОЕ: Kotlin Coroutines для WorkManager
+    // Play Integrity API
+    implementation("com.google.android.play:integrity:1.3.0")
+
+    // Kotlin Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+        // exel
+    implementation("org.dhatim:fastexcel:0.16.4")
 }

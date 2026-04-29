@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,18 +39,15 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.qrscannerapp.*
 import com.example.qrscannerapp.features.inventory.data.NewsItem
+import com.example.qrscannerapp.features.inventory.data.OrderStatus
+import com.example.qrscannerapp.features.inventory.data.WarehouseOrder
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.ActivityLogSheet
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.NewsEditSheet
 import com.example.qrscannerapp.features.inventory.ui.distribution.AnimatedCounterText
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-
-// --- Демо-данные Запчастей (остаются для примера) ---
-data class DemoSparePart(val name: String, val category: String, val stock: Int, val lowStockThreshold: Int = 10, val imageUrl: String? = null)
-val demoParts = listOf(
-    DemoSparePart("Стойка амортизатора", "Ходовая", 68),
-    DemoSparePart("Контроллер V3.1", "Электроника", 15)
-)
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 // --- Enum для статусов сотрудника ---
 enum class EmployeeStatus(val displayName: String, val color: Color) {
@@ -81,7 +79,6 @@ val demoEmployees = listOf(
     )
 )
 
-
 // (Утилита генерации цвета)
 fun generateColorForDashboard(name: String): Color {
     val hash = name.hashCode()
@@ -102,7 +99,9 @@ fun generateColorForDashboard(name: String): Color {
 fun WarehouseDashboardScreen(
     navController: NavController,
     isAdmin: Boolean,
-    userRole: UserRole, // ДОБАВЛЕНО: Принимаем роль пользователя
+    userRole: UserRole,
+    userId: String,
+    currentWarehouseId: String = "bestuzhevskaya_10",
     viewModel: WarehouseViewModel = hiltViewModel()
 ) {
     // --- Состояния UI ---
@@ -111,8 +110,9 @@ fun WarehouseDashboardScreen(
     var newsItemToEdit by remember { mutableStateOf<NewsItem?>(null) }
     var showEmployeeSheet by remember { mutableStateOf(false) }
 
-    // --- ЛОГИКА ПРАВ ДОСТУПА ---
-    // Админ ИЛИ Кладовщик имеют право управлять новостями и сотрудниками
+    // Используем ID заказа для открытия деталей, чтобы данные всегда были свежими
+    var selectedOrderId by remember { mutableStateOf<String?>(null) }
+
     val canManageWarehouse = isAdmin || userRole == UserRole.INVENTORY_MANAGER
 
     // --- Подписка на данные из ViewModel ---
@@ -120,9 +120,17 @@ fun WarehouseDashboardScreen(
     val newsItems by viewModel.newsItems.collectAsState()
     val shiftState by viewModel.shiftState.collectAsState()
     val allEmployees by viewModel.employees.collectAsState()
+    val orders by viewModel.orders.collectAsState()
 
+    // Подписка на заказы при входе на экран
+    LaunchedEffect(key1 = userId, key2 = canManageWarehouse) {
+        viewModel.subscribeToOrders(userId = userId, isAdmin = canManageWarehouse)
+    }
 
-    val lowStockItemsCount = demoParts.count { it.stock <= it.lowStockThreshold }
+    // Находим актуальный объект заказа из списка по ID
+    val activeOrderForSheet = remember(selectedOrderId, orders) {
+        orders.find { it.id == selectedOrderId }
+    }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -145,12 +153,13 @@ fun WarehouseDashboardScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            // === БЛОК С НОВОСТЯМИ И СВОДКОЙ ===
             item {
                 WarehouseSummaryCardWithNews(
                     news = newsItems,
                     shiftState = shiftState,
-                    lowStockItemsCount = lowStockItemsCount,
-                    takenTodayCount = 12,
+                    lowStockItemsCount = 0,
+                    takenTodayCount = 0,
                     onLowStockClick = { },
                     onTakenTodayClick = { },
                     onAnalyticsClick = { },
@@ -164,17 +173,43 @@ fun WarehouseDashboardScreen(
                         showNewsEditSheet = true
                     },
                     onChangeEmployeeClick = { showEmployeeSheet = true },
-                    // ПЕРЕДАЕМ ПРАВА ДОСТУПА
                     canManage = canManageWarehouse
                 )
             }
+
+            // === БЛОК АКТИВНЫХ ЗАКАЗОВ ===
+            item {
+                AnimatedVisibility(
+                    visible = orders.isNotEmpty(),
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = if (canManageWarehouse) "Входящие заявки" else "Мои заказы",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = StardustTextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        orders.forEach { order ->
+                            OrderCard(
+                                order = order,
+                                onClick = { selectedOrderId = order.id }
+                            )
+                        }
+                    }
+                }
+            }
+
+
+            // === КНОПКИ БЫСТРОГО ДОСТУПА ===
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ActionCard(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Outlined.History,
                         title = "История",
-                        subtitle = "Последние операции",
+                        subtitle = "Все операции",
                         color = StardustItemBg,
                         iconTint = StardustTextSecondary,
                         onClick = { showActivityLog = true }
@@ -183,7 +218,7 @@ fun WarehouseDashboardScreen(
                         modifier = Modifier.weight(1f),
                         icon = Icons.AutoMirrored.Outlined.MenuBook,
                         title = "Каталог",
-                        subtitle = "Все запчасти",
+                        subtitle = if (canManageWarehouse) "Управление" else "Взять / Заказать",
                         color = StardustPrimary.copy(alpha = 0.15f),
                         iconTint = StardustPrimary,
                         borderColor = StardustPrimary.copy(alpha = 0.3f),
@@ -191,17 +226,10 @@ fun WarehouseDashboardScreen(
                     )
                 }
             }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Остатки на складе", style = MaterialTheme.typography.titleLarge, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
-                    OutlinedTextField(value = "", onValueChange = {}, modifier = Modifier.fillMaxWidth(), placeholder = { Text("Поиск...") }, leadingIcon = { Icon(Icons.Default.Search, null) }, shape = RoundedCornerShape(14.dp), colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color.Transparent, focusedBorderColor = StardustPrimary, unfocusedContainerColor = StardustItemBg, focusedContainerColor = StardustItemBg))
-                }
-            }
-            items(demoParts) { part ->
-                SparePartListTile(part = part, onClick = { /* Детали */ })
-            }
         }
     }
+
+    // --- МОДАЛЬНЫЕ ОКНА ---
 
     if (showActivityLog) {
         ActivityLogSheet(
@@ -210,7 +238,6 @@ fun WarehouseDashboardScreen(
         )
     }
 
-    // Разрешаем открывать диалог редактирования, только если есть права
     if (showNewsEditSheet && canManageWarehouse) {
         NewsEditSheet(
             newsItem = newsItemToEdit,
@@ -232,9 +259,6 @@ fun WarehouseDashboardScreen(
             allStatuses = EmployeeStatus.values().toList(),
             currentShiftState = shiftState,
             onEmployeeSelected = { employee ->
-                // Только управляющий может менять сотрудника на смене?
-                // Если да, добавить проверку: if (canManageWarehouse) ...
-                // Пока оставим доступным всем, как было в коде, или ограничим:
                 if (canManageWarehouse) viewModel.onEmployeeSelected(employee)
             },
             onStatusSelected = { status ->
@@ -242,11 +266,313 @@ fun WarehouseDashboardScreen(
                 showEmployeeSheet = false
             },
             onDismiss = { showEmployeeSheet = false },
-            canSelect = canManageWarehouse // Передаем флаг для UI
+            canSelect = canManageWarehouse
+        )
+    }
+
+    // Если заказ был удален или выдан, окно закроется само (activeOrderForSheet станет null)
+    if (activeOrderForSheet != null) {
+        OrderDetailsSheet(
+            order = activeOrderForSheet!!,
+            isAdmin = canManageWarehouse,
+            onDismiss = { selectedOrderId = null },
+            onAccept = { viewModel.onAcceptOrder(activeOrderForSheet!!) },
+            onReady = { viewModel.onMarkOrderReady(activeOrderForSheet!!) },
+            onFinish = { order ->
+                viewModel.onFinishOrder(order, shiftState.employee.name)
+                selectedOrderId = null
+            },
+            onCancel = {
+                viewModel.onCancelOrder(activeOrderForSheet!!)
+                selectedOrderId = null
+            }
         )
     }
 }
 
+// ==========================================
+// КОМПОНЕНТЫ ДЛЯ ЗАКАЗОВ (ORDERS UI)
+// ==========================================
+
+@Composable
+fun OrderCard(
+    order: WarehouseOrder,
+    onClick: () -> Unit
+) {
+    val dateStr = remember(order.createdAt) {
+        val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+        sdf.format(order.createdAt.toDate())
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = StardustItemBg),
+        border = BorderStroke(1.dp, order.status.color.copy(alpha = 0.5f))
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(order.status.color.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = when(order.status) {
+                        OrderStatus.CREATED -> Icons.Outlined.NewReleases
+                        OrderStatus.PROCESSING -> Icons.Outlined.Build
+                        OrderStatus.READY -> Icons.Outlined.CheckCircle
+                        OrderStatus.COMPLETED -> Icons.Outlined.DoneAll
+                        OrderStatus.CANCELLED -> Icons.Outlined.Cancel
+                    },
+                    contentDescription = null,
+                    tint = order.status.color
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = order.userName.ifBlank { "Неизвестный" },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = StardustTextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${order.totalItemsCount} позиций • $dateStr",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = StardustTextSecondary
+                )
+            }
+
+            Surface(
+                color = order.status.color,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = order.status.displayName,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    color = Color.Black,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun OrderDetailsSheet(
+    order: WarehouseOrder,
+    isAdmin: Boolean,
+    onDismiss: () -> Unit,
+    onAccept: () -> Unit,
+    onReady: () -> Unit,
+    onFinish: (WarehouseOrder) -> Unit,
+    onCancel: () -> Unit
+) {
+    // Состояние галочек (хранится, пока открыто окно)
+    val checkedItems = remember(order.id) { mutableStateMapOf<String, Boolean>() }
+
+    // Проверка: все ли запчасти отмечены галочками
+    val allItemsPicked = remember(checkedItems.size, order.items.size) {
+        order.items.isNotEmpty() && order.items.all { checkedItems[it.itemId] == true }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = StardustModalBg,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = StardustTextSecondary) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+                .navigationBarsPadding()
+        ) {
+            // Заголовок и статус
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("Заказ #${order.id.takeLast(4).uppercase()}", style = MaterialTheme.typography.headlineSmall, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
+                    Text("от ${order.userName}", style = MaterialTheme.typography.bodyMedium, color = StardustTextSecondary)
+                }
+                Surface(
+                    color = order.status.color.copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, order.status.color)
+                ) {
+                    Text(
+                        text = order.status.displayName,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        color = order.status.color,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Список товаров с логикой галочек
+            Text("Состав заказа:", color = StardustTextPrimary, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LazyColumn(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(order.items) { item ->
+                    val isChecked = checkedItems[item.itemId] ?: false
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isChecked) StardustPrimary.copy(alpha = 0.1f) else StardustItemBg)
+                            .clickable(enabled = order.status == OrderStatus.PROCESSING) {
+                                checkedItems[item.itemId] = !isChecked
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Показываем галочку ТОЛЬКО в режиме сборки (PROCESSING)
+                        if (order.status == OrderStatus.PROCESSING) {
+                            Checkbox(
+                                checked = isChecked,
+                                onCheckedChange = { checkedItems[item.itemId] = it },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = StardustPrimary,
+                                    uncheckedColor = StardustTextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+
+                        if (item.itemImageUrl != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(item.itemImageUrl).crossfade(true).build(),
+                                contentDescription = null,
+                                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(modifier = Modifier.size(44.dp).background(Color.Gray.copy(alpha=0.3f), RoundedCornerShape(8.dp)))
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.itemName,
+                                color = if (isChecked) StardustPrimary else StardustTextPrimary,
+                                fontWeight = FontWeight.Medium,
+                                textDecoration = if (isChecked) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                            )
+                        }
+                        Text("${item.quantity} ${item.unit}", color = StardustPrimary, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // КНОПКИ ДЕЙСТВИЙ (Только для Админа/Кладовщика)
+            if (isAdmin) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    when(order.status) {
+                        OrderStatus.CREATED -> {
+                            Button(
+                                onClick = onAccept,
+                                modifier = Modifier.fillMaxWidth().height(54.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null, tint = Color.Black)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Принять в работу", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        OrderStatus.PROCESSING -> {
+                            // Кнопка активна ТОЛЬКО если все галочки проставлены
+                            Button(
+                                onClick = onReady,
+                                enabled = allItemsPicked,
+                                modifier = Modifier.fillMaxWidth().height(54.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = StardustSuccess,
+                                    disabledContainerColor = StardustSuccess.copy(alpha = 0.3f)
+                                ),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Default.Check, null, tint = Color.Black)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Всё собрано", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                            if (!allItemsPicked) {
+                                Text(
+                                    "Отметьте все запчасти галочками, чтобы завершить сборку",
+                                    color = StardustWarning,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                        OrderStatus.READY -> {
+                            Button(
+                                onClick = { onFinish(order) },
+                                modifier = Modifier.fillMaxWidth().height(54.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Icon(Icons.Default.DoneAll, null, tint = Color.Black)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Выдать и Завершить", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        else -> {}
+                    }
+
+                    if (order.status != OrderStatus.COMPLETED && order.status != OrderStatus.CANCELLED) {
+                        TextButton(
+                            onClick = onCancel,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Отменить заказ", color = StardustError) }
+                    }
+                }
+            } else {
+                // Для пользователя (Техника)
+                if (order.status == OrderStatus.READY) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = StardustSuccess.copy(alpha = 0.2f)),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, StardustSuccess)
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, null, tint = StardustSuccess)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Ваш заказ готов! Можно забирать.", color = StardustSuccess, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+// --- Остальные компоненты (Summary, DashboardWidget и др.) ---
 
 @Composable
 fun WarehouseSummaryCardWithNews(
@@ -261,7 +587,7 @@ fun WarehouseSummaryCardWithNews(
     onAddNews: () -> Unit,
     onEditNews: (NewsItem) -> Unit,
     onChangeEmployeeClick: () -> Unit,
-    canManage: Boolean // Заменили isAdmin на более общий флаг
+    canManage: Boolean
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -364,7 +690,7 @@ fun EmployeeSelectionSheet(
     onEmployeeSelected: (Employee) -> Unit,
     onStatusSelected: (EmployeeStatus) -> Unit,
     onDismiss: () -> Unit,
-    canSelect: Boolean // Флаг для блокировки UI если нет прав
+    canSelect: Boolean
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -376,8 +702,6 @@ fun EmployeeSelectionSheet(
                 .fillMaxWidth()
                 .padding(bottom = 32.dp, top = 8.dp)
         ) {
-            // Если прав нет, показываем только информацию, без возможности клика
-
             Text(
                 "Сотрудник на смене",
                 style = MaterialTheme.typography.titleMedium,
@@ -479,7 +803,7 @@ fun EmbeddedNewsWidget(
     news: List<NewsItem>,
     onAddClick: () -> Unit,
     onEditClick: (NewsItem) -> Unit,
-    canManage: Boolean // Заменили isAdmin
+    canManage: Boolean
 ) {
     var currentIndex by remember { mutableIntStateOf(0) }
     val currentItem = news.getOrNull(currentIndex)
@@ -542,11 +866,6 @@ fun EmbeddedNewsWidget(
     }
 }
 
-// ... Остальные виджеты без изменений (DashboardWidget, ActionCard, SparePartListTile, AnimatedGradientBackground)
-// Я их пропустил для краткости, они должны остаться как были.
-// Если ты копируешь весь файл, убедись, что они на месте (или скопируй их из прошлого моего ответа).
-// Для удобства я их добавлю снова, чтобы можно было копировать целиком.
-
 @Composable
 fun DashboardWidget(title: String, count: Int, icon: ImageVector, color: Color, prefix: String = "", onClick: () -> Unit) {
     Surface(onClick = onClick, modifier = Modifier.fillMaxWidth().height(65.dp), shape = RoundedCornerShape(14.dp), color = color.copy(alpha = 0.12f), border = BorderStroke(1.dp, color.copy(alpha = 0.3f))) {
@@ -569,36 +888,6 @@ fun ActionCard(modifier: Modifier = Modifier, icon: ImageVector, title: String, 
                 Text(title, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text(subtitle, color = StardustTextSecondary, fontSize = 10.sp, lineHeight = 10.sp)
             }
-        }
-    }
-}
-
-@Composable
-fun SparePartListTile(part: DemoSparePart, onClick: () -> Unit) {
-    val isLowStock = part.stock <= part.lowStockThreshold
-    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(StardustItemBg).clickable(onClick = onClick).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).background(StardustGlassBg), contentAlignment = Alignment.Center) {
-            if (part.imageUrl != null) {
-                AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(part.imageUrl).crossfade(true).build(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-            } else {
-                val seedColor = generateColorForDashboard(part.name)
-                Box(modifier = Modifier.fillMaxSize().background(seedColor), contentAlignment = Alignment.Center) { Text(part.name.take(1).uppercase(), fontWeight = FontWeight.Bold, fontSize = 24.sp, color = Color.White.copy(alpha = 0.5f)) }
-            }
-        }
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(part.name, color = StardustTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(6.dp).background(StardustTextSecondary, CircleShape))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(part.category, color = StardustTextSecondary, fontSize = 13.sp)
-            }
-        }
-        if (isLowStock) {
-            Box(Modifier.background(StardustError.copy(alpha = 0.15f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) { Text("${part.stock} шт.", color = StardustError, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
-        } else {
-            Text(text = "${part.stock}", color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            Text(text = " шт.", color = StardustTextSecondary, fontSize = 14.sp, modifier = Modifier.padding(start = 2.dp, bottom = 2.dp))
         }
     }
 }

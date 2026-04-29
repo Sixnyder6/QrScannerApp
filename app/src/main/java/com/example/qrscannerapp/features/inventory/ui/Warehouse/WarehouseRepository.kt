@@ -2,6 +2,7 @@ package com.example.qrscannerapp.features.inventory.data
 
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.Employee
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.DemoCatalogItem
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
@@ -25,11 +26,128 @@ class WarehouseRepository {
     private val logsCollection = db.collection("warehouse_logs")
     private val newsCollection = db.collection("warehouse_news")
     private val stateCollection = db.collection("warehouse_state")
-    // --- НОВОЕ: Коллекция для сотрудников ---
     private val employeesCollection = db.collection("warehouse_employees")
+    // --- НОВОЕ: Коллекция заказов ---
+    private val ordersCollection = db.collection("warehouse_orders")
 
+    // ==========================================
+    // ЛОГИКА ЗАКАЗОВ (НОВОЕ)
+    // ==========================================
 
-    // --- НОВЫЙ БЛОК: ПОЛУЧЕНИЕ СПИСКА СОТРУДНИКОВ ---
+    /**
+     * Создать новый заказ (делает Техник/Электрик).
+     * Товар НЕ списывается в этот момент, чтобы избежать ошибок если заказ отменят.
+     */
+    suspend fun createOrder(order: WarehouseOrder): Result<String> {
+        return try {
+            val docRef = ordersCollection.document()
+            // Сохраняем заказ с сгенерированным ID
+            ordersCollection.document(docRef.id).set(order.copy(id = docRef.id)).await()
+            Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Получить поток активных заказов.
+     * Если [userId] передан - возвращает заказы только этого пользователя (для Техника).
+     * Если [userId] null - возвращает ВСЕ активные заказы (для Кладовщика).
+     */
+    fun getActiveOrdersStream(userId: String? = null): Flow<List<WarehouseOrder>> = callbackFlow {
+        var query: Query = ordersCollection
+            .whereIn("status", listOf(OrderStatus.CREATED.name, OrderStatus.PROCESSING.name, OrderStatus.READY.name))
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+
+        if (userId != null) {
+            query = query.whereEqualTo("userId", userId)
+        }
+
+        val listener = query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                close(error)
+                return@addSnapshotListener
+            }
+            if (snapshot != null) {
+                val orders = snapshot.documents.mapNotNull { doc ->
+                    doc.toObject(WarehouseOrder::class.java)?.apply { id = doc.id }
+                }
+                trySend(orders)
+            }
+        }
+        awaitClose { listener.remove() }
+    }
+
+    /**
+     * Обновить статус заказа (Принять в работу, Отметить готовым).
+     */
+    suspend fun updateOrderStatus(orderId: String, newStatus: OrderStatus): Result<Unit> {
+        return try {
+            ordersCollection.document(orderId).update("status", newStatus).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * ЗАВЕРШИТЬ ЗАКАЗ (Выдача).
+     * Это самая важная функция: она списывает остатки и создает записи в логах.
+     * Выполняется в транзакции.
+     */
+    suspend fun completeOrder(orderId: String, warehouseManName: String): Result<Unit> {
+        return try {
+            db.runTransaction { transaction ->
+                val orderRef = ordersCollection.document(orderId)
+                val orderSnapshot = transaction.get(orderRef)
+                val order = orderSnapshot.toObject(WarehouseOrder::class.java)
+                    ?: throw IllegalStateException("Заказ не найден")
+
+                if (order.status == OrderStatus.COMPLETED) {
+                    throw IllegalStateException("Заказ уже выдан")
+                }
+
+                // Проходим по всем товарам в заказе и списываем их
+                for (orderItem in order.items) {
+                    val itemRef = itemsCollection.document(orderItem.itemId)
+                    val itemSnapshot = transaction.get(itemRef)
+
+                    // Если товара вдруг нет в базе (удалили), пропускаем или кидаем ошибку
+                    // Решим пропускать, но логировать, чтобы не ломать весь заказ
+                    if (itemSnapshot.exists()) {
+                        val currentStock = itemSnapshot.getLong("stockCount")?.toInt() ?: 0
+                        val newStock = currentStock - orderItem.quantity
+
+                        // Обновляем остаток (разрешаем уйти в минус, если это инвентарная ошибка,
+                        // или можно кинуть исключение throw IllegalStateException("Не хватает товара"))
+                        transaction.update(itemRef, "stockCount", newStock)
+
+                        // Пишем в лог, что товар ушел по заказу
+                        val newLogRef = logsCollection.document()
+                        val logEntry = WarehouseLog(
+                            itemId = orderItem.itemId,
+                            itemName = orderItem.itemName,
+                            userName = "${order.userName} (выдал $warehouseManName)",
+                            quantityChange = -orderItem.quantity,
+                            timestamp = Timestamp.now()
+                        )
+                        transaction.set(newLogRef, logEntry)
+                    }
+                }
+
+                // Обновляем статус заказа на COMPLETED
+                transaction.update(orderRef, "status", OrderStatus.COMPLETED)
+                transaction.update(orderRef, "completedAt", Timestamp.now())
+
+            }.await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // --- (Остальные методы без изменений) ---
+
     fun getEmployeesStream(): Flow<List<Employee>> = callbackFlow {
         val listener = employeesCollection
             .orderBy("name", Query.Direction.ASCENDING)
@@ -40,8 +158,6 @@ class WarehouseRepository {
                 }
 
                 if (snapshot != null) {
-                    // Преобразуем каждый документ в объект Employee.
-                    // Важно: id документа мы присваиваем полю id в объекте.
                     val employees = snapshot.documents.mapNotNull { doc ->
                         doc.toObject(Employee::class.java)?.apply { id = doc.id }
                     }
@@ -50,10 +166,7 @@ class WarehouseRepository {
             }
         awaitClose { listener.remove() }
     }
-    // --- КОНЕЦ НОВОГО БЛОКА ---
 
-
-    // --- БЛОК: УПРАВЛЕНИЕ СОСТОЯНИЕМ СМЕНЫ ---
     fun getShiftState(): Flow<WarehouseState> = callbackFlow {
         val docRef = stateCollection.document("global")
         val listener = docRef.addSnapshotListener { snapshot, error ->
@@ -96,10 +209,7 @@ class WarehouseRepository {
             }
         }
     }
-    // --- КОНЕЦ БЛОКА ---
 
-
-    // --- БЛОК: РАБОТА С НОВОСТЯМИ ---
     fun getNewsStream(): Flow<List<NewsItem>> = callbackFlow {
         val listener = newsCollection.addSnapshotListener { snapshot, error ->
             if (error != null) {
@@ -144,8 +254,6 @@ class WarehouseRepository {
         }
     }
 
-
-    // 1. ПОЛУЧЕНИЕ СПИСКА ТОВАРОВ (Realtime)
     fun getWarehouseItems(): Flow<List<WarehouseItem>> = callbackFlow {
         val listener = itemsCollection
             .orderBy("shortName", Query.Direction.ASCENDING)
@@ -167,7 +275,6 @@ class WarehouseRepository {
         awaitClose { listener.remove() }
     }
 
-    // --- ФУНКЦИЯ: ПОЛУЧЕНИЕ ЖУРНАЛА ОПЕРАЦИЙ ---
     fun getWarehouseLogs(): Flow<List<WarehouseLog>> = callbackFlow {
         val listener = logsCollection
             .orderBy("timestamp", Query.Direction.DESCENDING)
@@ -189,8 +296,6 @@ class WarehouseRepository {
         awaitClose { listener.remove() }
     }
 
-
-    // 2. ДОБАВЛЕНИЕ НОВОГО ТОВАРА
     suspend fun addNewItem(item: WarehouseItem): Result<Unit> {
         return try {
             val newDocRef = itemsCollection.document()
@@ -203,10 +308,8 @@ class WarehouseRepository {
         }
     }
 
-    // --- НОВЫЕ ФУНКЦИИ ДЛЯ РЕДАКТИРОВАНИЯ И УДАЛЕНИЯ ---
     suspend fun updateItem(item: WarehouseItem): Result<Unit> {
         return try {
-            // Генерируем новые ключевые слова для поиска, если название изменилось
             val searchKeywords = generateKeywords(item.fullName, item.shortName, item.sku)
             val itemToSave = item.copy(keywords = searchKeywords)
             itemsCollection.document(item.id).set(itemToSave).await()
@@ -224,10 +327,7 @@ class WarehouseRepository {
             Result.failure(e)
         }
     }
-    // --- КОНЕЦ НОВЫХ ФУНКЦИЙ ---
 
-
-    // 3. ВЗЯТИЕ ТОВАРА (ТРАНЗАКЦИЯ)
     suspend fun takeItem(itemId: String, quantityToTake: Int, userName: String): Result<Unit> {
         return try {
             db.runTransaction { transaction ->
@@ -236,7 +336,6 @@ class WarehouseRepository {
 
                 val currentStock = snapshot.getLong("stockCount")?.toInt() ?: 0
                 val itemName = snapshot.getString("shortName") ?: "Неизвестно"
-                val itemUnit = snapshot.getString("unit") ?: "шт."
 
                 if (currentStock < quantityToTake) {
                     throw IllegalStateException("Мало товара! Остаток: $currentStock")
@@ -261,7 +360,6 @@ class WarehouseRepository {
         }
     }
 
-    // --- Функция для обновления URL изображения товара ---
     suspend fun updateItemImageUrl(itemId: String, newUrl: String?): Result<Unit> {
         return try {
             itemsCollection.document(itemId).update("imageUrl", newUrl).await()
@@ -271,8 +369,6 @@ class WarehouseRepository {
         }
     }
 
-
-    // --- "УМНАЯ СИНХРОНИЗАЦИЯ" (UPSERT) ---
     suspend fun uploadDemoData(demoItems: List<DemoCatalogItem>): Result<Int> {
         return try {
             val batch = db.batch()

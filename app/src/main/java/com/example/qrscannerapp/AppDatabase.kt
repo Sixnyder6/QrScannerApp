@@ -1,5 +1,3 @@
-// Полная и исправленная версия файла: AppDatabase.kt
-
 package com.example.qrscannerapp
 
 import android.content.Context
@@ -24,17 +22,28 @@ import com.example.qrscannerapp.features.vehicle_report.data.local.dao.VehicleRe
 import com.example.qrscannerapp.features.vehicle_report.data.local.converters.StringListConverter
 import com.example.qrscannerapp.features.vehicle_report.domain.model.VehicleReportHistory
 
+// --- ИМПОРТЫ ДЛЯ INTERACTION ---
+import com.example.qrscannerapp.features.interaction.data.local.entity.InteractionSessionEntity
+import com.example.qrscannerapp.features.interaction.data.local.dao.InteractionDao
+// ------------------------------------------
+
+// --- НОВОЕ: ИМПОРТЫ ДЛЯ ТЕЛЕМЕТРИИ ---
+import com.example.qrscannerapp.data.local.dao.TelemetryDao
+import com.example.qrscannerapp.data.local.entity.TelemetryBuffer
+// --------------------------------------
+
 @Database(
     entities = [
         BatteryRepairLogEntity::class,
         ScanSessionEntity::class,
         TaskEntity::class,
         VehicleReportHistory::class,
-        // Добавляем наши новые сущности
         StorageCellEntity::class,
-        StoragePalletEntity::class
+        StoragePalletEntity::class,
+        InteractionSessionEntity::class,
+        TelemetryBuffer::class  // <<< НОВОЕ
     ],
-    version = 11, // Версия увеличена для миграции
+    version = 15, // <<< Увеличили с 14 до 15 (добавлена TelemetryBuffer)
     exportSchema = false
 )
 @TypeConverters(
@@ -42,7 +51,6 @@ import com.example.qrscannerapp.features.vehicle_report.domain.model.VehicleRepo
     TaskConverters::class,
     ElectricianConverters::class,
     StringListConverter::class
-    // Я убрал отсюда конфликтный InventoryConverters::class
 )
 abstract class AppDatabase : RoomDatabase() {
 
@@ -51,9 +59,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun vehicleReportHistoryDao(): VehicleReportHistoryDao
 
-    // Добавляем наши новые DAO
     abstract fun storageCellDao(): StorageCellDao
     abstract fun storagePalletDao(): StoragePalletDao
+
+    abstract fun interactionDao(): InteractionDao
+
+    // <<< НОВОЕ: DAO для телеметрии
+    abstract fun telemetryDao(): TelemetryDao
 
     companion object {
         @Volatile

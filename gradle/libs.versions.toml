@@ -38,6 +38,12 @@ ycharts = "2.1.0"
 composeMaterialDialogs = "0.9.0"
 shimmer = "1.2.0"
 poi = "5.2.3"
+talsec = "5.2.0"
+rootbeer = "0.1.0"
+tink = "1.14.1"
+codefort = "1.0.0"
+fastexcel = "0.20.0"
+aaltoXml = "1.3.2"
 
 # --- Testing ---
 junit = "4.13.2"
@@ -98,6 +104,12 @@ ycharts = { group = "co.yml", name = "ycharts", version.ref = "ycharts" }
 compose-material-dialogs-datetime = { group = "io.github.vanpra.compose-material-dialogs", name = "datetime", version.ref = "composeMaterialDialogs" }
 compose-shimmer = { group = "com.valentinilk.shimmer", name = "compose-shimmer", version.ref = "shimmer" }
 apache-poi = { group = "org.apache.poi", name = "poi-ooxml", version.ref = "poi" }
+talsec-free-rasp = { group = "com.talsec.rasp", name = "free-rasp", version.ref = "talsec" }
+fastexcel-reader = { group = "org.dhatim", name = "fastexcel-reader", version.ref = "fastexcel" }
+aalto-xml = { group = "com.fasterxml", name = "aalto-xml", version.ref = "aaltoXml" }
+rootbeer = { group = "com.scottyab", name = "rootbeer-android", version.ref = "rootbeer" }
+tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tink" }
+codefort = { group = "org.codeberg.mamila", name = "CodeFort", version.ref = "codefort" }
 
 # --- Testing ---
 junit = { group = "junit", name = "junit", version.ref = "junit" }

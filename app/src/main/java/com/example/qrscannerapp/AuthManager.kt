@@ -1,6 +1,7 @@
 package com.example.qrscannerapp
 
 import android.content.Context
+import android.provider.Settings
 import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -8,14 +9,18 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -23,24 +28,40 @@ import kotlinx.coroutines.withContext
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "internal_auth_store")
 private const val TAG = "InternalAuth"
 
-// --- НОВАЯ СТРУКТУРА РОЛЕЙ ---
+// Интервал обновления lastSeen — 3 минуты
+private const val HEARTBEAT_INTERVAL_MS = 3 * 60 * 1000L
+
+// Порог "онлайн" — если lastSeen был менее 5 минут назад
+const val ONLINE_THRESHOLD_MS = 5 * 60 * 1000L
+
 enum class UserRole(val key: String, val displayName: String) {
     ADMIN("admin", "Администратор"),
-    MOVER("muver", "Мувер"), // Ключ оставили старый для совместимости
+    MOVER("muver", "Мувер"),
     ELECTRICIAN("electrician", "Электрик"),
-    INVENTORY_MANAGER("inventory_manager", "Кладовщик"), // Ключ старый, название новое
-    TECHNIC("technic", "Техник"), // НОВАЯ РОЛЬ
-    USER("user", "Пользователь"); // Роль по умолчанию
+    INVENTORY_MANAGER("inventory_manager", "Кладовщик"),
+    TECHNIC("technic", "Техник"),
+    SUPERVISOR("supervisor", "Супервайзер"),
+    SECURITY("security", "СБ"),
+    USER("user", "Пользователь");
 
     companion object {
-        fun fromKey(key: String?): UserRole {
-            return entries.find { it.key == key } ?: USER
-        }
+        fun fromKey(key: String?): UserRole =
+            entries.find { it.key == key } ?: USER
 
-        // Список для выпадающего меню при создании сотрудника
-        fun getSelectableRoles(): List<UserRole> {
-            return entries.filter { it != USER }
-        }
+        fun getSelectableRoles(): List<UserRole> =
+            entries.filter { it != USER }
+    }
+}
+
+enum class ShiftRequestStatus(val key: String) {
+    NONE("NONE"),
+    PENDING("PENDING"),
+    APPROVED("APPROVED"),
+    DENIED("DENIED");
+
+    companion object {
+        fun fromKey(key: String?): ShiftRequestStatus =
+            entries.find { it.key.equals(key, ignoreCase = true) } ?: NONE
     }
 }
 
@@ -49,12 +70,22 @@ data class AuthState(
     val userId: String? = null,
     val userName: String? = null,
     val isAdmin: Boolean = false,
-    val role: UserRole = UserRole.USER, // Теперь здесь тип UserRole
+    val role: UserRole = UserRole.USER,
     val error: String? = null,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val isShiftActive: Boolean = false,
+    val shiftStartTime: Long = 0L,
+    val isAllowedToWork: Boolean = false,
+    val shiftRequestStatus: ShiftRequestStatus = ShiftRequestStatus.NONE
 )
 
-class AuthManager(private val context: Context) {
+class AuthManager(
+    private val context: Context,
+    // TelemetryManager инжектируем через lazy чтобы избежать циклической зависимости
+    // при старте — он создаётся только при первом heartbeat
+    private val telemetryManagerProvider: () -> TelemetryManager
+) {
+
     private val firestore = Firebase.firestore
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val LOGGED_IN_USER_ID_KEY = stringPreferencesKey("logged_in_user_id")
@@ -62,151 +93,295 @@ class AuthManager(private val context: Context) {
     private val _authState = MutableStateFlow(AuthState(isLoggedIn = false))
     val authState = _authState.asStateFlow()
 
+    private var userListener: ListenerRegistration? = null
+
+    // Job для heartbeat — чтобы можно было отменить при logout
+    private var heartbeatJob: Job? = null
+
+    // Уникальный ID текущего устройства
+    private val deviceId: String by lazy {
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
+    }
+
+    // Флаг: нас выкинуло другое устройство (не трогаем activeDeviceId при logout)
+    @Volatile
+    private var isKickedByAnotherDevice = false
+
     val currentUserId: String?
         get() = _authState.value.userId
 
     init {
         scope.launch {
+            // Даём Firebase время инициализироваться
+            delay(1500)
+
             val preferences = context.dataStore.data.first()
             val loggedInUserId = preferences[LOGGED_IN_USER_ID_KEY]
             if (loggedInUserId != null) {
-                Log.d(TAG, "Found saved user session for UID: $loggedInUserId. Fetching data...")
-                loadUserData(loggedInUserId)
+                withContext(Dispatchers.Main) {
+                    attachUserListener(loggedInUserId)
+                }
             } else {
-                Log.d(TAG, "No saved user session found.")
                 _authState.value = AuthState(isLoggedIn = false, isLoading = false)
             }
         }
     }
 
-    fun goOnline() {
-        val uid = _authState.value.userId ?: return
-        Log.d(TAG, "Setting status to 'online' for user $uid")
-        try {
-            val userDocRef = firestore.collection("internal_users").document(uid)
-            userDocRef.update("status", "online")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting online status for user $uid", e)
+    private fun attachUserListener(uid: String) {
+        userListener?.remove()
+
+        userListener = firestore.collection("internal_users").document(uid)
+            .addSnapshotListener { userDocument, error ->
+                if (error != null) {
+                    Log.e(TAG, "Listen failed.", error)
+                    _authState.value = _authState.value.copy(
+                        error = "Ошибка связи с сервером",
+                        isLoading = false
+                    )
+                    return@addSnapshotListener
+                }
+
+                if (userDocument != null && userDocument.exists()) {
+                    // ═══════════════════════════════════════════════════════════
+                    // ПРОВЕРКА ПРИВЯЗКИ УСТРОЙСТВА
+                    // Если activeDeviceId изменился — нас выкинули
+                    // ═══════════════════════════════════════════════════════════
+                    val activeDevice = userDocument.getString("activeDeviceId")
+                    if (activeDevice != null && activeDevice != deviceId) {
+                        Log.w(TAG, "Session taken by another device ($activeDevice). Forcing logout.")
+                        isKickedByAnotherDevice = true
+                        scope.launch {
+                            forceLogoutLocal("Аккаунт используется на другом устройстве")
+                        }
+                        return@addSnapshotListener
+                    }
+
+                    val displayName = userDocument.getString("displayName") ?: "Без имени"
+                    val isAdmin = userDocument.getBoolean("isAdmin") ?: false
+                    val roleString = userDocument.getString("role")
+                    val userRole = UserRole.fromKey(roleString)
+                    val isShiftActive = userDocument.getBoolean("isShiftActive") ?: false
+                    val shiftStartTime = userDocument.getLong("shiftStartTime") ?: 0L
+                    val isAllowedToWork = userDocument.getBoolean("isAllowedToWork") ?: false
+                    val statusString = userDocument.getString("shiftRequestStatus")
+                    val shiftRequestStatus = ShiftRequestStatus.fromKey(statusString)
+
+                    _authState.value = AuthState(
+                        isLoggedIn = true,
+                        userId = uid,
+                        userName = displayName,
+                        isAdmin = isAdmin,
+                        role = userRole,
+                        isShiftActive = isShiftActive,
+                        shiftStartTime = shiftStartTime,
+                        isLoading = false,
+                        isAllowedToWork = isAllowedToWork,
+                        shiftRequestStatus = shiftRequestStatus
+                    )
+                } else {
+                    Log.d(TAG, "User document for UID $uid not found. Logging out.")
+                    scope.launch { logout() }
+                }
+            }
+
+        // Сразу пишем lastSeen + deviceId и запускаем heartbeat
+        startHeartbeat(uid)
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // HEARTBEAT — каждые 3 минуты:
+    //   1. lastSeen + activeDeviceId (онлайн-статус)
+    //   2. Полная телеметрия устройства → пишем прямо в internal_users
+    //   3. GPS координаты для всех ролей (если разрешение выдано)
+    //      Если разрешения нет — старые поля удаляются
+    // ════════════════════════════════════════════════════════════════════════
+    private fun startHeartbeat(uid: String) {
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                try {
+                    val telemetryManager = telemetryManagerProvider()
+
+                    // Собираем телеметрию (без пинга — он медленный)
+                    val telemetry = telemetryManager.getAllTelemetry(includePing = false)
+
+                    // Формируем payload: всё из телеметрии + онлайн-маркеры
+                    val heartbeatData = telemetry.toMutableMap().apply {
+                        put("lastSeen", System.currentTimeMillis())
+                        put("activeDeviceId", deviceId)
+                        // Убираем timestamp из телеметрии — используем lastSeen как единый источник
+                        remove("timestamp")
+                    }
+
+                    // GPS для всех ролей — TelemetryManager сам проверяет разрешения
+                    val location = telemetryManager.getCurrentLocation()
+                    if (location != null) {
+                        heartbeatData["locationLat"] = location.latitude
+                        heartbeatData["locationLng"] = location.longitude
+                        heartbeatData["locationTimestamp"] = location.timestamp
+                        Log.d(TAG, "GPS OK: ${location.latitude}, ${location.longitude}")
+                    } else {
+                        // Нет координат — удаляем старые поля чтобы не показывать протухшие
+                        heartbeatData["locationLat"] = FieldValue.delete()
+                        heartbeatData["locationLng"] = FieldValue.delete()
+                        heartbeatData["locationTimestamp"] = FieldValue.delete()
+                    }
+
+                    firestore.collection("internal_users").document(uid)
+                        .update(heartbeatData)
+                        .await()
+
+                    Log.d(TAG, "Heartbeat OK: lastSeen + telemetry + GPS updated for $uid")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Heartbeat error for $uid", e)
+                }
+                delay(HEARTBEAT_INTERVAL_MS)
+            }
         }
     }
 
     fun goOffline() {
         val uid = _authState.value.userId ?: return
-        Log.d(TAG, "Setting status to 'offline' for user $uid")
-        try {
-            val userDocRef = firestore.collection("internal_users").document(uid)
-            val offlineStatus = mapOf(
-                "status" to "offline",
-                "lastSeen" to FieldValue.serverTimestamp()
-            )
-            userDocRef.update(offlineStatus)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting offline status for user $uid", e)
-        }
-    }
-
-    private suspend fun loadUserData(uid: String) {
-        try {
-            val userDocument = firestore.collection("internal_users").document(uid).get().await()
-            if (userDocument.exists()) {
-                val displayName = userDocument.getString("displayName") ?: "Без имени"
-                val isAdmin = userDocument.getBoolean("isAdmin") ?: false
-
-                // Считываем строку и превращаем в Enum
-                val roleString = userDocument.getString("role")
-                val userRole = UserRole.fromKey(roleString)
-
-                _authState.value = AuthState(
-                    isLoggedIn = true,
-                    userId = uid,
-                    userName = displayName,
-                    isAdmin = isAdmin,
-                    role = userRole, // Сохраняем как Enum
-                    isLoading = false
-                )
-                Log.d(TAG, "Successfully loaded data for user: $displayName, isAdmin: $isAdmin, role: ${userRole.displayName}")
-
-                goOnline()
-
-            } else {
-                Log.w(TAG, "Saved session for UID $uid, but user not found in Firestore. Logging out.")
-                logout()
+        scope.launch {
+            try {
+                firestore.collection("internal_users").document(uid)
+                    .update("lastSeen", 0L)
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error setting offline status", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading user data for UID $uid", e)
-            _authState.value = _authState.value.copy(error = "Ошибка загрузки профиля", isLoading = false)
         }
     }
 
     fun login(username: String, password: String) {
         _authState.value = _authState.value.copy(isLoading = true, error = null)
+        isKickedByAnotherDevice = false
+
         scope.launch {
             try {
-                Log.d(TAG, "Attempting to log in with username: $username")
                 val querySnapshot = firestore.collection("internal_users")
                     .whereEqualTo("username", username)
                     .limit(1)
                     .get()
                     .await()
-
-                if (querySnapshot.isEmpty) {
-                    throw Exception("Пользователь не найден")
-                }
-
+                if (querySnapshot.isEmpty) throw Exception("Пользователь не найден")
                 val userDocument = querySnapshot.documents.first()
                 val correctPassword = userDocument.getString("password")
-
                 if (correctPassword == password) {
-                    Log.d(TAG, "Password is correct. Login successful.")
                     val userId = userDocument.id
 
-                    // Telemetry update logic remains here...
-                    launch {
-                        try {
-                            // Примечание: предполагается, что TelemetryManager существует в проекте
-                            // Если код не компилируется, удалите этот блок или импортируйте TelemetryManager
-                            /*
-                             val telemetryManager = TelemetryManager(context)
-                             val telemetryData = telemetryManager.getAllTelemetry()
-                             firestore.collection("internal_users").document(userId)
-                                 .update(telemetryData)
-                                 .await()
-                            */
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to update telemetry", e)
-                        }
-                    }
+                    // ═══════════════════════════════════════════════════════════
+                    // ПРИВЯЗКА УСТРОЙСТВА — записываем наш deviceId
+                    // Предыдущее устройство увидит изменение через
+                    // snapshot listener и автоматически разлогинится
+                    // ═══════════════════════════════════════════════════════════
+                    firestore.collection("internal_users").document(userId)
+                        .update(
+                            mapOf(
+                                "activeDeviceId" to deviceId,
+                                "lastSeen" to System.currentTimeMillis()
+                            )
+                        )
+                        .await()
 
                     context.dataStore.edit { preferences ->
                         preferences[LOGGED_IN_USER_ID_KEY] = userId
                     }
-                    loadUserData(userId)
+                    withContext(Dispatchers.Main) {
+                        attachUserListener(userId)
+                    }
                 } else {
                     throw Exception("Неверный пароль")
                 }
-
             } catch (e: Exception) {
-                Log.e(TAG, "Login failed", e)
                 withContext(Dispatchers.Main) {
-                    _authState.value = AuthState(isLoggedIn = false, error = e.message ?: "Ошибка входа", isLoading = false)
+                    _authState.value = AuthState(
+                        isLoggedIn = false,
+                        error = e.message ?: "Ошибка входа",
+                        isLoading = false
+                    )
                 }
             }
         }
     }
 
+    /**
+     * Принудительный локальный logout — БЕЗ сброса activeDeviceId в Firestore.
+     * Вызывается когда другое устройство перехватило сессию.
+     */
+    private suspend fun forceLogoutLocal(errorMessage: String) {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+
+        userListener?.remove()
+        userListener = null
+
+        context.dataStore.edit { preferences ->
+            preferences.remove(LOGGED_IN_USER_ID_KEY)
+        }
+
+        withContext(Dispatchers.Main) {
+            _authState.value = AuthState(
+                isLoggedIn = false,
+                isLoading = false,
+                error = errorMessage
+            )
+        }
+    }
+
     fun logout() {
+        // Останавливаем heartbeat и сбрасываем lastSeen
+        heartbeatJob?.cancel()
+        heartbeatJob = null
         goOffline()
+
+        // При ручном logout — очищаем activeDeviceId, чтобы можно было
+        // залогиниться с любого устройства
+        val uid = _authState.value.userId
+        if (uid != null && !isKickedByAnotherDevice) {
+            scope.launch {
+                try {
+                    firestore.collection("internal_users").document(uid)
+                        .update(
+                            mapOf(
+                                "activeDeviceId" to FieldValue.delete()
+                            )
+                        )
+                        .await()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error clearing activeDeviceId", e)
+                }
+            }
+        }
+
+        isKickedByAnotherDevice = false
+
+        userListener?.remove()
+        userListener = null
 
         scope.launch {
             context.dataStore.edit { preferences ->
                 preferences.remove(LOGGED_IN_USER_ID_KEY)
             }
             _authState.value = AuthState(isLoggedIn = false, isLoading = false)
-            Log.d(TAG, "User logged out.")
         }
     }
 
     fun clearError() {
         _authState.value = _authState.value.copy(error = null)
+    }
+
+    fun startShiftLocally() {
+        _authState.value = _authState.value.copy(
+            isShiftActive = true,
+            shiftStartTime = System.currentTimeMillis()
+        )
+    }
+
+    fun endShiftLocally() {
+        _authState.value = _authState.value.copy(
+            isShiftActive = false,
+            shiftStartTime = 0L
+        )
     }
 }

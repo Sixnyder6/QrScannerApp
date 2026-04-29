@@ -1,10 +1,11 @@
-// Полная, обновленная версия файла: DashboardScreen.kt
-// Реализовано: Добавление, Удаление и РЕДАКТИРОВАНИЕ (карандаш) + НОВАЯ СИСТЕМА РОЛЕЙ
-
 package com.example.qrscannerapp
 
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,26 +20,36 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.common.ui.AppBackground
+import com.example.qrscannerapp.common.ui.SkeletonBlock
 import com.example.qrscannerapp.features.tasks.domain.model.Task
 import com.example.qrscannerapp.features.tasks.domain.model.TaskStatus
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-// ИМПОРТ НАШЕГО ENUM
-import com.example.qrscannerapp.UserRole
+
+private fun getAppVersionName(context: android.content.Context): String {
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0)).versionName ?: "1.3.8"
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.3.8"
+        }
+    } catch (_: Exception) { "1.3.8" }
+}
+
+private enum class ExpandedWidget { NONE, SCANS, FIELD, TEAM, TASKS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,141 +58,33 @@ fun DashboardScreen(
     onNavigateToEmployeeProfile: (userId: String) -> Unit,
     onNavigateToAdminRepairLog: () -> Unit,
     onNavigateToTaskCreation: () -> Unit,
-    onNavigateToVehicleReport: () -> Unit
+    onNavigateToVehicleReport: () -> Unit,
+    onNavigateToTeam: () -> Unit = {},
+    onNavigateToFieldRepairAdmin: () -> Unit = {},
+    onNavigateToEmployeeDetail: (userId: String, userName: String, userRole: String) -> Unit = { _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val currentAppVersion = remember { getAppVersionName(context) }
 
-    // Состояния для BottomSheets
-    val employeeDetailsSheetState = rememberModalBottomSheetState()
-    val employeeListSheetState = rememberModalBottomSheetState()
-    var showEmployeeListSheet by remember { mutableStateOf(false) }
-
+    var expandedWidget by remember { mutableStateOf(ExpandedWidget.NONE) }
+    var showAlertDialog by remember { mutableStateOf(false) }
     val selectedTaskForDetails = remember { mutableStateOf<Task?>(null) }
     val taskDetailsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Состояния для диалогов
-    var showClearArchiveDialog by remember { mutableStateOf(false) }
-
-    // Состояние диалога Добавления/Редактирования
-    var showAddEditDialog by remember { mutableStateOf(false) }
-    // Храним сотрудника, которого редактируем (если null - значит создаем нового)
-    var employeeToEdit by remember { mutableStateOf<EmployeeInfo?>(null) }
-
-    // Состояния для удаления сотрудника
-    var showDeleteEmployeeConfirmDialog by remember { mutableStateOf(false) }
-    var employeeToDeleteId by remember { mutableStateOf<String?>(null) }
-
-    // --- ЛОГИКА ПОКАЗА ДИАЛОГОВ ---
-
-    // Диалог Добавления / Редактирования
-    if (showAddEditDialog) {
-        AddEditEmployeeDialog(
-            initialName = employeeToEdit?.name ?: "",
-            // Логин при редактировании не показываем старый (безопасность), либо оставляем пустым
-            initialUsername = "",
-            // Если редактируем - конвертируем строку из БД в Enum, иначе берем дефолтную роль (например Мувер)
-            initialRole = if (employeeToEdit != null) UserRole.fromKey(employeeToEdit!!.role) else UserRole.MOVER,
-            isEditMode = employeeToEdit != null,
-            onDismiss = {
-                showAddEditDialog = false
-                employeeToEdit = null
-            },
-            onConfirm = { name, username, pass, role ->
-                // role здесь приходит как UserRole, нам нужно достать ключ (.key)
-                if (employeeToEdit != null) {
-                    // Режим редактирования
-                    viewModel.updateEmployee(employeeToEdit!!.id, name, username, pass, role.key)
-                } else {
-                    // Режим создания
-                    viewModel.createEmployee(name, username, pass, role.key)
-                }
-                showAddEditDialog = false
-                employeeToEdit = null
-            }
-        )
+    val pendingRequests = uiState.pendingShiftRequests
+    val outdatedEmployees = remember(uiState.allEmployees, currentAppVersion) {
+        uiState.allEmployees.filter { it.appVersion != null && it.appVersion != currentAppVersion && it.isOnline }
     }
+    val alertCount = pendingRequests.size + (if (outdatedEmployees.isNotEmpty()) 1 else 0)
 
-    // Диалог подтверждения удаления
-    if (showDeleteEmployeeConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                showDeleteEmployeeConfirmDialog = false
-                employeeToDeleteId = null
-            },
-            title = { Text("Удалить сотрудника?") },
-            text = { Text("Сотрудник будет удален из базы навсегда. Доступ в приложение будет закрыт.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        employeeToDeleteId?.let { id ->
-                            viewModel.deleteEmployee(id)
-                        }
-                        showDeleteEmployeeConfirmDialog = false
-                        employeeToDeleteId = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = StardustError)
-                ) {
-                    Text("Удалить")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = {
-                    showDeleteEmployeeConfirmDialog = false
-                    employeeToDeleteId = null
-                }) {
-                    Text("Отмена")
-                }
-            },
-            containerColor = StardustModalBg,
-            titleContentColor = StardustTextPrimary,
-            textContentColor = StardustTextPrimary
-        )
-    }
-
-    if (uiState.selectedEmployeeDetails != null) {
-        EmployeeDetailsSheet(
-            details = uiState.selectedEmployeeDetails!!,
-            isLoading = uiState.isDetailsLoading,
-            sheetState = employeeDetailsSheetState,
-            onDismiss = {
-                scope.launch {
-                    employeeDetailsSheetState.hide()
-                    viewModel.clearEmployeeDetails()
-                }
-            }
-        )
-    }
-
-    if (showEmployeeListSheet) {
-        EmployeeListSheet(
-            employees = uiState.allEmployees,
-            sheetState = employeeListSheetState,
-            onDismiss = { showEmployeeListSheet = false },
-            onEmployeeClick = { userId ->
-                scope.launch { employeeListSheetState.hide() }.invokeOnCompletion {
-                    showEmployeeListSheet = false
-                    onNavigateToEmployeeProfile(userId)
-                }
-            },
-            onAddClick = {
-                scope.launch { employeeListSheetState.hide() }.invokeOnCompletion {
-                    showEmployeeListSheet = false
-                    employeeToEdit = null // Очищаем = создание нового
-                    showAddEditDialog = true
-                }
-            },
-            onEditClick = { employee ->
-                scope.launch { employeeListSheetState.hide() }.invokeOnCompletion {
-                    showEmployeeListSheet = false
-                    employeeToEdit = employee // Запоминаем = редактирование
-                    showAddEditDialog = true
-                }
-            },
-            onDeleteClick = { userId ->
-                employeeToDeleteId = userId
-                showDeleteEmployeeConfirmDialog = true
-            }
+    if (showAlertDialog) {
+        AlertDetailsDialog(
+            pendingRequests = pendingRequests, outdatedEmployees = outdatedEmployees,
+            currentAppVersion = currentAppVersion,
+            onApprove = { viewModel.approveShiftRequest(it) },
+            onDeny = { viewModel.denyShiftRequest(it) },
+            onDismiss = { showAlertDialog = false }
         )
     }
 
@@ -189,209 +92,460 @@ fun DashboardScreen(
         DashboardTaskDetailsSheet(
             task = selectedTaskForDetails.value!!,
             sheetState = taskDetailsSheetState,
-            onDismiss = {
-                scope.launch { taskDetailsSheetState.hide() }.invokeOnCompletion {
-                    selectedTaskForDetails.value = null
-                }
-            }
-        )
-    }
-
-    if (showClearArchiveDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearArchiveDialog = false },
-            title = { Text("Очистить архив?") },
-            text = { Text("Будут удалены все завершенные и отмененные задачи. Это действие необратимо.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.clearArchivedTasks()
-                        showClearArchiveDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = StardustError)
-                ) {
-                    Text("Очистить")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showClearArchiveDialog = false }) {
-                    Text("Отмена")
-                }
-            }
+            onDismiss = { selectedTaskForDetails.value = null }
         )
     }
 
     AppBackground {
-        Scaffold(
-            floatingActionButton = {
-                FloatingActionButton(
-                    onClick = onNavigateToTaskCreation,
-                    containerColor = StardustPrimary
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Создать задачу")
+        Box(modifier = Modifier.fillMaxSize()) {
+            when {
+                uiState.isLoading -> DashboardSkeleton()
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+
+                        // ── Заголовок ──
+                        item(key = "header") {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("Сегодня", style = MaterialTheme.typography.titleMedium, color = StardustTextSecondary)
+                                if (alertCount > 0) {
+                                    BadgedBox(badge = { Badge(containerColor = StardustError) { Text(alertCount.toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) } }) {
+                                        IconButton(onClick = { showAlertDialog = true }, modifier = Modifier.size(36.dp).background(StardustError.copy(alpha = 0.15f), CircleShape)) {
+                                            Icon(Icons.Default.NotificationsActive, "Алерты", tint = StardustError, modifier = Modifier.size(20.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 4 виджета 2×2 + раскрытая панель ──
+                        item(key = "widgets") {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    DashWidget(
+                                        title = "Сканы", value = uiState.scansToday.toString(), icon = Icons.Default.QrCodeScanner,
+                                        sub = if (uiState.scansYesterday > 0) { val d = uiState.scansToday - uiState.scansYesterday; "${if (d >= 0) "↑" else "↓"} ${kotlin.math.abs(d)} vs вчера" } else null,
+                                        subColor = if (uiState.scansToday >= uiState.scansYesterday) StardustSuccess else StardustError,
+                                        isExpanded = expandedWidget == ExpandedWidget.SCANS, modifier = Modifier.weight(1f),
+                                        onClick = { expandedWidget = if (expandedWidget == ExpandedWidget.SCANS) ExpandedWidget.NONE else ExpandedWidget.SCANS }
+                                    )
+                                    DashWidget(
+                                        title = "Поле",
+                                        value = if (uiState.fieldTotalToday > 0) "${uiState.fieldDoneToday}/${uiState.fieldTotalToday}" else "—",
+                                        icon = Icons.Default.TwoWheeler,
+                                        sub = if (uiState.fieldTotalToday > 0) "${(uiState.fieldDoneToday * 100f / uiState.fieldTotalToday).toInt()}% готово" else "нет сессии",
+                                        subColor = if (uiState.fieldTotalToday > 0) StardustSuccess else StardustTextSecondary,
+                                        isExpanded = expandedWidget == ExpandedWidget.FIELD, modifier = Modifier.weight(1f),
+                                        onClick = { expandedWidget = if (expandedWidget == ExpandedWidget.FIELD) ExpandedWidget.NONE else ExpandedWidget.FIELD }
+                                    )
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    DashWidget(
+                                        title = "Команда", value = "${uiState.employeesOnShift}/${uiState.allEmployees.size}", icon = Icons.Default.Groups,
+                                        sub = "на смене", subColor = StardustTextSecondary,
+                                        isExpanded = expandedWidget == ExpandedWidget.TEAM, modifier = Modifier.weight(1f),
+                                        onClick = { expandedWidget = if (expandedWidget == ExpandedWidget.TEAM) ExpandedWidget.NONE else ExpandedWidget.TEAM }
+                                    )
+                                    DashWidget(
+                                        title = "Задачи", value = uiState.activeTasks.size.toString(), icon = Icons.Default.TaskAlt,
+                                        sub = run { val n = uiState.activeTasks.count { it.status == TaskStatus.NEW }; val p = uiState.activeTasks.count { it.status == TaskStatus.IN_PROGRESS }; if (n > 0 || p > 0) "${n} новых · ${p} в работе" else "всё спокойно" },
+                                        subColor = if (uiState.activeTasks.any { it.status == TaskStatus.IN_PROGRESS }) StardustWarning else StardustTextSecondary,
+                                        isExpanded = expandedWidget == ExpandedWidget.TASKS, modifier = Modifier.weight(1f),
+                                        onClick = { expandedWidget = if (expandedWidget == ExpandedWidget.TASKS) ExpandedWidget.NONE else ExpandedWidget.TASKS }
+                                    )
+                                }
+
+                                // Раскрытая панель
+                                AnimatedContent(
+                                    targetState = expandedWidget,
+                                    transitionSpec = { fadeIn(tween(200)) + expandVertically(tween(250)) togetherWith fadeOut(tween(150)) + shrinkVertically(tween(200)) },
+                                    label = "expand"
+                                ) { widget ->
+                                    when (widget) {
+                                        ExpandedWidget.SCANS -> ScansExpandPanel(
+                                            employeeActivities = uiState.employeeActivities,
+                                            scansToday = uiState.scansToday,
+                                            scansYesterday = uiState.scansYesterday,
+                                            hourlyActivity = uiState.hourlyActivity
+                                        )
+                                        ExpandedWidget.FIELD -> FieldExpandPanel(
+                                            total = uiState.fieldTotalToday, done = uiState.fieldDoneToday,
+                                            inProgress = uiState.fieldInProgressToday, toStorage = uiState.fieldToStorageToday,
+                                            notFound = uiState.fieldNotFoundToday, techs = uiState.fieldTechnicianProgress,
+                                            onOpenAdmin = onNavigateToFieldRepairAdmin
+                                        )
+                                        ExpandedWidget.TEAM -> TeamExpandPanel(
+                                            employees = uiState.employeesOnShiftDetails, allEmployees = uiState.allEmployees,
+                                            onEmployeeClick = { emp -> val info = uiState.allEmployees.find { it.id == emp.id }; if (info != null) onNavigateToEmployeeDetail(info.id, info.displayName, info.role) }
+                                        )
+                                        ExpandedWidget.TASKS -> TasksExpandPanel(
+                                            tasks = uiState.activeTasks, onTaskClick = { selectedTaskForDetails.value = it },
+                                            onCreateTask = onNavigateToTaskCreation
+                                        )
+                                        ExpandedWidget.NONE -> Box(Modifier.fillMaxWidth().height(0.dp))
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── График активности ──
+                        item(key = "activity_chart") {
+                            val chartPoints = when (uiState.chartMode) {
+                                ActivityChartMode.TODAY -> uiState.hourlyActivity
+                                ActivityChartMode.YESTERDAY -> uiState.yesterdayActivity
+                                ActivityChartMode.WEEK -> uiState.weekActivity
+                            }
+                            HourlyActivityCard(points = chartPoints, chartMode = uiState.chartMode, onModeChange = { viewModel.setChartMode(it) })
+                        }
+
+                        // ── Инструменты ──
+                        item(key = "tools") {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Инструменты", style = MaterialTheme.typography.titleMedium, color = StardustTextSecondary)
+                                ToolCard(
+                                    icon = Icons.Default.TwoWheeler, iconColor = Color(0xFF6C5CE7),
+                                    title = "Полевой ремонт",
+                                    subtitle = if (uiState.fieldTotalToday > 0) "Активно: ${uiState.fieldTotalToday} · Готово: ${uiState.fieldDoneToday}" else "Мониторинг · импорт заданий",
+                                    badge = if (uiState.fieldInProgressToday > 0) uiState.fieldInProgressToday.toString() else null,
+                                    badgeColor = StardustWarning, onClick = onNavigateToFieldRepairAdmin
+                                )
+                                ToolCard(
+                                    icon = Icons.Default.Build, iconColor = Color(0xFF38BDF8),
+                                    title = "Журнал ремонтов", subtitle = "Ремонты АКБ · по электрикам",
+                                    badge = if (uiState.repairsToday > 0) uiState.repairsToday.toString() else null,
+                                    badgeColor = Color(0xFF38BDF8), onClick = onNavigateToAdminRepairLog
+                                )
+                                ToolCard(
+                                    icon = Icons.Default.Summarize, iconColor = StardustPrimary,
+                                    title = "Сводка по самокатам", subtitle = "Загрузить и проанализировать Excel",
+                                    onClick = onNavigateToVehicleReport
+                                )
+                            }
+                        }
+
+                        item(key = "bottom_spacer") { Spacer(Modifier.height(80.dp)) }
+                    }
                 }
-            },
-            containerColor = Color.Transparent
-        ) { paddingValues ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-            ) {
-                when {
-                    uiState.isLoading -> {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = StardustPrimary)
+            }
+        }
+    }
+}
+
+// ── Виджет ───────────────────────────────────────────────────────────────────
+
+@Composable
+private fun DashWidget(title: String, value: String, icon: ImageVector, sub: String?, subColor: Color, isExpanded: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Card(
+        modifier = modifier.border(1.dp, if (isExpanded) StardustPrimary.copy(alpha = 0.5f) else Color.Transparent, RoundedCornerShape(14.dp)).clickable { onClick() },
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = StardustGlassBg),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 90.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)
+        ) {
+            Icon(icon, null, tint = if (isExpanded) StardustPrimary else StardustPrimary.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
+            Text(value, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = StardustTextSecondary, fontSize = 10.sp, maxLines = 1)
+            if (sub != null) Text(sub, color = subColor, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Box(modifier = Modifier.size(width = 20.dp, height = 2.dp).clip(RoundedCornerShape(1.dp)).background(if (isExpanded) StardustPrimary else StardustTextSecondary.copy(alpha = 0.2f)))
+        }
+    }
+}
+
+// ── Раскрытые панели ─────────────────────────────────────────────────────────
+
+@Composable
+private fun ScansExpandPanel(employeeActivities: List<EmployeeActivity>, scansToday: Int, scansYesterday: Int, hourlyActivity: List<HourlyActivityPoint>) {
+    val delta = scansToday - scansYesterday; val isUp = delta >= 0
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(StardustGlassBg).border(0.5.dp, StardustPrimary.copy(alpha = 0.3f), RoundedCornerShape(14.dp)).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(scansToday.toString(), color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+            val dc = if (isUp) StardustSuccess else StardustError
+            Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(dc.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+                Text("${if (isUp) "↑" else "↓"} ${kotlin.math.abs(delta)} vs вчера", color = dc, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (hourlyActivity.isNotEmpty() && hourlyActivity.any { it.scans > 0 }) {
+            val maxS = hourlyActivity.maxOf { it.scans }.takeIf { it > 0 } ?: 1
+            Row(modifier = Modifier.fillMaxWidth().height(36.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
+                hourlyActivity.forEach { pt ->
+                    val f = (pt.scans.toFloat() / maxS).coerceIn(0f, 1f)
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight(f.coerceAtLeast(0.06f)).clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)).background(StardustPrimary.copy(alpha = 0.4f + f * 0.5f)))
+                }
+            }
+        }
+        HorizontalDivider(color = StardustItemBg)
+        Text("По сотрудникам", color = StardustTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        if (employeeActivities.isEmpty()) {
+            Text("Активности пока нет", color = StardustTextSecondary, fontSize = 12.sp)
+        } else {
+            employeeActivities.sortedByDescending { it.totalScans }.take(5).forEach { activity ->
+                val fraction = if (scansToday > 0) activity.totalScans.toFloat() / scansToday else 0f
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(if (activity.status == "online") StardustSuccess else StardustTextSecondary))
+                    Text(activity.name.split(" ").firstOrNull() ?: activity.name, color = StardustTextPrimary, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    LinearProgressIndicator(progress = { fraction }, modifier = Modifier.width(60.dp).height(3.dp).clip(RoundedCornerShape(2.dp)), color = StardustPrimary, trackColor = StardustItemBg)
+                    Text(activity.totalScans.toString(), color = StardustTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(32.dp), textAlign = TextAlign.End)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FieldExpandPanel(total: Int, done: Int, inProgress: Int, toStorage: Int, notFound: Int, techs: List<TechnicianStat>, onOpenAdmin: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(StardustGlassBg).border(0.5.dp, Color(0xFF6C5CE7).copy(alpha = 0.3f), RoundedCornerShape(14.dp)).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        if (total == 0) { Text("Нет активной сессии", color = StardustTextSecondary, fontSize = 13.sp); return@Column }
+        val t = total.toFloat()
+        Row(modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))) {
+            if (done > 0)       Box(Modifier.weight(done / t).fillMaxHeight().background(StardustSuccess))
+            if (toStorage > 0)  Box(Modifier.weight(toStorage / t).fillMaxHeight().background(Color(0xFF38BDF8)))
+            if (notFound > 0)   Box(Modifier.weight(notFound / t).fillMaxHeight().background(StardustError))
+            if (inProgress > 0) Box(Modifier.weight(inProgress / t).fillMaxHeight().background(StardustWarning))
+            val newCnt = total - done - toStorage - notFound - inProgress
+            if (newCnt > 0) Box(Modifier.weight(newCnt / t).fillMaxHeight().background(StardustItemBg))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (done > 0)       ExpandChip("✓ $done", StardustSuccess)
+            if (toStorage > 0)  ExpandChip("▲ $toStorage", Color(0xFF38BDF8))
+            if (notFound > 0)   ExpandChip("? $notFound", StardustError)
+            if (inProgress > 0) ExpandChip("⟳ $inProgress", StardustWarning)
+        }
+        if (techs.isNotEmpty()) {
+            HorizontalDivider(color = StardustItemBg)
+            techs.take(3).forEach { tech ->
+                val tf = if (tech.total > 0) tech.done.toFloat() / tech.total else 0f
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val initials = tech.name.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("")
+                    Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(Color(0xFF6C5CE7).copy(0.15f)), contentAlignment = Alignment.Center) {
+                        Text(initials, color = Color(0xFF6C5CE7), fontSize = 8.sp, fontWeight = FontWeight.Bold)
                     }
-                    uiState.error != null -> {
-                        Text(uiState.error!!, color = StardustError, modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(16.dp), textAlign = TextAlign.Center)
+                    Text(tech.name.split(" ").firstOrNull() ?: tech.name, color = StardustTextPrimary, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    LinearProgressIndicator(progress = { tf }, modifier = Modifier.width(50.dp).height(3.dp).clip(RoundedCornerShape(2.dp)), color = if (tf >= 1f) StardustSuccess else Color(0xFF6C5CE7), trackColor = StardustItemBg)
+                    Text("${tech.done}/${tech.total}", color = StardustTextSecondary, fontSize = 10.sp)
+                }
+            }
+        }
+        OutlinedButton(
+            onClick = onOpenAdmin, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF6C5CE7).copy(alpha = 0.4f)),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF6C5CE7))
+        ) { Text("Открыть мониторинг →", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+    }
+}
+
+@Composable
+private fun TeamExpandPanel(employees: List<EmployeeActivity>, allEmployees: List<EmployeeInfo>, onEmployeeClick: (EmployeeActivity) -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(StardustGlassBg).border(0.5.dp, StardustPrimary.copy(alpha = 0.3f), RoundedCornerShape(14.dp)).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (employees.isEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.NightShelter, null, tint = StardustTextSecondary, modifier = Modifier.size(18.dp))
+                Text("Никого нет на смене", color = StardustTextSecondary, fontSize = 13.sp)
+            }
+            return@Column
+        }
+        val onShift  = allEmployees.filter { emp -> employees.any { it.id == emp.id } }
+        val offShift = allEmployees.filter { emp -> employees.none { it.id == emp.id } }
+        if (onShift.isNotEmpty()) {
+            Text("На смене · ${onShift.size}", color = StardustSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            onShift.forEach { info ->
+                val activity = employees.find { it.id == info.id }
+                val roleColor = when (info.role) { "admin" -> Color(0xFFEC407A); "inventory_manager" -> Color(0xFF4CAF50); "muver" -> Color(0xFF29B6F6); "electrician" -> Color(0xFFFFCA28); "technic" -> Color(0xFFAB47BC); else -> Color(0xFF78909C) }
+                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { activity?.let { onEmployeeClick(it) } }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(modifier = Modifier.size(30.dp).clip(CircleShape).background(roleColor.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                        Text(info.displayName.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercase() }.joinToString(""), color = roleColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
-                    else -> {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(24.dp)
-                        ) {
-                            item {
-                                SectionTitle(title = "Сводка за сегодня")
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    StatCard("Сканы", uiState.scansToday.toString(), Icons.Default.QrCodeScanner, Modifier.weight(1f))
-                                    StatCard("Партии", uiState.logEntriesToday.toString(), Icons.Default.BarChart, Modifier.weight(1f))
-                                    Box(modifier = Modifier
-                                        .weight(1f)
-                                        .clickable(onClick = onNavigateToAdminRepairLog)) {
-                                        StatCard("Ремонты", uiState.repairsToday.toString(), Icons.Default.Build)
-                                    }
-                                    Box(modifier = Modifier
-                                        .weight(1f)
-                                        .clickable { showEmployeeListSheet = true }) {
-                                        StatCard(
-                                            title = "Сотрудники",
-                                            value = uiState.allEmployees.size.toString(),
-                                            icon = Icons.Default.Groups
-                                        )
-                                    }
-                                }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(info.displayName, color = StardustTextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(UserRole.fromKey(info.role).displayName, color = StardustTextSecondary, fontSize = 10.sp)
+                    }
+                    if (activity != null && activity.totalScans > 0) Text("${activity.totalScans} ск.", color = StardustSuccess, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        if (offShift.isNotEmpty()) {
+            HorizontalDivider(color = StardustItemBg)
+            Text("Не на смене · ${offShift.size}", color = StardustTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            offShift.take(4).forEach { info ->
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(StardustTextSecondary.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+                        Text(info.displayName.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercase() }.joinToString(""), color = StardustTextSecondary, fontSize = 8.sp)
+                    }
+                    Text(info.displayName, color = StardustTextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (offShift.size > 4) Text("ещё ${offShift.size - 4}...", color = StardustTextSecondary, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun TasksExpandPanel(tasks: List<Task>, onTaskClick: (Task) -> Unit, onCreateTask: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(StardustGlassBg).border(0.5.dp, StardustPrimary.copy(alpha = 0.3f), RoundedCornerShape(14.dp)).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (tasks.isEmpty()) {
+            Text("Нет активных задач", color = StardustTextSecondary, fontSize = 13.sp)
+        } else {
+            tasks.take(5).forEach { task ->
+                val timeString = remember(task.createdAt) { task.createdAt?.let { SimpleDateFormat("HH:mm", Locale.getDefault()).format(it) } ?: "--:--" }
+                val statusColor = when (task.status) { TaskStatus.NEW -> StardustPrimary; TaskStatus.IN_PROGRESS -> StardustWarning; TaskStatus.COMPLETED -> StardustSuccess; TaskStatus.CANCELED -> StardustError; else -> StardustTextSecondary }
+                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onTaskClick(task) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(statusColor))
+                    Text(task.title, color = StardustTextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (task.assigneeName.isNotBlank()) Text(task.assigneeName.split(" ").firstOrNull() ?: "", color = StardustTextSecondary, fontSize = 11.sp)
+                    Text(timeString, color = StardustTextSecondary, fontSize = 10.sp)
+                }
+            }
+            if (tasks.size > 5) Text("ещё ${tasks.size - 5} задач", color = StardustTextSecondary, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        HorizontalDivider(color = StardustItemBg)
+        OutlinedButton(
+            onClick = onCreateTask, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.4f)),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = StardustPrimary)
+        ) {
+            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
+            Text("Создать задачу", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+// ── Инструмент-кнопка ─────────────────────────────────────────────────────────
+
+@Composable
+private fun ToolCard(icon: ImageVector, iconColor: Color, title: String, subtitle: String, badge: String? = null, badgeColor: Color = StardustWarning, onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = StardustGlassBg), elevation = CardDefaults.cardElevation(0.dp)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(iconColor.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = StardustTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+                Text(subtitle, color = StardustTextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (badge != null) Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(badgeColor.copy(0.15f)).padding(horizontal = 7.dp, vertical = 3.dp)) { Text(badge, color = badgeColor, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+            Icon(Icons.Default.ChevronRight, null, tint = StardustTextSecondary, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+// ── Вспомогалки ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun ExpandChip(label: String, color: Color) {
+    Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = 0.1f)).padding(horizontal = 7.dp, vertical = 3.dp)) {
+        Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun DashboardSkeleton() {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.3f).height(16.dp), cornerRadius = 6)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { SkeletonBlock(modifier = Modifier.weight(1f).height(90.dp)); SkeletonBlock(modifier = Modifier.weight(1f).height(90.dp)) }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { SkeletonBlock(modifier = Modifier.weight(1f).height(90.dp)); SkeletonBlock(modifier = Modifier.weight(1f).height(90.dp)) }
+        SkeletonBlock(modifier = Modifier.fillMaxWidth().height(150.dp))
+        SkeletonBlock(modifier = Modifier.fillMaxWidth(0.3f).height(14.dp), cornerRadius = 6)
+        repeat(3) { SkeletonBlock(modifier = Modifier.fillMaxWidth().height(52.dp)) }
+    }
+}
+
+// ── Диалоги ───────────────────────────────────────────────────────────────────
+
+@Composable
+private fun AlertDetailsDialog(pendingRequests: List<EmployeeInfo>, outdatedEmployees: List<EmployeeInfo>, currentAppVersion: String, onApprove: (String) -> Unit, onDeny: (String) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg), modifier = Modifier.fillMaxWidth().wrapContentHeight().clip(RoundedCornerShape(20.dp))) {
+            Column(modifier = Modifier.padding(20.dp).defaultMinSize(minHeight = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Warning, null, tint = StardustError, modifier = Modifier.size(24.dp)); Spacer(modifier = Modifier.width(10.dp)); Text("Требует внимания", color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f)) }
+                HorizontalDivider(color = StardustItemBg)
+                if (pendingRequests.isNotEmpty()) {
+                    Text("Запросы на смену", color = StardustTextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    pendingRequests.forEach { employee ->
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(modifier = Modifier.weight(1f)) { Text(employee.displayName, color = StardustTextPrimary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(UserRole.fromKey(employee.role).displayName, color = StardustTextSecondary, fontSize = 11.sp) }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilledIconButton(onClick = { onApprove(employee.id) }, modifier = Modifier.size(32.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = StardustSuccess.copy(alpha = 0.2f))) { Icon(Icons.Default.Check, null, tint = StardustSuccess, modifier = Modifier.size(18.dp)) }
+                                FilledIconButton(onClick = { onDeny(employee.id) }, modifier = Modifier.size(32.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = StardustError.copy(alpha = 0.2f))) { Icon(Icons.Default.Close, null, tint = StardustError, modifier = Modifier.size(18.dp)) }
                             }
+                        }
+                    }
+                }
+                if (outdatedEmployees.isNotEmpty()) {
+                    if (pendingRequests.isNotEmpty()) HorizontalDivider(color = StardustItemBg)
+                    Text("Устаревшая версия (v$currentAppVersion)", color = StardustWarning, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    outdatedEmployees.forEach { emp ->
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(emp.displayName, color = StardustTextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(color = StardustWarning.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) { Text("v${emp.appVersion ?: "?"}", color = StardustWarning, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Закрыть", color = StardustPrimary) }
+            }
+        }
+    }
+}
 
-                            item {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    SectionTitle(title = "Терминал Задач")
-                                    IconButton(onClick = { showClearArchiveDialog = true }) {
-                                        Icon(
-                                            Icons.Default.DeleteSweep,
-                                            contentDescription = "Очистить архив",
-                                            tint = StardustTextSecondary
-                                        )
-                                    }
-                                }
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(300.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
-                                ) {
-                                    if (uiState.activeTasks.isEmpty()) {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "Нет активных задач.",
-                                                color = StardustTextSecondary,
-                                                textAlign = TextAlign.Center
-                                            )
-                                        }
-                                    } else {
-                                        LazyColumn(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentPadding = PaddingValues(16.dp),
-                                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                            items(uiState.activeTasks, key = { it.id }) { task ->
-                                                ActiveTaskItem(
-                                                    task = task,
-                                                    onClick = { selectedTaskForDetails.value = task }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+@Composable
+fun HourlyActivityCard(points: List<HourlyActivityPoint>, chartMode: ActivityChartMode, onModeChange: (ActivityChartMode) -> Unit) {
+    val hasData = points.any { it.scans > 0 }
+    val maxScans = points.maxOfOrNull { it.scans }?.takeIf { it > 0 } ?: 1
+    val animProgress = remember { Animatable(0f) }
+    LaunchedEffect(chartMode) { animProgress.snapTo(0f); animProgress.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 200f)) }
+    val progress by animProgress.asState()
+    val screenWidth = LocalConfiguration.current.screenWidthDp
+    val chartHeight = if (screenWidth > 400) 120.dp else 100.dp
 
-                            item {
-                                SectionTitle(title = "Отчеты")
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(onClick = onNavigateToVehicleReport),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Summarize,
-                                            contentDescription = "Отчеты",
-                                            tint = StardustPrimary,
-                                            modifier = Modifier.size(40.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Сводка по самокатам",
-                                                color = StardustTextPrimary,
-                                                fontWeight = FontWeight.SemiBold,
-                                                style = MaterialTheme.typography.bodyLarge
-                                            )
-                                            Text(
-                                                text = "Загрузка и анализ Excel-отчета",
-                                                color = StardustTextSecondary,
-                                                style = MaterialTheme.typography.bodySmall
-                                            )
-                                        }
-                                        Icon(
-                                            imageVector = Icons.Default.ChevronRight,
-                                            contentDescription = "Перейти",
-                                            tint = StardustTextSecondary
-                                        )
-                                    }
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = StardustGlassBg), modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(0.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Активность", color = StardustTextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(ActivityChartMode.TODAY to "Сегодня", ActivityChartMode.YESTERDAY to "Вчера", ActivityChartMode.WEEK to "Неделя").forEach { (mode, label) ->
+                        FilterChip(selected = chartMode == mode, onClick = { onModeChange(mode) }, label = { Text(label, fontSize = 10.sp) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = StardustPrimary, selectedLabelColor = Color.White, containerColor = StardustItemBg, labelColor = StardustTextSecondary), border = null, shape = RoundedCornerShape(8.dp), modifier = Modifier.height(28.dp))
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            AnimatedContent(targetState = chartMode, transitionSpec = { fadeIn(tween(250)) togetherWith fadeOut(tween(200)) }, label = "chart") { mode ->
+                if (points.isEmpty() || !hasData) {
+                    Box(modifier = Modifier.fillMaxWidth().height(chartHeight), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.BarChart, null, tint = StardustTextSecondary.copy(alpha = 0.3f), modifier = Modifier.size(28.dp)); Spacer(Modifier.height(4.dp)); Text("Пока нет активности", color = StardustTextSecondary, fontSize = 12.sp) }
+                    }
+                } else {
+                    Row(modifier = Modifier.fillMaxWidth().height(chartHeight), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
+                        points.forEach { point ->
+                            val frac = ((point.scans.toFloat() / maxScans) * progress).coerceIn(0f, 1f)
+                            Column(modifier = Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
+                                Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.BottomCenter) {
+                                    Box(modifier = Modifier.fillMaxWidth().fillMaxHeight().clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)).background(StardustPrimary.copy(alpha = 0.08f)))
+                                    if (frac > 0f) Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(frac).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)).background(StardustPrimary.copy(alpha = (0.5f + frac * 0.5f).coerceIn(0f, 1f))))
                                 }
-                            }
-
-                            item { SectionTitle(title = "Активность сотрудников (сегодня)") }
-
-                            if (uiState.employeeActivities.isEmpty()) {
-                                item {
-                                    Text(
-                                        text = "Сегодня еще не было активности.",
-                                        color = StardustTextSecondary,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 40.dp),
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            } else {
-                                items(uiState.employeeActivities) { activity ->
-                                    EmployeeActivityListItem(
-                                        activity = activity,
-                                        onClick = { onNavigateToEmployeeProfile(activity.id) }
-                                    )
-                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                val label = if (mode == ActivityChartMode.WEEK) listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").getOrElse(point.hour) { "" } else "${point.hour}"
+                                Text(label, color = StardustTextSecondary, fontSize = 9.sp, maxLines = 1)
                             }
                         }
                     }
@@ -401,663 +555,100 @@ fun DashboardScreen(
     }
 }
 
-// ... Остальные Composable (ActiveTaskItem, DashboardTaskDetailsSheet и т.д.) без изменений ...
-// Для краткости я их пропустил, но в твоем файле они должны остаться!
-// Если ты копируешь весь файл, убедись, что вспомогательные функции ниже тоже скопированы.
-// Я сейчас добавлю их для полноты картины, чтобы ты мог просто сделать Ctrl+A -> Ctrl+V.
-
-@Composable
-fun ActiveTaskItem(task: Task, onClick: () -> Unit) {
-    val sdf = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-    val timeString = task.createdAt?.let { sdf.format(it) } ?: "--:--"
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .background(StardustGlassBg.copy(alpha = 0.5f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "[$timeString]",
-            color = StardustTextSecondary,
-            fontSize = 14.sp,
-            fontFamily = FontFamily.Monospace
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = task.title,
-            color = StardustTextPrimary,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 15.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardTaskDetailsSheet(
-    task: Task,
-    sheetState: SheetState,
-    onDismiss: () -> Unit
-) {
-    val sdf = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = StardustModalBg,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
-    ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = StardustTextSecondary)
+fun DashboardTaskDetailsSheet(task: Task, sheetState: SheetState, onDismiss: () -> Unit) {
+    val timeString = remember(task.createdAt) { task.createdAt?.let { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(it) } ?: "-" }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = StardustModalBg, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(task.title, color = StardustTextPrimary, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, null, tint = StardustTextSecondary, modifier = Modifier.size(24.dp)) }
             }
-
-            Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .padding(top = 24.dp)
-            ) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = StardustGlassBg),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = task.title,
-                            color = StardustTextPrimary,
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (task.description.isNotBlank()) {
-                            Text(
-                                text = task.description,
-                                color = StardustTextPrimary.copy(alpha = 0.8f),
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        }
-                        HorizontalDivider(color = StardustItemBg)
-
-                        DetailRow(label = "Статус") {
-                            TaskStatusIndicator(task = task)
-                        }
-
-                        DetailRow(label = "Создал", value = task.creatorName)
-                        DetailRow(label = "Назначен", value = task.assigneeName)
-                        DetailRow(label = "Создана", value = task.createdAt?.let { sdf.format(it) } ?: "-")
-                        DetailRow(label = "Обновлена", value = task.updatedAt?.let { sdf.format(it) } ?: "-")
-                    }
-                }
-            }
+            if (task.description.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text(task.description, color = StardustTextPrimary.copy(alpha = 0.8f), maxLines = 3, overflow = TextOverflow.Ellipsis) }
+            Spacer(Modifier.height(16.dp)); HorizontalDivider(color = StardustItemBg); Spacer(Modifier.height(12.dp))
+            DetailRow("Статус") { TaskStatusIndicator(task = task) }
+            DetailRow("Создал", task.creatorName); DetailRow("Назначен", task.assigneeName); DetailRow("Создана", timeString)
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
 private fun DetailRow(label: String, content: @Composable RowScope.() -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = "$label:",
-            color = StardustTextSecondary,
-            modifier = Modifier.weight(0.4f),
-            fontWeight = FontWeight.SemiBold
-        )
-        Row(modifier = Modifier.weight(0.6f)) {
-            content()
-        }
-    }
-}
-
-private fun formatDuration(millis: Long): String {
-    val hours = (millis / (1000 * 60 * 60))
-    val minutes = (millis / (1000 * 60)) % 60
-    val seconds = (millis / 1000) % 60
-    return String.format("%02d:%02d:%02d", hours, minutes, seconds)
-}
-
-@Composable
-fun TaskStatusIndicator(task: Task) {
-    val inProgressColor = Color(0xFFFFC107) // Yellow
-
-    when (task.status) {
-        TaskStatus.NEW -> {
-            val infiniteTransition = rememberInfiniteTransition("new_pulse")
-            val scale by infiniteTransition.animateFloat(
-                initialValue = 1f,
-                targetValue = 1.2f,
-                animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-                label = "scale"
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.FiberNew,
-                    contentDescription = "Новая",
-                    tint = StardustPrimary,
-                    modifier = Modifier.scale(scale)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Новая", color = StardustPrimary, fontWeight = FontWeight.Bold)
-            }
-        }
-        TaskStatus.IN_PROGRESS -> {
-            val taskStartedAt = task.startedAt
-            if (taskStartedAt == null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(24.dp)) {
-                        CircularProgressIndicator(
-                            strokeWidth = 2.dp,
-                            color = inProgressColor
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text("Синхронизация...", color = StardustTextSecondary, style = MaterialTheme.typography.bodySmall)
-                }
-            } else {
-                var durationText by remember { mutableStateOf("00:00:00") }
-
-                val startTime by remember(taskStartedAt) {
-                    mutableStateOf(taskStartedAt.time)
-                }
-
-                LaunchedEffect(startTime) {
-                    while (true) {
-                        val elapsedTime = System.currentTimeMillis() - startTime
-                        durationText = formatDuration(elapsedTime)
-                        delay(1000)
-                    }
-                }
-
-                val infiniteTransition = rememberInfiniteTransition("in_progress_rotate")
-                val angle by infiniteTransition.animateFloat(
-                    initialValue = 0f,
-                    targetValue = 360f,
-                    animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Restart),
-                    label = "angle"
-                )
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.Settings,
-                            contentDescription = "В работе",
-                            tint = inProgressColor,
-                            modifier = Modifier.rotate(angle)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("В работе:", color = inProgressColor, fontWeight = FontWeight.Bold)
-                    }
-                    Text(
-                        durationText,
-                        color = StardustTextPrimary,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = inProgressColor,
-                        trackColor = StardustItemBg,
-                        strokeCap = StrokeCap.Round
-                    )
-                }
-            }
-        }
-        TaskStatus.COMPLETED -> {
-            var scale by remember { mutableStateOf(0.5f) }
-            LaunchedEffect(Unit) {
-                animate(0.5f, 1f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)) { value, _ ->
-                    scale = value
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.CheckCircle,
-                    contentDescription = "Завершена",
-                    tint = StardustSuccess,
-                    modifier = Modifier.scale(scale)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Завершена", color = StardustSuccess, fontWeight = FontWeight.Bold)
-            }
-        }
-        TaskStatus.CANCELED -> {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Cancel, contentDescription = "Отменена", tint = StardustError)
-                Spacer(Modifier.width(8.dp))
-                Text("Отменена", color = StardustError, fontWeight = FontWeight.Bold)
-            }
-        }
-        else -> Text(task.status.name, color = StardustTextSecondary)
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("$label:", color = StardustTextSecondary, modifier = Modifier.weight(0.4f), fontWeight = FontWeight.SemiBold)
+        Row(modifier = Modifier.weight(0.6f)) { content() }
     }
 }
 
 @Composable
 private fun DetailRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "$label:",
-            color = StardustTextSecondary,
-            modifier = Modifier.weight(0.4f),
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = value,
-            color = StardustTextPrimary,
-            modifier = Modifier.weight(0.6f)
-        )
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text("$label:", color = StardustTextSecondary, modifier = Modifier.weight(0.4f), fontWeight = FontWeight.SemiBold)
+        Text(value, color = StardustTextPrimary, modifier = Modifier.weight(0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
-private fun StatusIndicator(isOnline: Boolean) {
-    val greenColor = Color(0xFF4CAF50)
-    val grayColor = Color.Gray
-    if (isOnline) {
-        val infiniteTransition = rememberInfiniteTransition(label = "online_indicator_pulse")
-        val alpha by infiniteTransition.animateFloat(
-            initialValue = 0.4f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1000),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "pulse_alpha"
-        )
-        Box(
-            modifier = Modifier
-                .size(12.dp)
-                .clip(CircleShape)
-                .background(greenColor.copy(alpha = alpha))
-        )
-    } else {
-        Box(
-            modifier = Modifier
-                .size(12.dp)
-                .clip(CircleShape)
-                .background(grayColor)
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EmployeeListSheet(
-    employees: List<EmployeeInfo>,
-    sheetState: SheetState,
-    onDismiss: () -> Unit,
-    onEmployeeClick: (userId: String) -> Unit,
-    onAddClick: () -> Unit,
-    onEditClick: (EmployeeInfo) -> Unit, // Добавлен параметр редактирования
-    onDeleteClick: (userId: String) -> Unit
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = StardustModalBg
-    ) {
-        Column(modifier = Modifier.padding(bottom = 32.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Все сотрудники (${employees.size})",
-                    color = StardustTextPrimary,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                IconButton(onClick = onAddClick) {
-                    Icon(
-                        imageVector = Icons.Default.AddCircle,
-                        contentDescription = "Добавить сотрудника",
-                        tint = StardustPrimary,
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                items(employees, key = { it.id }) { employee ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Кликабельная часть (инфо)
-                        Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { onEmployeeClick(employee.id) },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            StatusIndicator(isOnline = employee.status == "online")
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Icon(Icons.Default.Person, contentDescription = null, tint = StardustTextSecondary)
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text(employee.name, color = StardustTextPrimary, fontSize = 16.sp)
-                                if (employee.role.isNotBlank()) {
-                                    // ИСПОЛЬЗУЕМ ENUM ДЛЯ КРАСИВОГО ОТОБРАЖЕНИЯ РОЛИ
-                                    val roleDisplayName = UserRole.fromKey(employee.role).displayName
-                                    Text(roleDisplayName, color = StardustTextSecondary, fontSize = 12.sp)
-                                }
-                            }
-                        }
-
-                        // Кнопка Редактирования (Карандаш)
-                        IconButton(onClick = { onEditClick(employee) }) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Редактировать",
-                                tint = StardustPrimary.copy(alpha = 0.7f)
-                            )
-                        }
-
-                        // Кнопка Удаления (Корзина)
-                        IconButton(onClick = { onDeleteClick(employee.id) }) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Удалить",
-                                tint = StardustError.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
-                }
-            }
+fun TaskStatusIndicator(task: Task) {
+    when (task.status) {
+        TaskStatus.NEW -> Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.FiberNew, null, tint = StardustPrimary, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Новая", color = StardustPrimary, fontWeight = FontWeight.Bold) }
+        TaskStatus.IN_PROGRESS -> Row(verticalAlignment = Alignment.CenterVertically) {
+            val transition = rememberInfiniteTransition("rotate_task")
+            val angle by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(2000, easing = LinearEasing)), label = "rotate")
+            Icon(Icons.Default.Settings, null, tint = StardustWarning, modifier = Modifier.size(20.dp).rotate(angle)); Spacer(Modifier.width(8.dp)); Text("В работе", color = StardustWarning, fontWeight = FontWeight.Bold)
         }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EmployeeDetailsSheet(
-    details: EmployeeDetails,
-    isLoading: Boolean,
-    sheetState: SheetState,
-    onDismiss: () -> Unit
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = StardustModalBg,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Активность: ${details.name}",
-                color = StardustTextPrimary,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            if (isLoading) {
-                CircularProgressIndicator(color = StardustPrimary, modifier = Modifier.padding(vertical = 40.dp))
-            } else {
-                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                    items(details.entries) { entry ->
-                        DetailLogEntryItem(entry = entry)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DetailLogEntryItem(entry: ActivityLogEntry) {
-    val sdf = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Default.History, contentDescription = "Time", tint = StardustTextSecondary)
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(
-                text = "В ${sdf.format(Date(entry.timestamp))}",
-                color = StardustTextPrimary,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = "${entry.itemCount} сканов",
-                color = StardustTextPrimary,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
+        TaskStatus.COMPLETED -> Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.CheckCircle, null, tint = StardustSuccess, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Завершена", color = StardustSuccess, fontWeight = FontWeight.Bold) }
+        TaskStatus.CANCELED  -> Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Cancel, null, tint = StardustError, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Отменена", color = StardustError, fontWeight = FontWeight.Bold) }
+        else -> Text(task.status.name, color = StardustTextSecondary)
     }
 }
 
 @Composable
 fun SectionTitle(title: String, modifier: Modifier = Modifier) {
-    Text(text = title, style = MaterialTheme.typography.titleMedium, color = StardustTextSecondary, modifier = modifier.padding(bottom = 12.dp))
-}
-
-@Composable
-fun StatCard(title: String, value: String, icon: ImageVector, modifier: Modifier = Modifier) {
-    Card(modifier = modifier, shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = StardustGlassBg)) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = 16.dp, horizontal = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(imageVector = icon, contentDescription = title, tint = StardustPrimary, modifier = Modifier.size(28.dp))
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = value, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-            Text(text = title, color = StardustTextSecondary, fontSize = 12.sp, maxLines = 1)
-        }
-    }
-}
-
-@Composable
-fun EmployeeActivityListItem(activity: EmployeeActivity, onClick: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = StardustGlassBg),
-        modifier = Modifier
-            .padding(vertical = 6.dp)
-            .clickable(onClick = onClick)
-    ) {
-        Row(modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.PersonOutline, contentDescription = "User Icon", modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(StardustItemBg)
-                .padding(8.dp), tint = StardustTextSecondary)
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusIndicator(isOnline = activity.status == "online")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = activity.name, color = StardustTextPrimary, fontWeight = FontWeight.SemiBold)
-                }
-                Text(text = "Партий скопировано: ${activity.logCount}", color = StardustTextSecondary, fontSize = 12.sp)
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(text = activity.totalScans.toString(), color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            Text(text = " сканов", color = StardustTextSecondary, fontSize = 14.sp, modifier = Modifier.padding(start = 4.dp))
-        }
-    }
+    Text(title, style = MaterialTheme.typography.titleMedium, color = StardustTextSecondary, modifier = modifier.padding(bottom = 12.dp))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddEditEmployeeDialog(
-    initialName: String = "",
-    initialUsername: String = "",
-    initialRole: UserRole = UserRole.MOVER, // Теперь принимаем Enum
-    isEditMode: Boolean = false,
-    onDismiss: () -> Unit,
-    onConfirm: (name: String, username: String, password: String, role: UserRole) -> Unit
+    initialName: String = "", initialUsername: String = "",
+    initialRole: UserRole = UserRole.MOVER, initialWarehouseId: String = "bestuzhevskaya_10",
+    isEditMode: Boolean = false, onDismiss: () -> Unit,
+    onConfirm: (name: String, username: String, password: String, role: UserRole, warehouseId: String) -> Unit
 ) {
     var name by remember { mutableStateOf(initialName) }
     var username by remember { mutableStateOf(initialUsername) }
     var password by remember { mutableStateOf("") }
-
-    // Список ролей берем из ENUM
     val roles = UserRole.getSelectableRoles()
     var selectedRole by remember { mutableStateOf(initialRole) }
     var isRoleExpanded by remember { mutableStateOf(false) }
+    val warehouses = listOf("bestuzhevskaya_10" to "Бестужевская 10", "sklad_2" to "Склад 2", "sklad_3" to "Склад 3", "sklad_4" to "Склад 4")
+    var selectedWarehouseId by remember { mutableStateOf(initialWarehouseId) }
+    var isWarehouseExpanded by remember { mutableStateOf(false) }
+    val selectedWarehouseName = warehouses.find { it.first == selectedWarehouseId }?.second ?: "Неизвестный склад"
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = if (isEditMode) "Редактировать сотрудника" else "Новый сотрудник",
-                fontWeight = FontWeight.Bold,
-                color = StardustTextPrimary
-            )
-        },
+        title = { Text(if (isEditMode) "Редактировать сотрудника" else "Новый сотрудник", fontWeight = FontWeight.Bold, color = StardustTextPrimary) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Имя и Фамилия") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = StardustTextPrimary,
-                        unfocusedTextColor = StardustTextPrimary,
-                        focusedLabelColor = StardustPrimary,
-                        unfocusedLabelColor = StardustTextSecondary,
-                        focusedBorderColor = StardustPrimary,
-                        unfocusedBorderColor = StardustItemBg
-                    )
-                )
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = {
-                        Text(if (isEditMode) "Новый Логин (оставьте пустым, чтобы не менять)" else "Логин (username)")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = StardustTextPrimary,
-                        unfocusedTextColor = StardustTextPrimary,
-                        focusedLabelColor = StardustPrimary,
-                        unfocusedLabelColor = StardustTextSecondary,
-                        focusedBorderColor = StardustPrimary,
-                        unfocusedBorderColor = StardustItemBg
-                    )
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = {
-                        Text(if (isEditMode) "Новый Пароль (оставьте пустым, чтобы не менять)" else "Пароль")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = StardustTextPrimary,
-                        unfocusedTextColor = StardustTextPrimary,
-                        focusedLabelColor = StardustPrimary,
-                        unfocusedLabelColor = StardustTextSecondary,
-                        focusedBorderColor = StardustPrimary,
-                        unfocusedBorderColor = StardustItemBg
-                    )
-                )
-
-                // Выбор роли
-                ExposedDropdownMenuBox(
-                    expanded = isRoleExpanded,
-                    onExpandedChange = { isRoleExpanded = !isRoleExpanded },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    OutlinedTextField(
-                        value = selectedRole.displayName, // Показываем красивое имя
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Роль") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isRoleExpanded) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = StardustTextPrimary,
-                            unfocusedTextColor = StardustTextPrimary,
-                            focusedLabelColor = StardustPrimary,
-                            unfocusedLabelColor = StardustTextSecondary,
-                            focusedBorderColor = StardustPrimary,
-                            unfocusedBorderColor = StardustItemBg
-                        ),
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = isRoleExpanded,
-                        onDismissRequest = { isRoleExpanded = false },
-                        modifier = Modifier.background(StardustGlassBg)
-                    ) {
-                        roles.forEach { role ->
-                            DropdownMenuItem(
-                                text = { Text(text = role.displayName, color = StardustTextPrimary) },
-                                onClick = {
-                                    selectedRole = role
-                                    isRoleExpanded = false
-                                }
-                            )
-                        }
-                    }
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Имя и Фамилия") }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg))
+                OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text(if (isEditMode) "Новый Логин (можно пусто)" else "Логин") }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg))
+                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text(if (isEditMode) "Новый Пароль (можно пусто)" else "Пароль") }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg))
+                ExposedDropdownMenuBox(expanded = isWarehouseExpanded, onExpandedChange = { isWarehouseExpanded = !isWarehouseExpanded }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(value = selectedWarehouseName, onValueChange = {}, readOnly = true, label = { Text("Склад") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isWarehouseExpanded) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg), modifier = Modifier.menuAnchor().fillMaxWidth())
+                    ExposedDropdownMenu(expanded = isWarehouseExpanded, onDismissRequest = { isWarehouseExpanded = false }, modifier = Modifier.background(StardustGlassBg)) { warehouses.forEach { (id, wName) -> DropdownMenuItem(text = { Text(wName, color = StardustTextPrimary) }, onClick = { selectedWarehouseId = id; isWarehouseExpanded = false }) } }
+                }
+                ExposedDropdownMenuBox(expanded = isRoleExpanded, onExpandedChange = { isRoleExpanded = !isRoleExpanded }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(value = selectedRole.displayName, onValueChange = {}, readOnly = true, label = { Text("Роль") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isRoleExpanded) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg), modifier = Modifier.menuAnchor().fillMaxWidth())
+                    ExposedDropdownMenu(expanded = isRoleExpanded, onDismissRequest = { isRoleExpanded = false }, modifier = Modifier.background(StardustGlassBg)) { roles.forEach { role -> DropdownMenuItem(text = { Text(role.displayName, color = StardustTextPrimary) }, onClick = { selectedRole = role; isRoleExpanded = false }) } }
                 }
             }
         },
-        confirmButton = {
-            Button(
-                onClick = {
-                    // Логика валидации
-                    if (isEditMode) {
-                        // При редактировании логин и пароль могут быть пустыми
-                        if (name.isNotBlank()) {
-                            onConfirm(name, username, password, selectedRole)
-                        }
-                    } else {
-                        // При создании все поля обязательны
-                        if (name.isNotBlank() && username.isNotBlank() && password.isNotBlank()) {
-                            onConfirm(name, username, password, selectedRole)
-                        }
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
-            ) {
-                Text(if (isEditMode) "Сохранить" else "Создать")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена", color = StardustTextSecondary)
-            }
-        },
-        containerColor = StardustModalBg,
-        textContentColor = StardustTextPrimary,
-        titleContentColor = StardustTextPrimary
+        confirmButton = { Button(onClick = { if (isEditMode) { if (name.isNotBlank()) onConfirm(name, username, password, selectedRole, selectedWarehouseId) } else { if (name.isNotBlank() && username.isNotBlank() && password.isNotBlank()) onConfirm(name, username, password, selectedRole, selectedWarehouseId) } }, colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) { Text(if (isEditMode) "Сохранить" else "Создать") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = StardustTextSecondary) } },
+        containerColor = StardustModalBg, textContentColor = StardustTextPrimary, titleContentColor = StardustTextPrimary
     )
 }

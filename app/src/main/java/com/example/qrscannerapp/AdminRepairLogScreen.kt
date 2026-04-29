@@ -39,7 +39,8 @@ import java.util.*
 @Composable
 fun AdminRepairLogScreen() {
     val context = LocalContext.current
-    val authManager = remember { AuthManager(context) }
+    val telemetryManager = remember { TelemetryManager(context) }
+    val authManager = remember { AuthManager(context, telemetryManagerProvider = { telemetryManager }) }
     val viewModel: AdminRepairLogViewModel = viewModel(
         factory = AdminRepairLogViewModelFactory(authManager)
     )

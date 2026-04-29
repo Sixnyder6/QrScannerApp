@@ -2,7 +2,7 @@
 package com.example.qrscannerapp.features.profile.data.repository
 
 import com.example.qrscannerapp.TelemetryManager
-import com.example.qrscannerapp.UserRole // <-- ИМПОРТИРУЕМ ENUM
+import com.example.qrscannerapp.UserRole
 import com.example.qrscannerapp.features.profile.domain.model.DevicePerformanceDetails
 import com.example.qrscannerapp.features.profile.domain.model.PerformanceClass
 import com.example.qrscannerapp.features.profile.domain.model.UserActivityLog
@@ -40,12 +40,8 @@ class EmployeeProfileRepository @Inject constructor(
             val dateOfBirthStr = userDoc.getString("dateOfBirth")
             val age = if (dateOfBirthStr != null) calculateAge(dateOfBirthStr) else 0
 
-            // --- ИСПРАВЛЕНИЕ: ПРАВИЛЬНОЕ ОПРЕДЕЛЕНИЕ РОЛИ ---
             val rawRole = userDoc.getString("role")
             val isAdmin = userDoc.getBoolean("isAdmin") ?: false
-
-            // Если есть поле role, берем красивое имя из Enum.
-            // Если нет, но isAdmin=true -> Администратор. Иначе -> Сотрудник.
             val roleDisplayName = if (rawRole != null) {
                 UserRole.fromKey(rawRole).displayName
             } else if (isAdmin) {
@@ -53,26 +49,30 @@ class EmployeeProfileRepository @Inject constructor(
             } else {
                 "Сотрудник"
             }
-            // ------------------------------------------------
+
+            // [НОВОЕ] Читаем поля для пульта управления
+            val isShiftActive = userDoc.getBoolean("isShiftActive") ?: false
+            val isAllowedToWork = userDoc.getBoolean("isAllowedToWork") ?: false
+            val shiftRequestStatus = userDoc.getString("shiftRequestStatus") ?: "NONE"
 
             val profile = UserProfile(
                 name = userDoc.getString("displayName") ?: "Без имени",
                 username = userDoc.getString("username") ?: "N/A",
-                role = roleDisplayName, // Используем вычисленное имя
+                role = roleDisplayName,
                 age = age,
                 deviceInfo = userDoc.getString("deviceInfo") ?: "Нет данных",
                 appVersion = userDoc.getString("appVersion") ?: "-",
-                lastBatteryLevel = userDoc.getLong("lastBatteryLevel")?.toInt() ?: -1
+                lastBatteryLevel = userDoc.getLong("lastBatteryLevel")?.toInt() ?: -1,
+                // [НОВОЕ] Передаём в модель
+                isShiftActive = isShiftActive,
+                isAllowedToWork = isAllowedToWork,
+                shiftRequestStatus = shiftRequestStatus
             )
             Result.success(profile)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
-
-    // ... (Остальной код без изменений - listenForLastActivity, getPerformanceDetails, calculateAge) ...
-    // Для экономии места я его пропустил, но в твоем файле он должен остаться!
-    // Если хочешь, могу прислать файл целиком.
 
     fun listenForLastActivity(userId: String): Flow<Result<UserActivityLog?>> = callbackFlow {
         val listener = firestore.collection(ACTIVITY_LOG_COLLECTION)

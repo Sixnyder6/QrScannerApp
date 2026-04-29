@@ -1,10 +1,8 @@
-// Полное содержимое для ИСПРАВЛЕННОГО файла SplashScreen.kt
-
 package com.example.qrscannerapp
 
-import androidx.compose.animation.AnimatedVisibility // <-- ВОТ НУЖНЫЙ ИМПОРТ
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
-import androidx.compose.animation.fadeIn // <-- И ЭТОТ ТОЖЕ
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -35,21 +33,24 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlin.random.Random
 
-// ... (весь код для цветов, шрифтов, Particles и BeamShape остается без изменений) ...
 val SplashScreenBackgroundColor = Color.Black
 val SplashScreenLogoColor = Color(0xFF7B61FF)
 val SplashScreenTextColor = Color(0xFFEAEAF0)
 val SplashScreenStudioTextColor = Color(0xFFFFFBEB)
 val SplashScreenStudioGlowColor = Color(0xFFFFC107)
 val BeamColor = Color(0x1AFFFFFF)
-val provider = GoogleFont.Provider(
+
+// Локальный provider для SplashScreen — избегаем конфликта с common.ui
+private val splashFontProvider = GoogleFont.Provider(
     providerAuthority = "com.google.android.gms.fonts",
     providerPackage = "com.google.android.gms",
     certificates = R.array.com_google_android_gms_fonts_certs
 )
+
 val InterFont = FontFamily(
-    Font(googleFont = GoogleFont("Inter"), fontProvider = provider)
+    Font(googleFont = GoogleFont("Inter"), fontProvider = splashFontProvider)
 )
+
 private val BeamShape = object : Shape {
     override fun createOutline(
         size: Size,
@@ -66,6 +67,7 @@ private val BeamShape = object : Shape {
         return Outline.Generic(path)
     }
 }
+
 @Composable
 fun Particles(modifier: Modifier) {
     val particles = remember {
@@ -99,6 +101,7 @@ fun Particles(modifier: Modifier) {
         }
     }
 }
+
 data class Particle(val x: Float, val y: Float, val size: Float, val alpha: Float)
 
 @Composable
@@ -117,9 +120,9 @@ fun SplashScreen(
     val textAlpha by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(1500, 3000), label = "textAlpha")
     val studioAlpha by animateFloatAsState(targetValue = if (startAnimation) 1f else 0f, animationSpec = tween(1500, 3500), label = "studioAlpha")
 
+    // ИСПРАВЛЕНО: без лишнего delay — ViewModel сам гарантирует минимальное время анимации
     LaunchedEffect(isLoading) {
         if (!isLoading) {
-            kotlinx.coroutines.delay(1500)
             onAnimationFinished()
         }
     }
@@ -209,7 +212,7 @@ fun SplashScreen(
             )
         }
 
-        // НОВЫЙ ЭЛЕМЕНТ: Текст статуса загрузки
+        // Текст статуса загрузки
         AnimatedVisibility(
             visible = startAnimation,
             enter = fadeIn(animationSpec = tween(durationMillis = 1000, delayMillis = 2000)),
@@ -218,7 +221,7 @@ fun SplashScreen(
                 .padding(bottom = 80.dp)
         ) {
             Text(
-                text = loadingStatus, // <-- Показываем текст из ViewModel
+                text = loadingStatus,
                 fontFamily = InterFont,
                 fontSize = 14.sp,
                 color = SplashScreenTextColor.copy(alpha = 0.7f)

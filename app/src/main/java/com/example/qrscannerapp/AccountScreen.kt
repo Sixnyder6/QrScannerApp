@@ -1,17 +1,12 @@
 package com.example.qrscannerapp
 
-import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -19,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,17 +22,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -44,31 +33,41 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.qrscannerapp.common.ui.AppBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // =================================================================================
-// ХЕЛПЕР ДЛЯ ЗАГРУЗКИ ФОТО
+// КОРПОРАТИВНАЯ ЦВЕТОВАЯ ПАЛИТРА
 // =================================================================================
-private const val GITHUB_EMPLOYEES_URL = "https://raw.githubusercontent.com/Sixnyder6/QrScannerApp/master/images/employees/"
+object CorporateColors {
+    val Background   = Color(0xFF09090E)
+    val CardSurface  = Color(0xFF14141E)
+    val CardBorder   = Color(0xFF2A2A3A)
+    val TextPrimary  = Color(0xFFF3F4F6)
+    val TextSecondary = Color(0xFF8E8E9F)
+    val AccentGreen  = Color(0xFF10B981)
+    val AccentPurple = Color(0xFF7C3AED)
+    val AccentRed    = Color(0xFFEF4444)
+    val AccentAmber  = Color(0xFFF59E0B)
+}
+
+private const val GITHUB_EMPLOYEES_URL =
+    "https://raw.githubusercontent.com/Sixnyder6/QrScannerApp/master/images/employees/"
 
 fun getEmployeePhotoUrl(userName: String): String? {
     val filename = when (userName) {
-        "Николай Никасов" -> "nikasov.png"
-        "Михаил Ситников" -> "sitnikov.png"
+        "Николай Никасов"  -> "nikasov.png"
+        "Михаил Ситников"  -> "sitnikov.png"
         "Соболев Владислав" -> "sobolev.png"
-        // Сюда можно добавлять новых сотрудников по мере появления фото
         else -> null
     }
     return filename?.let { GITHUB_EMPLOYEES_URL + it }
 }
 
 // =================================================================================
-// ОСНОВНОЙ ЭКРАН (ТОЧКА ВХОДА)
+// ГЛАВНЫЙ ЭКРАН АККАУНТА
 // =================================================================================
 
 @Composable
@@ -83,55 +82,50 @@ fun AccountScreen(authManager: AuthManager) {
         }
     }
 
-    AppBackground {
-        Box(modifier = Modifier.fillMaxSize()) {
-            when {
-                authState.isLoading -> {
-                    CircularProgressIndicator(
-                        color = StardustPrimary,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
-                authState.isLoggedIn -> {
-                    val viewModel: AccountViewModel = viewModel(factory = AccountViewModelFactory(authManager))
-                    val uiState by viewModel.uiState.collectAsState()
+    Box(modifier = Modifier.fillMaxSize().background(CorporateColors.Background)) {
+        when {
+            authState.isLoading -> {
+                CircularProgressIndicator(
+                    color = CorporateColors.AccentPurple,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+            authState.isLoggedIn -> {
+                val viewModel: AccountViewModel =
+                    androidx.hilt.navigation.compose.hiltViewModel()
+                val uiState by viewModel.uiState.collectAsState()
 
-                    when {
-                        uiState.isLoading -> {
-                            CircularProgressIndicator(
-                                color = StardustPrimary,
-                                modifier = Modifier.align(Alignment.Center)
-                            )
-                        }
-                        uiState.error != null -> {
-                            Text(
-                                text = uiState.error!!,
-                                color = StardustError,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .padding(16.dp)
-                            )
-                        }
-                        else -> {
-                            PersonalProfileScreen(
-                                viewModel = viewModel,
-                                state = uiState,
-                                onLogout = { authManager.logout() }
-                            )
-                        }
+                when {
+                    uiState.isLoading && uiState.userName == "Загрузка..." -> {
+                        CircularProgressIndicator(
+                            color = CorporateColors.AccentPurple,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+                    uiState.error != null -> {
+                        Text(
+                            text = uiState.error!!,
+                            color = CorporateColors.AccentRed,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.align(Alignment.Center).padding(16.dp)
+                        )
+                    }
+                    else -> {
+                        PersonalProfileScreen(
+                            viewModel = viewModel,
+                            state = uiState,
+                            authManager = authManager
+                        )
                     }
                 }
-                else -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        LoginFormComponent(authManager = authManager)
-                    }
+            }
+            else -> {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    LoginFormComponent(authManager = authManager)
                 }
             }
         }
@@ -139,91 +133,370 @@ fun AccountScreen(authManager: AuthManager) {
 }
 
 // =================================================================================
-// ЭКРАН ПРОФИЛЯ С УПРАВЛЕНИЕМ СМЕНОЙ
+// ПРОФИЛЬ — разный контент для техника и остальных
 // =================================================================================
 
 @Composable
 fun PersonalProfileScreen(
     viewModel: AccountViewModel,
     state: AccountUiState,
-    onLogout: () -> Unit,
+    authManager: AuthManager
 ) {
-    val lazyListState = rememberLazyListState()
-    val firstItemTranslationY by remember {
-        derivedStateOf {
-            if (lazyListState.firstVisibleItemIndex == 0) {
-                lazyListState.firstVisibleItemScrollOffset * 0.5f
-            } else {
-                0f
-            }
-        }
-    }
+    val scope = rememberCoroutineScope()
+    val isTechnic = state.userRoleEnum == UserRole.TECHNIC
+
+    var showEndShiftDialog by remember { mutableStateOf(false) }
+    var showLogoutDialog   by remember { mutableStateOf(false) }
+    var showHistorySheet   by remember { mutableStateOf(false) }
 
     LazyColumn(
-        state = lazyListState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 32.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+
+        // ── Шапка профиля (одинакова для всех) ──
         item {
             ProfileHeader(
-                userName = state.userName,
-                userRole = state.userRole, // Передаем роль
+                userName      = state.userName,
+                userRole      = state.userRole,
                 isShiftActive = state.isShiftActive,
-                onStartShift = { viewModel.startShift() },
-                onEndShift = { viewModel.endShift() },
-                modifier = Modifier.graphicsLayer {
-                    translationY = firstItemTranslationY
-                }
+                onStartShift  = { viewModel.startShift() },
+                onEndShift    = { showEndShiftDialog = true }
             )
         }
 
+        // ── Таймер смены (одинаков для всех) ──
         item {
             AnimatedVisibility(
                 visible = state.isShiftActive,
-                enter = fadeIn(animationSpec = tween(300)) + expandVertically(animationSpec = tween(500)),
-                exit = fadeOut(animationSpec = tween(300)) + shrinkVertically(animationSpec = tween(500))
+                enter = fadeIn(tween(300)) + expandVertically(tween(500)),
+                exit  = fadeOut(tween(300)) + shrinkVertically(tween(500))
             ) {
                 ShiftProgressBar(
-                    modifier = Modifier.padding(top = 24.dp),
-                    shiftStartTime = state.shiftStartTime,
+                    modifier = Modifier.padding(top = 16.dp),
+                    shiftStartTime = state.shiftStartTime
                 )
             }
         }
 
+        // ── Статистика за сегодня ──
+        // Для техника — блок полевого ремонта
+        // Для остальных — сканы/партии
         item {
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(16.dp))
+            if (isTechnic) {
+                TechnicFieldStatsCard(
+                    stats     = state.fieldRepairStats,
+                    isLoading = state.fieldRepairLoading
+                )
+            } else {
+                AnimatedVisibility(
+                    visible = state.isShiftActive,
+                    enter = fadeIn(tween(400)) + expandVertically(tween(500)),
+                    exit  = fadeOut(tween(300)) + shrinkVertically(tween(400))
+                ) {
+                    TodayStatsCard(
+                        scansToday    = state.scansToday,
+                        sessionsToday = state.sessionsToday
+                    )
+                }
+            }
+        }
+
+        // ── Стрик + рекорд — только НЕ для техника ──
+        if (!isTechnic) {
+            item {
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    StreakCard(streakDays = state.streakDays, modifier = Modifier.weight(1f))
+                    RecordCard(record = state.personalRecord, modifier = Modifier.weight(1f))
+                }
+            }
+
+            // ── График активности — только НЕ для техника ──
+            item {
+                Spacer(Modifier.height(16.dp))
+                WeeklyChartCard(weeklyScans = state.weeklyScans)
+            }
+        }
+
+        // ── Журнал смен (одинаков для всех) ──
+        item {
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = { showHistorySheet = true },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.CardSurface)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Outlined.History, null, tint = CorporateColors.TextPrimary)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Открыть журнал смен",
+                        color = CorporateColors.TextPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        // ── Общая статистика ──
+        // Для техника — количество самокатов всего
+        // Для остальных — сканы/партии
+        item {
+            Spacer(Modifier.height(32.dp))
             Text(
-                text = "Персональная статистика",
-                color = StardustTextSecondary,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp)
+                "Общая статистика",
+                color = CorporateColors.TextPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp, start = 4.dp)
             )
         }
-        item { AnimatedStatCard(icon = Icons.Default.QrCodeScanner, label = "Всего сканирований", value = state.totalScans.toString(), delay = 0, isNumeric = true) }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-        item { AnimatedStatCard(icon = Icons.Default.BarChart, label = "Всего партий", value = state.totalSessions.toString(), delay = 150, isNumeric = true) }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-        item { AnimatedStatCard(icon = Icons.Default.CalendarMonth, label = "Дата регистрации", value = state.registrationDate, delay = 300, isNumeric = false) }
+
         item {
-            Spacer(modifier = Modifier.height(32.dp))
-            val shape = RoundedCornerShape(16.dp)
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
-                    .clip(shape)
-                    .background(Color.Black.copy(alpha = 0.2f))
-                    .border(width = 1.dp, color = StardustItemBg, shape = shape)
-                    .clickable(onClick = onLogout),
-                contentAlignment = Alignment.Center
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(CorporateColors.CardSurface)
+                    .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp))
+                    .padding(vertical = 8.dp)
             ) {
+                if (isTechnic) {
+                    // Для техника — самокаты
+                    StatListItem(
+                        Icons.Default.TwoWheeler,
+                        "Самокатов завершено",
+                        state.fieldRepairStats.doneAllTime.toString(),
+                        Color(0xFF22C55E)
+                    )
+                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
+                    StatListItem(
+                        Icons.Default.List,
+                        "Всего заданий",
+                        state.fieldRepairStats.totalAllTime.toString(),
+                        CorporateColors.AccentPurple
+                    )
+                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
+                    StatListItem(
+                        Icons.Default.Timer,
+                        "Среднее время",
+                        if (state.fieldRepairStats.avgMinutesPerScooter > 0)
+                            "${state.fieldRepairStats.avgMinutesPerScooter} мин"
+                        else "—",
+                        CorporateColors.AccentAmber
+                    )
+                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
+                    StatListItem(
+                        Icons.Outlined.Event,
+                        "В системе с",
+                        state.registrationDate,
+                        CorporateColors.TextSecondary
+                    )
+                } else {
+                    // Для остальных — сканы
+                    StatListItem(
+                        Icons.Outlined.QrCodeScanner,
+                        "Всего сканирований",
+                        state.totalScans.toString(),
+                        CorporateColors.AccentPurple
+                    )
+                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
+                    StatListItem(
+                        Icons.Outlined.Inventory2,
+                        "Обработано партий",
+                        state.totalSessions.toString(),
+                        CorporateColors.AccentPurple
+                    )
+                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
+                    StatListItem(
+                        Icons.Outlined.Event,
+                        "В системе с",
+                        state.registrationDate,
+                        CorporateColors.TextSecondary
+                    )
+                }
+            }
+        }
+
+        // ── Кнопка выхода (одинакова для всех) ──
+        item {
+            Spacer(Modifier.height(32.dp))
+            OutlinedButton(
+                onClick = { showLogoutDialog = true },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = CorporateColors.AccentRed),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CorporateColors.AccentRed.copy(alpha = 0.5f))
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ExitToApp, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Выйти из системы", fontWeight = FontWeight.Medium, fontSize = 16.sp)
+            }
+        }
+    }
+
+    if (showHistorySheet) {
+        ShiftHistoryBottomSheet(
+            shifts    = state.shiftHistory,
+            onDismiss = { showHistorySheet = false }
+        )
+    }
+
+    EndShiftDialog(
+        showDialog = showEndShiftDialog,
+        onDismiss  = { showEndShiftDialog = false },
+        onConfirm  = { showEndShiftDialog = false; viewModel.endShift() }
+    )
+
+    LogoutDialog(
+        showDialog    = showLogoutDialog,
+        isShiftActive = state.isShiftActive,
+        onDismiss     = { showLogoutDialog = false },
+        onConfirm     = {
+            showLogoutDialog = false
+            scope.launch {
+                if (state.isShiftActive) viewModel.endShiftOnLogout()
+                authManager.logout()
+            }
+        }
+    )
+}
+
+// =================================================================================
+// ШТОРКА ИСТОРИИ СМЕН
+// =================================================================================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ShiftHistoryBottomSheet(
+    shifts: List<com.example.qrscannerapp.features.shift.domain.model.Shift>,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+        containerColor   = CorporateColors.Background,
+        dragHandle       = { BottomSheetDefaults.DragHandle(color = CorporateColors.CardBorder) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                "Журнал работы",
+                color      = CorporateColors.TextPrimary,
+                fontSize   = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier   = Modifier.padding(bottom = 16.dp)
+            )
+
+            if (shifts.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("История смен пока пуста", color = CorporateColors.TextSecondary)
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxHeight(0.8f)
+                ) {
+                    items(shifts.size) { index ->
+                        ShiftHistoryCard(shift = shifts[index])
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ShiftHistoryCard(shift: com.example.qrscannerapp.features.shift.domain.model.Shift) {
+    val dateFormat = remember { java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale("ru")) }
+    val timeFormat = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale("ru")) }
+
+    val dateStr      = dateFormat.format(java.util.Date(shift.startTime))
+    val startTimeStr = timeFormat.format(java.util.Date(shift.startTime))
+    val endTimeStr   = shift.endTime?.let { timeFormat.format(java.util.Date(it)) } ?: "..."
+    val hours        = shift.durationMinutes / 60
+    val mins         = shift.durationMinutes % 60
+    val durationStr  = if (hours > 0) "${hours}ч ${mins}м" else "${mins}м"
+
+    val (statusColor, statusIcon, statusText) = when {
+        shift.isActive -> Triple(CorporateColors.AccentGreen, Icons.Default.PlayCircle, "В процессе")
+        shift.status == "COMPLETED" || shift.endReason == "manual" ->
+            Triple(CorporateColors.AccentPurple, Icons.Default.CheckCircle, "Завершена")
+        shift.endReason == "auto_12h" ->
+            Triple(CorporateColors.AccentAmber, Icons.Default.Warning, "Авто-закрытие")
+        shift.status == "FORCE_ENDED" || shift.endReason == "admin_force" ->
+            Triple(CorporateColors.AccentRed, Icons.Default.GppBad, "Закрыто админом")
+        else -> Triple(CorporateColors.TextSecondary, Icons.Default.Info, "Завершена")
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(16.dp),
+        colors   = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(16.dp))
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "$dateStr • $startTimeStr - $endTimeStr",
+                    color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium
+                )
+                Surface(color = statusColor.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)) {
+                    Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(statusIcon, null, tint = statusColor, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(statusText, color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = CorporateColors.CardBorder)
+            Spacer(Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Выйти", tint = StardustError)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Выйти", color = StardustError, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Outlined.QrCodeScanner, null, tint = CorporateColors.TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("${shift.totalScanCount}", color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(" скан.", color = CorporateColors.TextSecondary, fontSize = 12.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Inventory2, null, tint = CorporateColors.TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("${shift.sessionsCreated}", color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(" парт.", color = CorporateColors.TextSecondary, fontSize = 12.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Schedule, null, tint = CorporateColors.TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(durationStr, color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -231,7 +504,7 @@ fun PersonalProfileScreen(
 }
 
 // =================================================================================
-// ОБНОВЛЕННЫЕ КОМПОНЕНТЫ
+// КОМПОНЕНТЫ
 // =================================================================================
 
 @Composable
@@ -243,219 +516,83 @@ fun ProfileHeader(
     onEndShift: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scope = rememberCoroutineScope()
-    var animatingButton by remember { mutableStateOf<String?>(null) }
-
     val photoUrl = remember(userName) { getEmployeePhotoUrl(userName) }
 
-    val vibrantPurple = Color(0xFF8E2DE2)
-    val deepPurple = Color(0xFF4A00E0)
-    val brush = Brush.linearGradient(colors = listOf(vibrantPurple, deepPurple))
-
-    val textStyleWithShadow = TextStyle(
-        shadow = Shadow(
-            color = Color.Black.copy(alpha = 0.25f),
-            offset = Offset(0f, 2f),
-            blurRadius = 4f
-        )
-    )
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(brush = brush)
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape    = RoundedCornerShape(24.dp),
+        colors   = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)
     ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(24.dp))
+                .padding(24.dp)
         ) {
-            // --- ВЕРХНЯЯ ЧАСТЬ: ФОТО + ТЕКСТ (ГОРИЗОНТАЛЬНО) ---
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // 1. Фотография (Слева)
-                Box(
-                    modifier = Modifier
-                        .size(110.dp)
-                        .clip(CircleShape)
-                        .border(3.dp, Color.White.copy(alpha = 0.3f), CircleShape)
-                        .background(Color.Black.copy(alpha = 0.2f))
-                ) {
-                    if (photoUrl != null) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(photoUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Profile Photo",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(60.dp)
-                                .align(Alignment.Center),
-                            tint = Color.White.copy(alpha = 0.8f)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(20.dp)) // Отступ
-
-                // 2. Текст (Справа)
-                Column(
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = userName,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        style = textStyleWithShadow,
-                        lineHeight = 28.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Бэджик для роли
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(8.dp)
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(CorporateColors.Background)
+                            .border(2.dp, CorporateColors.CardBorder, CircleShape)
                     ) {
-                        Text(
-                            text = userRole,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = StardustPrimary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                        if (photoUrl != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(photoUrl).crossfade(true).build(),
+                                contentDescription = "Profile Photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Person, null,
+                                modifier = Modifier.size(40.dp).align(Alignment.Center),
+                                tint = CorporateColors.TextSecondary
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(20.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(userName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = CorporateColors.TextPrimary)
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier.size(8.dp).clip(CircleShape)
+                                    .background(if (isShiftActive) CorporateColors.AccentGreen else CorporateColors.TextSecondary)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (isShiftActive) "На смене • $userRole" else "Не в сети • $userRole",
+                                fontSize = 13.sp, fontWeight = FontWeight.Medium, color = CorporateColors.TextSecondary
+                            )
+                        }
                     }
                 }
-            }
-
-            // --- НИЖНЯЯ ЧАСТЬ: КНОПКИ ---
-            Column(
-                modifier = Modifier.width(IntrinsicSize.Max),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                PressableButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { if (animatingButton == null) { scope.launch { animatingButton = "start"; delay(200); onStartShift(); animatingButton = null } } },
-                    text = "Начать смену",
-                    icon = Icons.Default.PlayArrow,
-                    isManuallyPressed = animatingButton == "start",
-                    enabled = !isShiftActive && animatingButton == null,
-                    activeColor = Color(0xFF00C853),
-                    contentColor = Color.White
-                )
-                PressableButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { if (animatingButton == null) { scope.launch { animatingButton = "end"; delay(200); onEndShift(); animatingButton = null } } },
-                    text = "Завершить смену",
-                    icon = Icons.Default.Stop,
-                    isManuallyPressed = animatingButton == "end",
-                    enabled = isShiftActive && animatingButton == null,
-                    activeColor = Color(0xFFD32F2F),
-                    contentColor = Color.White
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun PressableButton(
-    onClick: () -> Unit,
-    text: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    isManuallyPressed: Boolean = false,
-    activeColor: Color,
-    contentColor: Color
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val showPressedState = (isPressed || isManuallyPressed) && enabled
-    val shape = RoundedCornerShape(50)
-
-    val brightCenterColor = activeColor
-    val darkEdgeColor = androidx.compose.ui.graphics.lerp(activeColor, Color.Black, 0.4f)
-    val pressedCenterColor = androidx.compose.ui.graphics.lerp(activeColor, Color.Black, 0.2f)
-
-    val animatedCenterColor by animateColorAsState(
-        targetValue = if (showPressedState) pressedCenterColor else brightCenterColor,
-        animationSpec = tween(durationMillis = 150),
-        label = "button_color_animation"
-    )
-
-    val disabledBackgroundColor = Color.Black.copy(alpha = 0.2f)
-    val disabledContentColor = Color.White.copy(alpha = 0.3f)
-
-    val backgroundBrush = if (enabled) {
-        Brush.radialGradient(
-            colors = listOf(animatedCenterColor, darkEdgeColor),
-            radius = 250f
-        )
-    } else {
-        SolidColor(disabledBackgroundColor)
-    }
-
-    val currentContentColor = if (enabled) contentColor else disabledContentColor
-
-    Box(
-        modifier = modifier
-            .clip(shape)
-            .background(brush = backgroundBrush)
-            .border(
-                width = 1.dp,
-                color = Color.White.copy(alpha = if (enabled) 0.2f else 0.1f),
-                shape = shape
-            )
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                enabled = enabled,
-                onClick = onClick
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(imageVector = icon, contentDescription = text, tint = currentContentColor)
-            Text(text, color = currentContentColor, fontWeight = FontWeight.Bold, maxLines = 1)
-        }
-    }
-}
-
-
-@Composable
-fun StatCard(icon: ImageVector, label: String, value: String, isNumeric: Boolean) {
-    val shape = RoundedCornerShape(16.dp)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(Color.Black.copy(alpha = 0.2f))
-            .border(width = 1.dp, color = StardustItemBg, shape = shape)
-    ) {
-        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            GlowingIcon(icon = icon, contentDescription = label)
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = label, color = StardustTextSecondary, fontSize = 14.sp)
-                if (isNumeric) {
-                    AnimatedCounter(count = value.toIntOrNull() ?: 0, style = MaterialTheme.typography.titleMedium.copy(color = StardustTextPrimary, fontWeight = FontWeight.SemiBold))
+                Spacer(Modifier.height(24.dp))
+                if (!isShiftActive) {
+                    Button(
+                        onClick = onStartShift,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentGreen)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null, tint = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Начать смену", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    }
                 } else {
-                    Text(text = value, color = StardustTextPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Button(
+                        onClick = onEndShift,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.Background)
+                    ) {
+                        Icon(Icons.Default.Stop, null, tint = CorporateColors.AccentRed)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Завершить смену", color = CorporateColors.AccentRed, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    }
                 }
             }
         }
@@ -464,8 +601,11 @@ fun StatCard(icon: ImageVector, label: String, value: String, isNumeric: Boolean
 
 @Composable
 fun ShiftProgressBar(modifier: Modifier = Modifier, shiftStartTime: Long) {
-    val totalShiftDuration = 12 * 60 * 60 * 1000L; var progress by remember { mutableFloatStateOf(0f) }; var elapsedTimeText by remember { mutableStateOf("00:00:00") }
-    LaunchedEffect(key1 = shiftStartTime) {
+    val totalShiftDuration = 12 * 60 * 60 * 1000L
+    var progress by remember { mutableFloatStateOf(0f) }
+    var elapsedTimeText by remember { mutableStateOf("00:00:00") }
+
+    LaunchedEffect(shiftStartTime) {
         if (shiftStartTime == 0L) { progress = 0f; elapsedTimeText = "00:00:00"; return@LaunchedEffect }
         while (true) {
             val elapsedMillis = (System.currentTimeMillis() - shiftStartTime).coerceAtLeast(0)
@@ -475,76 +615,204 @@ fun ShiftProgressBar(modifier: Modifier = Modifier, shiftStartTime: Long) {
             delay(1000)
         }
     }
-    val animatedProgress by animateFloatAsState(targetValue = progress, animationSpec = tween(durationMillis = 1000, easing = LinearEasing), label = "progressAnimation")
-    val progressBrush = Brush.linearGradient(colors = listOf(Color(0xFF00C2FF), Color(0xFF8E2DE2)))
 
-    Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        val shape = CircleShape
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp)
-                .clip(shape)
-                .background(Color.Black.copy(alpha = 0.2f))
-                .border(1.dp, color = StardustItemBg, shape)
-        ) {
-            Box(modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(animatedProgress)
-                .clip(shape)
-                .background(progressBrush))
-            Row(modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = elapsedTimeText, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.5f), Offset(2f, 2f), 4f)))
-                Text(text = "${(animatedProgress * 100).toInt()}%", color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.5f), Offset(2f, 2f), 4f)))
+    val animatedProgress by animateFloatAsState(targetValue = progress, animationSpec = tween(1000, easing = LinearEasing), label = "progress")
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Время на смене", color = CorporateColors.TextSecondary, fontSize = 13.sp)
+            Text(elapsedTimeText, color = CorporateColors.TextPrimary, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+        }
+        Box(modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(CorporateColors.CardSurface)) {
+            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(animatedProgress).clip(CircleShape).background(CorporateColors.AccentGreen))
+        }
+    }
+}
+
+@Composable
+fun TodayStatsCard(scansToday: Int, sessionsToday: Int, modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
+        Box(modifier = Modifier.fillMaxWidth().border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp)).padding(20.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                TodayStatItem(value = scansToday, label = "СКАНИРОВАНИЙ", color = CorporateColors.TextPrimary)
+                Box(modifier = Modifier.width(1.dp).height(40.dp).background(CorporateColors.CardBorder))
+                TodayStatItem(value = sessionsToday, label = "ПАРТИЙ", color = CorporateColors.AccentPurple)
             }
         }
-        Text(text = "Длительность смены", color = StardustTextSecondary, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
 @Composable
-fun AnimatedStatCard(icon: ImageVector, label: String, value: String, delay: Int, isNumeric: Boolean) {
-    var isVisible by remember { mutableStateOf(false) }; LaunchedEffect(Unit) { delay(delay.toLong()); isVisible = true }
-    AnimatedVisibility(visible = isVisible, enter = slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(500)) + fadeIn(animationSpec = tween(500))) {
-        StatCard(icon = icon, label = label, value = value, isNumeric = isNumeric)
+private fun TodayStatItem(value: Int, label: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        AnimatedCounter(count = value, style = MaterialTheme.typography.headlineMedium.copy(color = color, fontWeight = FontWeight.Bold))
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = CorporateColors.TextSecondary, fontSize = 11.sp, letterSpacing = 1.sp)
     }
 }
 
 @Composable
-private fun GlowingIcon(icon: ImageVector, contentDescription: String?) {
-    Icon(
-        imageVector = icon,
-        contentDescription = contentDescription,
-        tint = Color.White,
-        modifier = Modifier
-            .size(48.dp)
-            .background(StardustPrimary.copy(alpha = 0.1f), CircleShape)
-            .padding(12.dp)
-    )
+fun StreakCard(streakDays: Int, modifier: Modifier = Modifier) {
+    CorporateStatCard(modifier, Icons.Default.TrendingUp, if (streakDays > 0) CorporateColors.AccentAmber else CorporateColors.TextSecondary, streakDays.toString(), "Дней подряд", "Текущий стрик")
+}
+
+@Composable
+fun RecordCard(record: Int, modifier: Modifier = Modifier) {
+    CorporateStatCard(modifier, Icons.Default.EmojiEvents, CorporateColors.AccentAmber, record.toString(), "Рекорд за день", "Макс. сканов")
+}
+
+@Composable
+private fun CorporateStatCard(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, iconColor: Color, value: String, label: String, subLabel: String) {
+    Card(modifier = modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
+        Column(modifier = Modifier.fillMaxWidth().border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp)).padding(16.dp), horizontalAlignment = Alignment.Start) {
+            Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(iconColor.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(value, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = CorporateColors.TextPrimary)
+            Text(label, color = CorporateColors.TextSecondary, fontSize = 12.sp)
+            Text(subLabel, color = CorporateColors.TextSecondary.copy(alpha = 0.5f), fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+fun WeeklyChartCard(weeklyScans: List<ChartDataPoint>) {
+    if (weeklyScans.isEmpty()) return
+    val maxVal = weeklyScans.maxOfOrNull { it.count }?.takeIf { it > 0 } ?: 1
+    val todayIndex = weeklyScans.size - 1
+    val animProgress = remember { Animatable(0f) }
+    LaunchedEffect(weeklyScans) { animProgress.snapTo(0f); animProgress.animateTo(1f, tween(800, easing = FastOutSlowInEasing)) }
+    val progress by animProgress.asState()
+
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
+        Column(modifier = Modifier.border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp)).padding(20.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.BarChart, null, tint = CorporateColors.AccentPurple, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Активность за неделю", color = CorporateColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                }
+                Text("${weeklyScans.sumOf { it.count }}", color = CorporateColors.TextSecondary, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth().height(120.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                weeklyScans.forEachIndexed { index, point ->
+                    val isToday  = index == todayIndex
+                    val fraction = (point.count.toFloat() / maxVal) * progress
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom, modifier = Modifier.weight(1f)) {
+                        if (point.count > 0) {
+                            Text(if (point.count >= 1000) "${point.count / 1000}k" else point.count.toString(), color = if (isToday) CorporateColors.TextPrimary else CorporateColors.TextSecondary, fontSize = 10.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium)
+                            Spacer(Modifier.height(6.dp))
+                        }
+                        Box(modifier = Modifier.width(12.dp).height(80.dp).clip(RoundedCornerShape(50)).background(CorporateColors.Background)) {
+                            Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(fraction.coerceAtLeast(0.05f)).clip(RoundedCornerShape(50)).background(if (isToday) CorporateColors.AccentPurple else CorporateColors.CardBorder).align(Alignment.BottomCenter))
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(point.day.take(2), color = if (isToday) CorporateColors.AccentPurple else CorporateColors.TextSecondary, fontSize = 11.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StatListItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String, iconTint: Color) {
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(CorporateColors.Background), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = iconTint, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Text(label, color = CorporateColors.TextPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text(value, color = CorporateColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    }
 }
 
 @Composable
 fun AnimatedCounter(count: Int, modifier: Modifier = Modifier, style: androidx.compose.ui.text.TextStyle = LocalTextStyle.current) {
-    val animatedCount by animateIntAsState(targetValue = count, animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing), label = "animatedCounter"); Text(text = animatedCount.toString(), modifier = modifier, style = style)
+    val animatedCount by animateIntAsState(targetValue = count, animationSpec = tween(1000, easing = FastOutSlowInEasing), label = "counter")
+    Text(animatedCount.toString(), modifier = modifier, style = style)
+}
+
+@Composable
+private fun EndShiftDialog(showDialog: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            containerColor = CorporateColors.CardSurface,
+            titleContentColor = CorporateColors.TextPrimary,
+            textContentColor = CorporateColors.TextSecondary,
+            title = { Text("Завершение смены", fontWeight = FontWeight.Bold) },
+            text = { Text("Статистика работы будет сохранена. Вы уверены?") },
+            confirmButton = { TextButton(onClick = onConfirm) { Text("Завершить", color = CorporateColors.AccentRed, fontWeight = FontWeight.Bold) } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = CorporateColors.TextSecondary) } }
+        )
+    }
+}
+
+@Composable
+private fun LogoutDialog(showDialog: Boolean, isShiftActive: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            containerColor = CorporateColors.CardSurface,
+            titleContentColor = CorporateColors.TextPrimary,
+            textContentColor = CorporateColors.TextSecondary,
+            title = { Text("Выход из аккаунта", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    if (isShiftActive) Text("У вас есть активная смена! Она будет завершена автоматически.", color = CorporateColors.AccentAmber, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 8.dp))
+                    Text("Продолжить выход из корпоративной системы?")
+                }
+            },
+            confirmButton = { Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentRed)) { Text("Выйти", color = Color.White) } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = CorporateColors.TextSecondary) } }
+        )
+    }
 }
 
 @Composable
 private fun LoginFormComponent(authManager: AuthManager) {
-    var username by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope(); val focusManager = LocalFocusManager.current; val passwordFocusRequester = remember { FocusRequester() }
-    Text(text = "Вход в аккаунт", fontSize = 22.sp, textAlign = TextAlign.Center, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
-    Spacer(modifier = Modifier.height(32.dp))
-    OutlinedTextField(value = username, onValueChange = { username = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Логин") }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next), keyboardActions = KeyboardActions(onNext = { passwordFocusRequester.requestFocus() }), shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, cursorColor = StardustPrimary, focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedContainerColor = Color.Black.copy(alpha = 0.2f), unfocusedContainerColor = Color.Black.copy(alpha = 0.2f)))
-    Spacer(modifier = Modifier.height(16.dp))
-    OutlinedTextField(value = password, onValueChange = { password = it }, modifier = Modifier
-        .fillMaxWidth()
-        .focusRequester(passwordFocusRequester), label = { Text("Пароль") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, cursorColor = StardustPrimary, focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedContainerColor = Color.Black.copy(alpha = 0.2f), unfocusedContainerColor = Color.Black.copy(alpha = 0.2f)))
-    Spacer(modifier = Modifier.height(32.dp))
-    Button(onClick = { focusManager.clearFocus(); scope.launch { authManager.login(username.trim(), password.trim()) } }, enabled = username.isNotBlank() && password.isNotBlank(), modifier = Modifier
-        .fillMaxWidth()
-        .height(56.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) {
-        Text("Войти", fontWeight = FontWeight.Bold)
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val passwordFocusRequester = remember { FocusRequester() }
+
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
+        Column(modifier = Modifier.border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(24.dp)).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Outlined.Lock, null, tint = CorporateColors.AccentPurple, modifier = Modifier.size(48.dp))
+            Spacer(Modifier.height(16.dp))
+            Text("Вход в систему", fontSize = 22.sp, color = CorporateColors.TextPrimary, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(32.dp))
+            OutlinedTextField(
+                value = username, onValueChange = { username = it },
+                modifier = Modifier.fillMaxWidth(), label = { Text("Логин") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { passwordFocusRequester.requestFocus() }),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CorporateColors.AccentPurple, unfocusedBorderColor = CorporateColors.CardBorder, focusedLabelColor = CorporateColors.AccentPurple, unfocusedLabelColor = CorporateColors.TextSecondary, focusedTextColor = CorporateColors.TextPrimary, unfocusedTextColor = CorporateColors.TextPrimary, focusedContainerColor = CorporateColors.Background, unfocusedContainerColor = CorporateColors.Background)
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = password, onValueChange = { password = it },
+                modifier = Modifier.fillMaxWidth().focusRequester(passwordFocusRequester),
+                label = { Text("Пароль") }, singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CorporateColors.AccentPurple, unfocusedBorderColor = CorporateColors.CardBorder, focusedLabelColor = CorporateColors.AccentPurple, unfocusedLabelColor = CorporateColors.TextSecondary, focusedTextColor = CorporateColors.TextPrimary, unfocusedTextColor = CorporateColors.TextPrimary, focusedContainerColor = CorporateColors.Background, unfocusedContainerColor = CorporateColors.Background)
+            )
+            Spacer(Modifier.height(32.dp))
+            Button(
+                onClick = { focusManager.clearFocus(); scope.launch { authManager.login(username.trim(), password.trim()) } },
+                enabled = username.isNotBlank() && password.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentPurple, disabledContainerColor = CorporateColors.CardBorder)
+            ) { Text("Войти", fontWeight = FontWeight.SemiBold, fontSize = 16.sp) }
+        }
     }
 }
