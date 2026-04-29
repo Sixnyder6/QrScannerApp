@@ -601,28 +601,114 @@ fun MainApp(
 
 @Composable
 fun DrawerHeader(authState: AuthState, warehouseName: String) {
-    var currentTime by remember { mutableStateOf("") }
     var currentDate by remember { mutableStateOf("") }
+    var weather by remember { mutableStateOf<WeatherData?>(null) }
+
     LaunchedEffect(Unit) {
-        val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
         val dateFmt = SimpleDateFormat("EEE, d MMM", Locale("ru"))
-        while (true) { val now = Date(); currentTime = timeFmt.format(now); currentDate = dateFmt.format(now); delay(1000) }
+        while (true) {
+            currentDate = dateFmt.format(Date())
+            delay(60_000)
+        }
     }
-    Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(colors = listOf(Color(0xFF6A5AE0).copy(alpha = 0.3f), Color.Transparent))).padding(horizontal = 20.dp, vertical = 20.dp)) {
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            weather = WeatherRepo.load()
+            delay(30 * 60 * 1000L) // обновление раз в 30 минут
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(colors = listOf(Color(0xFF6A5AE0).copy(alpha = 0.3f), Color.Transparent)))
+            .padding(horizontal = 20.dp, vertical = 20.dp)
+    ) {
         Column {
+            // Склад
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = StardustPrimary.copy(alpha = 0.8f), modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(text = warehouseName, color = StardustPrimary.copy(alpha = 0.8f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                Text(text = currentTime, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-                Text(text = currentDate, color = StardustTextSecondary, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Погода
+            if (weather != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = weather!!.emoji,
+                            fontSize = 32.sp
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "${weather!!.tempC}°C",
+                                color = Color.White,
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-1).sp
+                            )
+                            Text(
+                                text = weather!!.description,
+                                color = StardustTextSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                    Text(
+                        text = currentDate,
+                        color = StardustTextSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+            } else {
+                // Пока грузится — показываем дату
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text(
+                        text = "—°C",
+                        color = Color.White.copy(alpha = 0.3f),
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-1).sp
+                    )
+                    Text(
+                        text = currentDate,
+                        color = StardustTextSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
             }
+
+            // Роль
             if (authState.isLoggedIn) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Surface(color = StardustPrimary.copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) { Text(text = authState.role.displayName.uppercase(), color = StardustPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)) }
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    color = StardustPrimary.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = authState.role.displayName.uppercase(),
+                        color = StardustPrimary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
             }
         }
     }

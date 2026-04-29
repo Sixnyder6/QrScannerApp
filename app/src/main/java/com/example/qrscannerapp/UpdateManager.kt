@@ -75,7 +75,7 @@ class UpdateManager @Inject constructor(
     private val workManager = WorkManager.getInstance(context)
 
     companion object {
-        private const val UPDATE_URL = "https://github.com/Sixnyder6/QrscannerApp/releases/latest/download/update.json"
+        private const val UPDATE_URL = "https://github.com/Sixnyder6/QrScannerApp/releases/latest/download/update.json"
         private const val UPDATE_WORK_NAME = "app_update_work"
     }
 
