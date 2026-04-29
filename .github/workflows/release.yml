@@ -25,10 +25,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build with Gradle
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleRelease -Pandroid.injected.signing.store.file=$(pwd)/app/keystore.jks -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=appkey -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
 
       - name: Create release_notes.json
         run: |
