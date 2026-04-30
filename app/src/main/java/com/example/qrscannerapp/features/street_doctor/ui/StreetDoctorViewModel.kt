@@ -55,18 +55,12 @@ class StreetDoctorViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoading = false, error = error.message) }
                     return@addSnapshotListener
                 }
-
                 if (snapshot == null || snapshot.isEmpty) {
-                    Log.d(TAG, "No active session found")
                     _uiState.update { it.copy(isLoading = false, scooters = emptyList()) }
                     return@addSnapshotListener
                 }
-
                 val sessionId = snapshot.documents.first().id
-                Log.d(TAG, "Found active session: $sessionId")
-
                 if (_uiState.value.sessionId == sessionId) return@addSnapshotListener
-
                 _uiState.update { it.copy(sessionId = sessionId) }
                 startTasksListener(sessionId)
             }
@@ -74,7 +68,6 @@ class StreetDoctorViewModel @Inject constructor(
 
     private fun startTasksListener(sessionId: String) {
         val myId = authManager.authState.value.userId ?: ""
-
         tasksListener?.remove()
         tasksListener = firestore.collection("field_repair_tasks")
             .whereEqualTo("sessionId", sessionId)
@@ -85,7 +78,6 @@ class StreetDoctorViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoading = false, error = error.message) }
                     return@addSnapshotListener
                 }
-
                 if (snapshot != null) {
                     val scooters = snapshot.documents.mapNotNull { doc ->
                         try {
@@ -96,26 +88,18 @@ class StreetDoctorViewModel @Inject constructor(
                                 "to_storage"  -> ScooterFieldStatus.TO_STORAGE
                                 else          -> ScooterFieldStatus.NEW
                             }
-
                             val lat = when (val v = doc.get("lat")) {
-                                is Double -> v
-                                is String -> v.toDoubleOrNull() ?: 0.0
-                                is Long   -> v.toDouble()
-                                else      -> 0.0
+                                is Double -> v; is String -> v.toDoubleOrNull() ?: 0.0
+                                is Long -> v.toDouble(); else -> 0.0
                             }
                             val lon = when (val v = doc.get("lon")) {
-                                is Double -> v
-                                is String -> v.toDoubleOrNull() ?: 0.0
-                                is Long   -> v.toDouble()
-                                else      -> 0.0
+                                is Double -> v; is String -> v.toDoubleOrNull() ?: 0.0
+                                is Long -> v.toDouble(); else -> 0.0
                             }
                             val charge = when (val v = doc.get("charge")) {
-                                is Long   -> v.toInt()
-                                is Double -> v.toInt()
-                                is String -> v.toIntOrNull() ?: 0
-                                else      -> 0
+                                is Long -> v.toInt(); is Double -> v.toInt()
+                                is String -> v.toIntOrNull() ?: 0; else -> 0
                             }
-
                             StreetScooter(
                                 id             = doc.id,
                                 code           = doc.getString("scooterNumber") ?: "",
@@ -129,23 +113,16 @@ class StreetDoctorViewModel @Inject constructor(
                                 isMine         = true,
                                 workerName     = doc.getString("assignedToName"),
                                 workerInitials = doc.getString("assignedToName")
-                                    ?.split(" ")
-                                    ?.mapNotNull { it.firstOrNull()?.toString() }
-                                    ?.take(2)
-                                    ?.joinToString(""),
+                                    ?.split(" ")?.mapNotNull { it.firstOrNull()?.toString() }?.take(2)?.joinToString(""),
                                 workerRole     = "Техник",
                                 workStartTime  = if (status == ScooterFieldStatus.IN_PROGRESS)
-                                    doc.getLong("updatedAt") ?: doc.getLong("createdAt")
-                                else null
+                                    doc.getLong("updatedAt") ?: doc.getLong("createdAt") else null
                             )
                         } catch (e: Exception) {
-                            Log.e(TAG, "Error parsing task ${doc.id}", e)
-                            null
+                            Log.e(TAG, "Error parsing task ${doc.id}", e); null
                         }
                     }
-
                     _uiState.update { it.copy(scooters = scooters, isLoading = false) }
-                    Log.d(TAG, "Loaded ${scooters.size} tasks for myId=$myId")
                     updateDistances()
                 }
             }
@@ -158,11 +135,7 @@ class StreetDoctorViewModel @Inject constructor(
                 val updated = _uiState.value.scooters.map { scooter ->
                     if (scooter.lat == 0.0 && scooter.lon == 0.0) return@map scooter
                     val results = FloatArray(1)
-                    Location.distanceBetween(
-                        myLocation.latitude, myLocation.longitude,
-                        scooter.lat, scooter.lon,
-                        results
-                    )
+                    Location.distanceBetween(myLocation.latitude, myLocation.longitude, scooter.lat, scooter.lon, results)
                     scooter.copy(distanceMeters = results[0].toInt())
                 }.sortedBy { it.distanceMeters }
                 _uiState.update { it.copy(scooters = updated) }
@@ -192,12 +165,13 @@ class StreetDoctorViewModel @Inject constructor(
         }
     }
 
-    // ── Завершить ремонт — теперь сохраняет виды работ и заряд ──────────────
+    // ── Завершить ремонт — сохраняет виды работ, заряд, заметку, фото ───────
     fun completeRepair(
         scooterId: String,
         repairTypes: List<String> = emptyList(),
         batteryPctReal: Int? = null,
-        notes: String = ""
+        notes: String = "",
+        photoUrls: List<String> = emptyList()   // ← URLs после загрузки в Cloudinary
     ) {
         viewModelScope.launch {
             try {
@@ -210,7 +184,8 @@ class StreetDoctorViewModel @Inject constructor(
                     "repairTypes" to repairTypes
                 )
                 if (batteryPctReal != null) data["batteryPctReal"] = batteryPctReal
-                if (notes.isNotBlank()) data["notes"] = notes
+                if (notes.isNotBlank())     data["notes"] = notes
+                if (photoUrls.isNotEmpty()) data["photoUrls"] = photoUrls
 
                 firestore.collection("field_repair_tasks").document(scooterId)
                     .update(data).await()
@@ -222,12 +197,13 @@ class StreetDoctorViewModel @Inject constructor(
         }
     }
 
-    // ── На склад — тоже сохраняет виды работ и заряд ────────────────────────
+    // ── На склад — тоже сохраняет фото ───────────────────────────────────────
     fun sendToStorage(
         scooterId: String,
         repairTypes: List<String> = emptyList(),
         batteryPctReal: Int? = null,
-        notes: String = ""
+        notes: String = "",
+        photoUrls: List<String> = emptyList()   // ← URLs после загрузки в Cloudinary
     ) {
         viewModelScope.launch {
             try {
@@ -240,7 +216,8 @@ class StreetDoctorViewModel @Inject constructor(
                     "repairTypes" to repairTypes
                 )
                 if (batteryPctReal != null) data["batteryPctReal"] = batteryPctReal
-                if (notes.isNotBlank()) data["notes"] = notes
+                if (notes.isNotBlank())     data["notes"] = notes
+                if (photoUrls.isNotEmpty()) data["photoUrls"] = photoUrls
 
                 firestore.collection("field_repair_tasks").document(scooterId)
                     .update(data).await()
@@ -274,7 +251,6 @@ class StreetDoctorViewModel @Inject constructor(
     private suspend fun updateSessionDoneCount() {
         val sessionId = _uiState.value.sessionId ?: return
         try {
-            // Считаем актуально из Firestore через increment чтобы избежать race condition
             firestore.collection("field_repair_sessions").document(sessionId)
                 .update("doneCount", com.google.firebase.firestore.FieldValue.increment(1))
                 .await()

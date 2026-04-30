@@ -2,17 +2,20 @@
 // QR-сканер для техника полевого ремонта.
 // Логика: сканируешь самокат → ищет в field_repair_tasks (assignedToId == myId)
 // Если нашёл → PassportScreen. Нет в списке → предлагает добавить как незапланированный.
+// Включает возможность ручного ввода поврежденного QR-кода с жестким форматом "H LNNNL".
 package com.example.qrscannerapp.features.street_doctor.ui
 
 import android.util.Log
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -22,8 +25,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.*
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,6 +54,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
+import kotlin.math.min
 
 // ── Цвета (совпадают с TasksScreen) ──────────────────────────────────────────
 private val ScBg         = Color(0xFF0F0F13)
@@ -182,7 +190,6 @@ class TechnicScannerViewModel @Inject constructor(
 
     // ── Обработка QR-кода ─────────────────────────────────────────────────────
     fun onCodeScanned(raw: String) {
-        // Извлекаем номер самоката из QR (может быть URL вида .../HE600A)
         val code = extractScooterCode(raw)
         if (code.isBlank()) return
 
@@ -194,7 +201,6 @@ class TechnicScannerViewModel @Inject constructor(
         _uiState.update { it.copy(lastScannedCode = code, scanResult = ScanResult.Scanning) }
 
         viewModelScope.launch {
-            // Ищем в кэше заданий
             val found = _uiState.value.myTasks.find {
                 it.code.equals(code, ignoreCase = true)
             }
@@ -203,7 +209,6 @@ class TechnicScannerViewModel @Inject constructor(
                 triggerEffect(ScanEffect.Success)
                 _uiState.update { it.copy(scanResult = ScanResult.FoundInList(found)) }
             } else {
-                // Нет в списке — проверяем существует ли сессия вообще
                 if (_uiState.value.sessionId == null) {
                     triggerEffect(ScanEffect.Error)
                     _uiState.update { it.copy(scanResult = ScanResult.Error("Нет активной сессии полевого ремонта")) }
@@ -237,7 +242,7 @@ class TechnicScannerViewModel @Inject constructor(
                     "assignedToId"   to myId,
                     "assignedToName" to myName,
                     "status"         to "in_progress",
-                    "isFromList"     to false,      // ← незапланированный
+                    "isFromList"     to false,
                     "isUnplanned"    to true,
                     "createdAt"      to now,
                     "updatedAt"      to now,
@@ -289,7 +294,6 @@ class TechnicScannerViewModel @Inject constructor(
 
     // ── Парсинг номера самоката из QR ─────────────────────────────────────────
     private fun extractScooterCode(raw: String): String {
-        // URL-формат: https://...?number=HE600A или https://.../HE600A
         if (raw.contains("number=")) {
             val extracted = raw.substringAfter("number=")
                 .split('&', '?', '#').firstOrNull()?.trim()
@@ -301,7 +305,6 @@ class TechnicScannerViewModel @Inject constructor(
                 return segment.uppercase()
             }
         }
-        // Прямой номер (короткий буквенно-цифровой)
         val cleaned = raw.trim()
         if (cleaned.matches(Regex("[A-Za-z0-9]{2,12}"))
             && !cleaned.startsWith("4BB") && !cleaned.startsWith("4BZ")
@@ -329,14 +332,12 @@ fun TechnicScannerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Диалог "не в списке"
     var pendingUnplannedCode by remember { mutableStateOf<String?>(null) }
+    var showManualInputDialog by remember { mutableStateOf(false) }
 
-    // Реакция на результат сканирования
     LaunchedEffect(uiState.scanResult) {
         when (val r = uiState.scanResult) {
             is ScanResult.FoundInList -> {
-                // Небольшая пауза чтобы эффект был виден
                 delay(400)
                 onOpenPassport(r.scooter)
                 viewModel.resetScan()
@@ -348,7 +349,16 @@ fun TechnicScannerScreen(
         }
     }
 
-    // Диалог незапланированного самоката
+    if (showManualInputDialog) {
+        ManualInputDialog(
+            onDismiss = { showManualInputDialog = false },
+            onConfirm = { code ->
+                showManualInputDialog = false
+                viewModel.onCodeScanned(code)
+            }
+        )
+    }
+
     if (pendingUnplannedCode != null) {
         UnplannedScooterDialog(
             code = pendingUnplannedCode!!,
@@ -367,11 +377,9 @@ fun TechnicScannerScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(ScBg)) {
-
-        // ── Камера (весь экран) ──
         CameraView(
             isSearchMode = false,
-            hasPermission = true,  // разрешение запрашивается в MainActivity / host
+            hasPermission = true,
             scanEventFlow = kotlinx.coroutines.flow.emptyFlow(),
             isTorchOn = false,
             onTorchChange = {},
@@ -379,15 +387,12 @@ fun TechnicScannerScreen(
             onStatusUpdate = { _, _ -> }
         )
 
-        // ── Оверлей поверх камеры ──
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Шапка
             ScannerTopBar(onMenuClick = onMenuClick)
 
-            // Центральный фрейм сканирования
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
@@ -395,10 +400,10 @@ fun TechnicScannerScreen(
                 ScanFrame(effect = uiState.scanEffect)
             }
 
-            // Нижняя панель состояния
             ScannerBottomPanel(
                 uiState = uiState,
-                onRetry = { viewModel.resetScan() }
+                onRetry = { viewModel.resetScan() },
+                onManualInputClick = { showManualInputDialog = true }
             )
         }
     }
@@ -468,7 +473,6 @@ private fun ScanFrame(effect: ScanEffect) {
         label = "frame_color"
     )
 
-    // Пульс при успехе
     val pulse = rememberInfiniteTransition(label = "scan_pulse")
     val scanLine by pulse.animateFloat(0f, 1f, infiniteRepeatable(tween(1800, easing = LinearEasing)), label = "scan_line")
 
@@ -476,7 +480,6 @@ private fun ScanFrame(effect: ScanEffect) {
         modifier = Modifier.size(frameSize),
         contentAlignment = Alignment.Center
     ) {
-        // Сканирующая линия (только в Idle)
         if (effect == ScanEffect.None) {
             Box(
                 modifier = Modifier
@@ -492,20 +495,11 @@ private fun ScanFrame(effect: ScanEffect) {
             )
         }
 
-        // 4 угла рамки
-        val corners = listOf(
-            Alignment.TopStart to (0.dp to 0.dp),
-            Alignment.TopEnd to (0.dp to 0.dp),
-            Alignment.BottomStart to (0.dp to 0.dp),
-            Alignment.BottomEnd to (0.dp to 0.dp)
-        )
-        // Угол TopStart
         CornerBracket(Alignment.TopStart, frameSize, cornerLen, cornerThick, frameColor)
         CornerBracket(Alignment.TopEnd, frameSize, cornerLen, cornerThick, frameColor)
         CornerBracket(Alignment.BottomStart, frameSize, cornerLen, cornerThick, frameColor)
         CornerBracket(Alignment.BottomEnd, frameSize, cornerLen, cornerThick, frameColor)
 
-        // Иконка статуса по центру
         AnimatedVisibility(
             visible = effect != ScanEffect.None,
             enter = scaleIn(spring(0.5f)) + fadeIn(),
@@ -547,11 +541,7 @@ private fun CornerBracket(
     thickness: androidx.compose.ui.unit.Dp,
     color: Color
 ) {
-    val isTop    = alignment == Alignment.TopStart || alignment == Alignment.TopEnd
-    val isStart  = alignment == Alignment.TopStart || alignment == Alignment.BottomStart
-
     Box(modifier = Modifier.size(frameSize)) {
-        // Горизонтальная черта
         Box(
             modifier = Modifier
                 .width(cornerLen)
@@ -566,7 +556,6 @@ private fun CornerBracket(
                     }
                 )
         )
-        // Вертикальная черта
         Box(
             modifier = Modifier
                 .width(thickness)
@@ -589,7 +578,8 @@ private fun CornerBracket(
 @Composable
 private fun ScannerBottomPanel(
     uiState: TechnicScannerUiState,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onManualInputClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -605,18 +595,36 @@ private fun ScannerBottomPanel(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Подсказка / статус
         when (val r = uiState.scanResult) {
             is ScanResult.Idle -> {
-                StatusHint(
-                    icon = Icons.Outlined.QrCodeScanner,
-                    text = if (uiState.sessionId != null)
-                        "Наведите камеру на QR-код самоката"
-                    else
-                        "Нет активной сессии ремонта",
-                    color = if (uiState.sessionId != null) ScTextMuted else ScDanger
-                )
-                // Количество заданий
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Spacer(Modifier.size(44.dp))
+                    StatusHint(
+                        icon = Icons.Outlined.QrCodeScanner,
+                        text = if (uiState.sessionId != null)
+                            "Наведите камеру на QR-код самоката"
+                        else
+                            "Нет активной сессии ремонта",
+                        color = if (uiState.sessionId != null) ScTextMuted else ScDanger,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = onManualInputClick,
+                        enabled = uiState.sessionId != null,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Keyboard,
+                            contentDescription = "Ручной ввод",
+                            tint = if (uiState.sessionId != null) ScTextMuted else ScTextMuted.copy(alpha = 0.4f)
+                        )
+                    }
+                }
+
                 if (uiState.sessionId != null && uiState.myTasks.isNotEmpty()) {
                     val done = uiState.myTasks.count {
                         it.status == ScooterFieldStatus.DONE ||
@@ -671,7 +679,7 @@ private fun ScannerBottomPanel(
                     onClick = onRetry,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = ScDanger),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, ScDanger.copy(0.4f))
+                    border = BorderStroke(1.dp, ScDanger.copy(0.4f))
                 ) {
                     Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
@@ -683,12 +691,14 @@ private fun ScannerBottomPanel(
 }
 
 @Composable
-private fun StatusHint(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, color: Color) {
+private fun StatusHint(icon: ImageVector, text: String, color: Color, modifier: Modifier = Modifier) {
     Row(
+        modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.Center,
     ) {
         Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
         Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
     }
 }
@@ -712,7 +722,6 @@ private fun UnplannedScooterDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Иконка
                 Box(
                     modifier = Modifier
                         .size(64.dp)
@@ -722,15 +731,12 @@ private fun UnplannedScooterDialog(
                 ) {
                     Icon(Icons.Default.TwoWheeler, null, tint = ScWarning, modifier = Modifier.size(30.dp))
                 }
-
                 Text(
                     "Самокат вне списка",
                     color = ScTextMain,
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 18.sp
                 )
-
-                // Номер самоката
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
@@ -746,7 +752,6 @@ private fun UnplannedScooterDialog(
                         letterSpacing = 2.sp
                     )
                 }
-
                 Text(
                     "Этого самоката нет в ваших заданиях. Хотите добавить его как незапланированный ремонт?",
                     color = ScTextMuted,
@@ -754,8 +759,6 @@ private fun UnplannedScooterDialog(
                     textAlign = TextAlign.Center,
                     lineHeight = 19.sp
                 )
-
-                // Бейдж "незапланированный"
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -772,10 +775,7 @@ private fun UnplannedScooterDialog(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
-
                 Spacer(Modifier.height(4.dp))
-
-                // Кнопки
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -786,11 +786,10 @@ private fun UnplannedScooterDialog(
                         shape = RoundedCornerShape(12.dp),
                         enabled = !isAdding,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = ScTextMuted),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, ScDivider)
+                        border = BorderStroke(1.dp, ScDivider)
                     ) {
                         Text("Отмена", fontSize = 14.sp)
                     }
-
                     Button(
                         onClick = { onAdd(code) },
                         modifier = Modifier.weight(1f),
@@ -809,6 +808,168 @@ private fun UnplannedScooterDialog(
                             Spacer(Modifier.width(4.dp))
                             Text("Добавить", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Диалог ручного ввода с форматированием и валидацией ─────────────────────
+
+/**
+ * Визуальное преобразование вводимого текста в формат "H XNNN X".
+ */
+private class ScooterCodeVisualTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val inputText = text.text
+        val formattedText = buildAnnotatedString {
+            append("H ")
+
+            if (inputText.isNotEmpty()) {
+                append(inputText[0])
+            }
+            if (inputText.length > 1) {
+                append(inputText.substring(1, min(inputText.length, 4)))
+            }
+            if (inputText.length > 3) {
+                append(" ")
+            }
+            if (inputText.length > 4) {
+                append(inputText[4])
+            }
+        }
+
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int {
+                return when {
+                    offset == 0 -> 2
+                    offset <= 3 -> offset + 2
+                    offset == 4 -> offset + 3
+                    offset >= 5 -> offset + 3
+                    else -> formattedText.length
+                }
+            }
+
+            override fun transformedToOriginal(offset: Int): Int {
+                return when {
+                    offset <= 2 -> 0
+                    offset <= 5 -> offset - 2
+                    offset == 6 -> 3
+                    offset >= 7 -> offset - 3
+                    else -> inputText.length
+                }
+            }
+        }
+        return TransformedText(formattedText, offsetMapping)
+    }
+}
+
+@Composable
+private fun ManualInputDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    // Пользователь вводит только 5 символов после 'H'
+    var userInput by remember { mutableStateOf("") }
+    val maxLen = 5
+
+    // Переключение клавиатуры в зависимости от того, что ожидаем ввести
+    val keyboardType = when (userInput.length) {
+        0, 4 -> KeyboardType.Ascii // Ожидаем букву
+        1, 2, 3 -> KeyboardType.Number // Ожидаем цифру
+        else -> KeyboardType.Ascii
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E28))
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    "Ручной ввод номера",
+                    color = ScTextMain,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                Text(
+                    "Введите 1 букву, 3 цифры и 1 букву. Формат: H LNNN L",
+                    color = ScTextMuted,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+                OutlinedTextField(
+                    value = userInput,
+                    onValueChange = { newText ->
+                        if (newText.length <= maxLen) {
+                            val lastChar = newText.lastOrNull()
+                            val isValid = when (newText.length) {
+                                1, 5 -> lastChar?.isLetter() ?: true
+                                2, 3, 4 -> lastChar?.isDigit() ?: true
+                                else -> true
+                            }
+                            if (isValid) {
+                                userInput = newText.uppercase()
+                            }
+                        }
+                    },
+                    label = { Text("Номер самоката") },
+                    placeholder = { Text("H ... ...", fontFamily = FontFamily.Monospace, color = ScTextMuted) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    visualTransformation = ScooterCodeVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                        autoCorrect = false,
+                        keyboardType = keyboardType,
+                        imeAction = ImeAction.Done
+                    ),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = ScCard,
+                        unfocusedContainerColor = ScCard,
+                        focusedIndicatorColor = ScPrimary,
+                        unfocusedIndicatorColor = ScBorder,
+                        focusedTextColor = ScTextMain,
+                        unfocusedTextColor = ScTextMain,
+                        cursorColor = ScPrimary,
+                        focusedLabelColor = ScPrimary,
+                        unfocusedLabelColor = ScTextMuted,
+                    ),
+                    textStyle = LocalTextStyle.current.copy(
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 2.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ScTextMuted),
+                        border = BorderStroke(1.dp, ScDivider)
+                    ) {
+                        Text("Отмена")
+                    }
+                    Button(
+                        onClick = { onConfirm("H${userInput}") },
+                        enabled = userInput.length == maxLen,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ScPrimary)
+                    ) {
+                        Icon(Icons.Default.Search, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Найти", fontWeight = FontWeight.Bold)
                     }
                 }
             }
