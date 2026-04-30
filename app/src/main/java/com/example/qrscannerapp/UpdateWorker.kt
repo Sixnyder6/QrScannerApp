@@ -111,7 +111,9 @@ class UpdateWorker @AssistedInject constructor(
 
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", destinationFile)
                 showDownloadCompleteNotification(uri, versionName)
-                Result.success()
+                
+                val outputData = workDataOf("apk_uri" to uri.toString())
+                Result.success(outputData)
 
             } catch (e: Exception) {
                 Log.e("UpdateWorker", "Download failed", e)

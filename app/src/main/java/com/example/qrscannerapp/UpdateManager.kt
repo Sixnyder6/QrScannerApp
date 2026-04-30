@@ -60,6 +60,7 @@ sealed interface UpdateState {
     data class UpdateAvailable(val info: UpdateInfo) : UpdateState
     object UpdateNotAvailable : UpdateState
     data class Downloading(val progress: Int) : UpdateState
+    data class ReadyToInstall(val uri: Uri) : UpdateState
     data class Error(val message: String) : UpdateState
 }
 
@@ -94,7 +95,12 @@ class UpdateManager @Inject constructor(
                         _updateState.value = UpdateState.Downloading(progress)
                     }
                     WorkInfo.State.SUCCEEDED -> {
-                        resetState()
+                        val uriString = workInfo.outputData.getString("apk_uri")
+                        if (uriString != null) {
+                            _updateState.value = UpdateState.ReadyToInstall(Uri.parse(uriString))
+                        } else {
+                            resetState()
+                        }
                     }
                     WorkInfo.State.FAILED -> {
                         _updateState.value = UpdateState.Error("Ошибка загрузки обновления")
@@ -157,6 +163,14 @@ class UpdateManager @Inject constructor(
                 _updateState.value = UpdateState.Error("Ошибка проверки обновлений: ${e.message}")
             }
         }
+    }
+
+    fun installApk(uri: Uri) {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(intent)
     }
 
     fun resetState() {

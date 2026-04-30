@@ -351,6 +351,13 @@ fun MainApp(
     val updateState by updateManager.updateState.collectAsState()
     LaunchedEffect(Unit) { updateManager.checkForUpdates() }
 
+    LaunchedEffect(updateState) {
+        if (updateState is UpdateState.ReadyToInstall) {
+            updateManager.installApk((updateState as UpdateState.ReadyToInstall).uri)
+            updateManager.resetState()
+        }
+    }
+
     val view = LocalView.current
     val hapticFeedback = LocalHapticFeedback.current
     val settingsManager = remember { SettingsManager(context) }

@@ -159,6 +159,13 @@ private fun LockScreenContent(
     val updateManager: UpdateManager = hiltViewModel()
     val updateState by updateManager.updateState.collectAsState()
 
+    LaunchedEffect(updateState) {
+        if (updateState is UpdateState.ReadyToInstall) {
+            updateManager.installApk((updateState as UpdateState.ReadyToInstall).uri)
+            updateManager.resetState()
+        }
+    }
+
     LaunchedEffect(Unit) {
         updateManager.checkForUpdates()
     }

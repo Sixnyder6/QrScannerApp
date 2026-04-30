@@ -536,6 +536,10 @@
 
         LaunchedEffect(updateState) {
             if (updateState is UpdateState.UpdateAvailable) showUpdateDialog = true
+            if (updateState is UpdateState.ReadyToInstall) {
+                updateManager.installApk((updateState as UpdateState.ReadyToInstall).uri)
+                updateManager.resetState()
+            }
         }
 
         if (showUpdateDialog) {
@@ -557,7 +561,7 @@
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
-                    if (updateState !is UpdateState.Checking && updateState !is UpdateState.Downloading)
+                    if (updateState !is UpdateState.Checking && updateState !is UpdateState.Downloading && updateState !is UpdateState.ReadyToInstall)
                         onCheckClick()
                 }
                 .padding(horizontal = 16.dp, vertical = 16.dp),
@@ -573,6 +577,7 @@
                     is UpdateState.UpdateNotAvailable -> Text("У вас последняя версия",   color = StardustTextSecondary, fontSize = 12.sp)
                     is UpdateState.Error           -> Text(state.message,                 color = StardustError,         fontSize = 12.sp)
                     is UpdateState.Downloading     -> Text("Загрузка: ${state.progress}%",color = StardustPrimary,       fontSize = 12.sp)
+                    is UpdateState.ReadyToInstall  -> Text("Готово к установке",          color = StardustSuccess,       fontSize = 12.sp)
                     is UpdateState.Idle            -> Text("Нажмите, чтобы проверить",    color = StardustTextSecondary, fontSize = 12.sp)
                 }
             }
