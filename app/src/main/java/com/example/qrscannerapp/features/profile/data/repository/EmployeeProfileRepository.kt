@@ -1,4 +1,3 @@
-// Файл: features/profile/data/repository/EmployeeProfileRepository.kt
 package com.example.qrscannerapp.features.profile.data.repository
 
 import com.example.qrscannerapp.TelemetryManager
@@ -28,6 +27,7 @@ class EmployeeProfileRepository @Inject constructor(
     private companion object {
         const val USERS_COLLECTION = "internal_users"
         const val ACTIVITY_LOG_COLLECTION = "activity_log"
+        const val TELEMETRY_COLLECTION = "device_telemetry"
     }
 
     suspend fun getUserProfile(userId: String): Result<UserProfile> {
@@ -50,20 +50,22 @@ class EmployeeProfileRepository @Inject constructor(
                 "Сотрудник"
             }
 
-            // [НОВОЕ] Читаем поля для пульта управления
             val isShiftActive = userDoc.getBoolean("isShiftActive") ?: false
             val isAllowedToWork = userDoc.getBoolean("isAllowedToWork") ?: false
             val shiftRequestStatus = userDoc.getString("shiftRequestStatus") ?: "NONE"
+
+            // Телеметрийные поля — только из device_telemetry
+            val telemetrySource = firestore.collection(TELEMETRY_COLLECTION).document(userId).get().await()
 
             val profile = UserProfile(
                 name = userDoc.getString("displayName") ?: "Без имени",
                 username = userDoc.getString("username") ?: "N/A",
                 role = roleDisplayName,
                 age = age,
-                deviceInfo = userDoc.getString("deviceInfo") ?: "Нет данных",
-                appVersion = userDoc.getString("appVersion") ?: "-",
-                lastBatteryLevel = userDoc.getLong("lastBatteryLevel")?.toInt() ?: -1,
-                // [НОВОЕ] Передаём в модель
+                deviceInfo = telemetrySource.getString("deviceInfo") ?: "Нет данных",
+                activeDeviceId = telemetrySource.getString("activeDeviceId") ?: "",
+                appVersion = telemetrySource.getString("appVersion") ?: "-",
+                lastBatteryLevel = telemetrySource.getLong("lastBatteryLevel")?.toInt() ?: -1,
                 isShiftActive = isShiftActive,
                 isAllowedToWork = isAllowedToWork,
                 shiftRequestStatus = shiftRequestStatus

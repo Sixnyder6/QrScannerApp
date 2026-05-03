@@ -15,6 +15,8 @@ data class UserProfile(
     val role: String = "",
     val age: Int = 0,
     val deviceInfo: String = "",
+    // [ДОБАВЛЕНО] Поле для отображения реального устройства (iPhone)
+    val activeDeviceId: String = "",
     val appVersion: String = "",
     val lastBatteryLevel: Int = -1,
     val isShiftActive: Boolean = false,

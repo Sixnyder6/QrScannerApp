@@ -5,7 +5,13 @@
 // Включает возможность ручного ввода поврежденного QR-кода с жестким форматом "H LNNNL".
 package com.example.qrscannerapp.features.street_doctor.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -39,6 +45,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.qrscannerapp.AuthManager
+import com.example.qrscannerapp.TelemetryManager
 import com.example.qrscannerapp.features.scanner.ui.components.CameraView
 import com.example.qrscannerapp.features.street_doctor.domain.model.ScooterFieldStatus
 import com.example.qrscannerapp.features.street_doctor.domain.model.StreetScooter
@@ -96,7 +103,8 @@ enum class ScanEffect { None, Success, NotFound, Error }
 
 @HiltViewModel
 class TechnicScannerViewModel @Inject constructor(
-    private val authManager: AuthManager
+    private val authManager: AuthManager,
+    private val telemetryManager: TelemetryManager
 ) : ViewModel() {
 
     private val db = Firebase.firestore
@@ -236,6 +244,9 @@ class TechnicScannerViewModel @Inject constructor(
             try {
                 val docId = db.collection("field_repair_tasks").document().id
                 val now = System.currentTimeMillis()
+                val gps = telemetryManager.getCurrentLocation()
+                val lat = gps?.latitude ?: 0.0
+                val lon = gps?.longitude ?: 0.0
                 val data = hashMapOf(
                     "sessionId"      to sessionId,
                     "scooterNumber"  to code,
@@ -246,8 +257,8 @@ class TechnicScannerViewModel @Inject constructor(
                     "isUnplanned"    to true,
                     "createdAt"      to now,
                     "updatedAt"      to now,
-                    "lat"            to 0.0,
-                    "lon"            to 0.0,
+                    "lat"            to lat,
+                    "lon"            to lon,
                     "charge"         to 0,
                     "model"          to "",
                     "processStage"   to "Незапланированный"
@@ -261,7 +272,7 @@ class TechnicScannerViewModel @Inject constructor(
                     distanceMeters = 0,
                     batteryPct     = 0,
                     address        = "Незапланированный",
-                    lat            = 0.0, lon = 0.0,
+                    lat            = lat, lon = lon,
                     model          = "",
                     isMine         = true,
                     workerName     = myName,
@@ -331,6 +342,17 @@ fun TechnicScannerScreen(
     onOpenPassport: (StreetScooter) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    var hasCameraPermission by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasCameraPermission = granted
+    }
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
 
     var pendingUnplannedCode by remember { mutableStateOf<String?>(null) }
     var showManualInputDialog by remember { mutableStateOf(false) }
@@ -379,7 +401,7 @@ fun TechnicScannerScreen(
     Box(modifier = Modifier.fillMaxSize().background(ScBg)) {
         CameraView(
             isSearchMode = false,
-            hasPermission = true,
+            hasPermission = hasCameraPermission,
             scanEventFlow = kotlinx.coroutines.flow.emptyFlow(),
             isTorchOn = false,
             onTorchChange = {},

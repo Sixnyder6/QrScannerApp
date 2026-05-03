@@ -1,5 +1,6 @@
 package com.example.qrscannerapp
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -7,11 +8,15 @@ import com.example.qrscannerapp.features.tasks.data.remote.TaskRemoteDataSource
 import com.example.qrscannerapp.features.tasks.data.repository.TaskRepository
 import com.example.qrscannerapp.features.tasks.domain.model.Task
 import com.example.qrscannerapp.features.tasks.domain.model.TaskStatus
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -93,7 +98,8 @@ data class DashboardUiState(
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val taskRepository: TaskRepository,
-    private val taskRemoteDataSource: TaskRemoteDataSource
+    private val taskRemoteDataSource: TaskRemoteDataSource,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val db = Firebase.firestore
@@ -101,6 +107,8 @@ class DashboardViewModel @Inject constructor(
     private var employeesListener: ListenerRegistration? = null
     private var fieldRepairListener: ListenerRegistration? = null
     private var tasksListener: ListenerRegistration? = null // ✅ ДОБАВЛЕНО
+    private var migrationTriggered = false
+    private var cleanupTriggered = false
 
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState = _uiState.asStateFlow()
@@ -296,10 +304,7 @@ class DashboardViewModel @Inject constructor(
                     "shiftRequestStatus" to "NONE",
                     "registrationTimestamp" to System.currentTimeMillis(),
                     "appVersion" to "1.0.0", "lastAppUpdate" to System.currentTimeMillis(),
-                    "lastBatteryLevel" to 100, "deviceInfo" to "Created by Admin",
-                    "batteryHealth" to "Unknown", "isCharging" to false,
-                    "isPowerSaveMode" to false, "networkState" to "None",
-                    "freeRam" to "N/A", "freeStorage" to "N/A", "deviceUptime" to "N/A"
+                    "deviceInfo" to "Created by Admin"
                 )
                 db.collection("internal_users").add(newUser).await()
             } catch (e: Exception) {
@@ -425,7 +430,102 @@ class DashboardViewModel @Inject constructor(
                     )
                 }
                 loadActivityDataDebounced()
+
+                if (!migrationTriggered) {
+                    migrationTriggered = true
+                    migrateTelemetryToDeviceCollection(snapshot.documents)
+                }
+                if (!cleanupTriggered) {
+                    cleanupTriggered = true
+                    cleanupOldTelemetryFromInternalUsers(snapshot.documents)
+                }
             }
+    }
+
+    private fun migrateTelemetryToDeviceCollection(employees: List<DocumentSnapshot>) {
+        val prefs = context.getSharedPreferences("telemetry_migration", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("telemetry_migration_done_v1", false)) return
+
+        viewModelScope.launch {
+            try {
+                // Один запрос — все существующие device_telemetry документы с полем updatedAt
+                val existingTelemetry = db.collection("device_telemetry").get().await()
+                val migratedIds = existingTelemetry.documents
+                    .filter { it.contains("updatedAt") }
+                    .map { it.id }
+                    .toSet()
+
+                val toMigrate = employees.filter { it.id !in migratedIds }
+
+                if (toMigrate.isEmpty()) {
+                    prefs.edit().putBoolean("telemetry_migration_done_v1", true).apply()
+                    Log.d(tag, "Migration done: 0 users (all already have device_telemetry)")
+                    return@launch
+                }
+
+                val telemetryFields = listOf(
+                    "lastBatteryLevel", "isCharging", "batteryHealth", "isPowerSaveMode",
+                    "networkState", "networkPing", "freeRam", "freeStorage", "deviceUptime",
+                    "deviceInfo", "locationLat", "locationLng", "locationTimestamp",
+                    "activeDeviceId", "appVersion"
+                )
+                val now = System.currentTimeMillis()
+                var migratedCount = 0
+
+                toMigrate.chunked(500).forEach { chunk ->
+                    val batch = db.batch()
+                    chunk.forEach { userDoc ->
+                        val data = hashMapOf<String, Any?>()
+                        telemetryFields.forEach { field -> data[field] = userDoc.get(field) }
+                        data["updatedAt"] = now
+                        data["migratedAt"] = now
+                        val ref = db.collection("device_telemetry").document(userDoc.id)
+                        batch.set(ref, data, SetOptions.merge())
+                    }
+                    batch.commit().await()
+                    migratedCount += chunk.size
+                }
+
+                prefs.edit().putBoolean("telemetry_migration_done_v1", true).apply()
+                Log.d(tag, "Migration done: $migratedCount users")
+            } catch (e: Exception) {
+                Log.e(tag, "Migration failed (will retry next start)", e)
+                // Флаг не ставим — повторит при следующем старте
+            }
+        }
+    }
+
+    private fun cleanupOldTelemetryFromInternalUsers(employees: List<DocumentSnapshot>) {
+        val prefs = context.getSharedPreferences("telemetry_migration", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("telemetry_cleanup_done_v1", false)) return
+
+        viewModelScope.launch {
+            try {
+                val fieldsToDelete = listOf(
+                    "lastBatteryLevel", "isCharging", "batteryHealth", "isPowerSaveMode",
+                    "networkState", "networkPing", "freeRam", "freeStorage", "deviceUptime",
+                    "locationLat", "locationLng", "locationTimestamp"
+                )
+                val deleteEntry = FieldValue.delete()
+                var cleanedCount = 0
+
+                employees.chunked(500).forEach { chunk ->
+                    val batch = db.batch()
+                    chunk.forEach { userDoc ->
+                        val updates = hashMapOf<String, Any>()
+                        fieldsToDelete.forEach { field -> updates[field] = deleteEntry }
+                        batch.update(db.collection("internal_users").document(userDoc.id), updates)
+                    }
+                    batch.commit().await()
+                    cleanedCount += chunk.size
+                }
+
+                prefs.edit().putBoolean("telemetry_cleanup_done_v1", true).apply()
+                Log.d(tag, "Cleanup done: ${fieldsToDelete.size} fields removed from $cleanedCount users")
+            } catch (e: Exception) {
+                Log.e(tag, "Cleanup failed (will retry next start)", e)
+            }
+        }
     }
 
     private fun loadActivityDataDebounced() {

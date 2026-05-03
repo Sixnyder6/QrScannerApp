@@ -376,7 +376,7 @@ private fun pluralSessions(count: Int): String = when {
 }
 
 // =================================================================================
-// ПУЛЬТ УПРАВЛЕНИЯ АДМИНА (без изменений)
+// ПУЛЬТ УПРАВЛЕНИЯ АДМИНА
 // =================================================================================
 
 @Composable
@@ -503,7 +503,7 @@ fun AdminControlCard(
 }
 
 // =================================================================================
-// ОСТАЛЬНЫЕ КОМПОНЕНТЫ (без изменений)
+// ОСТАЛЬНЫЕ КОМПОНЕНТЫ
 // =================================================================================
 
 @Composable
@@ -614,16 +614,36 @@ fun TelemetryRow(icon: ImageVector, label: String, value: String, valueColor: Co
     }
 }
 
+// =================================================================================
+// ШАПКА ПРОФИЛЯ (С ИЗМЕНЕННЫМ УСТРОЙСТВОМ)
+// =================================================================================
+
 @Composable
 fun ProfileHeaderCard(profile: UserProfile) {
+
+    // Очищаем activeDeviceId: "Apple_iPhone 16 Pro Max_1776935440205" -> "Apple iPhone 16 Pro Max"
+    val displayDevice = remember(profile.activeDeviceId, profile.deviceInfo) {
+        if (profile.activeDeviceId.isNotBlank() && profile.activeDeviceId.contains("_")) {
+            // Разбиваем по "_", убираем последний элемент (цифры) и соединяем пробелом
+            profile.activeDeviceId.split("_").dropLast(1).joinToString(" ")
+        } else if (profile.activeDeviceId.isNotBlank()) {
+            profile.activeDeviceId
+        } else {
+            // Если activeDeviceId пустой, показываем обычный deviceInfo (эмулятор или старый андроид)
+            profile.deviceInfo
+        }
+    }
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.AccountCircle, "Profile Picture",
-                    modifier = Modifier.size(64.dp), tint = StardustTextPrimary)
+                Icon(
+                    Icons.Default.AccountCircle, "Profile Picture",
+                    modifier = Modifier.size(64.dp), tint = StardustTextPrimary
+                )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
                     Text(profile.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = StardustTextPrimary)
@@ -635,7 +655,8 @@ fun ProfileHeaderCard(profile: UserProfile) {
             Spacer(modifier = Modifier.height(12.dp))
             ProfileInfoRow(Icons.Default.AlternateEmail, "Логин", profile.username)
             ProfileInfoRow(Icons.Default.Info, "Последняя версия", profile.appVersion)
-            ProfileInfoRow(Icons.Default.PhoneAndroid, "Последнее устройство", profile.deviceInfo)
+            // ИСПОЛЬЗУЕМ ОЧИЩЕННОЕ ИМЯ УСТРОЙСТВА ИЗ activeDeviceId
+            ProfileInfoRow(Icons.Default.PhoneAndroid, "Устройство", displayDevice)
         }
     }
 }

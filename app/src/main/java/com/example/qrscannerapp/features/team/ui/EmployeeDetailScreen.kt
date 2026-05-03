@@ -71,6 +71,7 @@ private data class DeviceTelemetry(
     val freeStorage: String = "",
     val deviceUptime: String = "",
     val deviceInfo: String = "",
+    val activeDeviceId: String = "", // [НОВОЕ] Добавлено поле
     val appVersion: String = "",
     val lastSeen: Long = 0L,
     // GPS
@@ -100,19 +101,23 @@ fun EmployeeDetailScreen(
     var activitySummary by remember { mutableStateOf(ActivitySummary()) }
     var telemetry by remember { mutableStateOf(DeviceTelemetry()) }
 
-    // ── Realtime listener на документ сотрудника ──────────────────────────
+    // ── Realtime listeners: internal_users (lastSeen) + device_telemetry (телеметрия) ──
     DisposableEffect(userId) {
         val db = Firebase.firestore
-        val reg: ListenerRegistration = db
-            .collection("internal_users")
+        var currentLastSeen = 0L
+        var hasTelemetryDoc = false
+
+        // Listener 1: device_telemetry — основной источник телеметрийных полей
+        val telemetryReg: ListenerRegistration = db
+            .collection("device_telemetry")
             .document(userId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("EmployeeDetail", "Snapshot error", error)
-                    telemetry = telemetry.copy(isLoaded = true)
+                    Log.e("EmployeeDetail", "device_telemetry snapshot error", error)
                     return@addSnapshotListener
                 }
                 if (snapshot != null && snapshot.exists()) {
+                    hasTelemetryDoc = true
                     telemetry = DeviceTelemetry(
                         batteryLevel = snapshot.getLong("lastBatteryLevel")?.toInt() ?: 0,
                         isCharging = snapshot.getBoolean("isCharging") ?: false,
@@ -124,20 +129,37 @@ fun EmployeeDetailScreen(
                         freeStorage = snapshot.getString("freeStorage") ?: "",
                         deviceUptime = snapshot.getString("deviceUptime") ?: "",
                         deviceInfo = snapshot.getString("deviceInfo") ?: "",
+                        activeDeviceId = snapshot.getString("activeDeviceId") ?: "",
                         appVersion = snapshot.getString("appVersion") ?: "",
-                        lastSeen = snapshot.getLong("lastSeen") ?: 0L,
+                        lastSeen = currentLastSeen,
                         locationLat = snapshot.getDouble("locationLat"),
                         locationLng = snapshot.getDouble("locationLng"),
                         locationTimestamp = snapshot.getLong("locationTimestamp") ?: 0L,
                         isLoaded = true
                     )
-                } else {
-                    telemetry = telemetry.copy(isLoaded = true)
+                }
+                // Если документа нет — internal_users listener заполнит через fallback
+            }
+
+        // Listener 2: internal_users — только lastSeen
+        val internalReg: ListenerRegistration = db
+            .collection("internal_users")
+            .document(userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("EmployeeDetail", "internal_users snapshot error", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && snapshot.exists()) {
+                    currentLastSeen = snapshot.getLong("lastSeen") ?: 0L
+                    telemetry = telemetry.copy(lastSeen = currentLastSeen)
                 }
             }
+
         onDispose {
-            reg.remove()
-            Log.d("EmployeeDetail", "Listener removed for $userId")
+            telemetryReg.remove()
+            internalReg.remove()
+            Log.d("EmployeeDetail", "Both listeners removed for $userId")
         }
     }
 
@@ -363,7 +385,6 @@ private fun LocationCard(
         colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
     ) {
         Column {
-            // Заголовок карточки
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -389,7 +410,6 @@ private fun LocationCard(
                 Text(timeText, color = StardustTextSecondary, fontSize = 12.sp)
             }
 
-            // Сама карта через MapView
             AndroidView(
                 factory = { ctx ->
                     MapView(ctx).apply {
@@ -406,7 +426,6 @@ private fun LocationCard(
                     .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
             )
 
-            // Координаты под картой
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -425,8 +444,6 @@ private fun LocationCard(
 
 private fun setupMap(map: GoogleMap, lat: Double, lng: Double, roleColor: Color, name: String) {
     val position = LatLng(lat, lng)
-
-    // Тёмная тема карты (JSON стиль)
     try {
         map.setMapStyle(
             MapStyleOptions("""
@@ -448,7 +465,6 @@ private fun setupMap(map: GoogleMap, lat: Double, lng: Double, roleColor: Color,
         isZoomControlsEnabled = false
     }
 
-    // Кружок точности вокруг маркера
     map.addCircle(
         CircleOptions()
             .center(position)
@@ -466,7 +482,6 @@ private fun setupMap(map: GoogleMap, lat: Double, lng: Double, roleColor: Color,
             .strokeWidth(2f)
     )
 
-    // Маркер
     map.addMarker(
         MarkerOptions()
             .position(position)
@@ -485,6 +500,17 @@ private fun setupMap(map: GoogleMap, lat: Double, lng: Double, roleColor: Color,
 private fun LiveDeviceCard(telemetry: DeviceTelemetry) {
     val now = System.currentTimeMillis()
     val isOnline = telemetry.lastSeen > 0L && (now - telemetry.lastSeen) < ONLINE_THRESHOLD_MS
+
+    // [НОВОЕ] Логика очистки имени устройства
+    val displayDevice = remember(telemetry.activeDeviceId, telemetry.deviceInfo) {
+        if (telemetry.activeDeviceId.isNotBlank() && telemetry.activeDeviceId.contains("_")) {
+            telemetry.activeDeviceId.split("_").dropLast(1).joinToString(" ")
+        } else if (telemetry.activeDeviceId.isNotBlank()) {
+            telemetry.activeDeviceId
+        } else {
+            telemetry.deviceInfo
+        }
+    }
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -532,8 +558,9 @@ private fun LiveDeviceCard(telemetry: DeviceTelemetry) {
                 HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
             }
 
-            if (telemetry.deviceInfo.isNotBlank() && telemetry.deviceInfo != "Created by Admin") {
-                DeviceRow("Устройство", telemetry.deviceInfo, Icons.Default.Smartphone)
+            // [ИЗМЕНЕНО] Используем чистое название iPhone
+            if (displayDevice.isNotBlank() && displayDevice != "Created by Admin") {
+                DeviceRow("Устройство", displayDevice, Icons.Default.Smartphone)
                 HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
             }
 

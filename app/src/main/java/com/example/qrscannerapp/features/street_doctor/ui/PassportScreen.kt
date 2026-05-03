@@ -1,8 +1,11 @@
 package com.example.qrscannerapp.features.street_doctor.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -176,6 +179,9 @@ fun PassportScreen(
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success && cameraUri != null) photoUris = (photoUris + cameraUri!!).take(5)
     }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted && cameraUri != null) cameraLauncher.launch(cameraUri!!)
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(uiState.toastMessage) {
@@ -329,7 +335,11 @@ fun PassportScreen(
                                                 val photoFile = java.io.File(context.cacheDir, "sd_photo_${System.currentTimeMillis()}.jpg")
                                                 val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.provider", photoFile)
                                                 cameraUri = uri
-                                                cameraLauncher.launch(uri)
+                                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                                    cameraLauncher.launch(uri)
+                                                } else {
+                                                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                                }
                                             } catch (_: Exception) {}
                                         },
                                         modifier = Modifier.weight(1f),
@@ -404,9 +414,14 @@ fun PassportScreen(
                         scope.launch {
                             isUploading = true
                             try {
-                                // Загружаем фото в Cloudinary — получаем URLs
                                 val uploadedUrls = photoUris.mapNotNull { uri ->
                                     cloudinaryUploader.uploadImage(context, uri)
+                                }
+
+                                if (photoUris.isNotEmpty() && uploadedUrls.isEmpty()) {
+                                    snackbarHostState.showSnackbar("Не удалось загрузить фото — проверьте интернет")
+                                } else if (uploadedUrls.size < photoUris.size) {
+                                    snackbarHostState.showSnackbar("Загружено ${uploadedUrls.size} из ${photoUris.size} фото")
                                 }
 
                                 val repairList = selectedRepairs.toList()

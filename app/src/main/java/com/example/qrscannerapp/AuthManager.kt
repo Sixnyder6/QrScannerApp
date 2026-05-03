@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.CoroutineScope
@@ -205,33 +206,45 @@ class AuthManager(
                     // Собираем телеметрию (без пинга — он медленный)
                     val telemetry = telemetryManager.getAllTelemetry(includePing = false)
 
-                    // Формируем payload: всё из телеметрии + онлайн-маркеры
-                    val heartbeatData = telemetry.toMutableMap().apply {
-                        put("lastSeen", System.currentTimeMillis())
-                        put("activeDeviceId", deviceId)
-                        // Убираем timestamp из телеметрии — используем lastSeen как единый источник
-                        remove("timestamp")
-                    }
-
-                    // GPS для всех ролей — TelemetryManager сам проверяет разрешения
-                    val location = telemetryManager.getCurrentLocation()
-                    if (location != null) {
-                        heartbeatData["locationLat"] = location.latitude
-                        heartbeatData["locationLng"] = location.longitude
-                        heartbeatData["locationTimestamp"] = location.timestamp
-                        Log.d(TAG, "GPS OK: ${location.latitude}, ${location.longitude}")
-                    } else {
-                        // Нет координат — удаляем старые поля чтобы не показывать протухшие
-                        heartbeatData["locationLat"] = FieldValue.delete()
-                        heartbeatData["locationLng"] = FieldValue.delete()
-                        heartbeatData["locationTimestamp"] = FieldValue.delete()
-                    }
-
+                    // internal_users: только онлайн-маркеры и идентификатор устройства
+                    val internalData: Map<String, Any> = hashMapOf(
+                        "lastSeen" to System.currentTimeMillis(),
+                        "activeDeviceId" to deviceId,
+                        "appVersion" to (telemetry["appVersion"]?.toString() ?: "")
+                    )
                     firestore.collection("internal_users").document(uid)
-                        .update(heartbeatData)
+                        .update(internalData)
                         .await()
+                    Log.d(TAG, "Heartbeat OK: lastSeen updated for $uid")
 
-                    Log.d(TAG, "Heartbeat OK: lastSeen + telemetry + GPS updated for $uid")
+                    // device_telemetry: все телеметрийные поля + GPS
+                    try {
+                        val location = telemetryManager.getCurrentLocation()
+                        val telemetryFields = hashMapOf<String, Any?>(
+                            "lastBatteryLevel" to telemetry["lastBatteryLevel"],
+                            "isCharging" to telemetry["isCharging"],
+                            "batteryHealth" to telemetry["batteryHealth"],
+                            "isPowerSaveMode" to telemetry["isPowerSaveMode"],
+                            "networkState" to telemetry["networkState"],
+                            "networkPing" to telemetry["networkPing"],
+                            "freeRam" to telemetry["freeRam"],
+                            "freeStorage" to telemetry["freeStorage"],
+                            "deviceUptime" to telemetry["deviceUptime"],
+                            "deviceInfo" to telemetry["deviceInfo"],
+                            "activeDeviceId" to deviceId,
+                            "appVersion" to (telemetry["appVersion"]?.toString() ?: ""),
+                            "locationLat" to (location?.latitude ?: FieldValue.delete()),
+                            "locationLng" to (location?.longitude ?: FieldValue.delete()),
+                            "locationTimestamp" to (location?.timestamp ?: FieldValue.delete()),
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                        firestore.collection("device_telemetry").document(uid)
+                            .set(telemetryFields, SetOptions.merge())
+                            .await()
+                        Log.d(TAG, "Telemetry updated in device_telemetry/$uid")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "device_telemetry update failed (non-critical)", e)
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Heartbeat error for $uid", e)
                 }

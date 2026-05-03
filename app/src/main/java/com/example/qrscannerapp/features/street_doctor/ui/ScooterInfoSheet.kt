@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -99,6 +101,26 @@ fun ScooterInfoSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
+    var fullscreenUrl by remember { mutableStateOf<String?>(null) }
+
+    if (fullscreenUrl != null) {
+        Dialog(
+            onDismissRequest = { fullscreenUrl = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black).clickable { fullscreenUrl = null },
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = fullscreenUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -437,6 +459,7 @@ fun ScooterInfoSheet(
                                 modifier = Modifier
                                     .size(80.dp)
                                     .clip(RoundedCornerShape(10.dp))
+                                    .clickable { fullscreenUrl = url }
                             )
                         }
                     }

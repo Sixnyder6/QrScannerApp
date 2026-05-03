@@ -100,6 +100,8 @@ class StreetDoctorViewModel @Inject constructor(
                                 is Long -> v.toInt(); is Double -> v.toInt()
                                 is String -> v.toIntOrNull() ?: 0; else -> 0
                             }
+                            @Suppress("UNCHECKED_CAST")
+                            val photoUrls = (doc.get("photoUrls") as? List<String>) ?: emptyList()
                             StreetScooter(
                                 id             = doc.id,
                                 code           = doc.getString("scooterNumber") ?: "",
@@ -111,6 +113,7 @@ class StreetDoctorViewModel @Inject constructor(
                                 lon            = lon,
                                 model          = doc.getString("model") ?: "",
                                 isMine         = true,
+                                photoUrls      = photoUrls,
                                 workerName     = doc.getString("assignedToName"),
                                 workerInitials = doc.getString("assignedToName")
                                     ?.split(" ")?.mapNotNull { it.firstOrNull()?.toString() }?.take(2)?.joinToString(""),
@@ -128,7 +131,7 @@ class StreetDoctorViewModel @Inject constructor(
             }
     }
 
-    private fun updateDistances() {
+    fun updateDistances() {
         viewModelScope.launch {
             try {
                 val myLocation = telemetryManager.getCurrentLocation() ?: return@launch

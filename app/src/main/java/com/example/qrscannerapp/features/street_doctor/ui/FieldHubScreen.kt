@@ -53,7 +53,7 @@ import javax.inject.Inject
 private val HubBg        = Color(0xFF0F0F13)
 private val HubCard      = Color(0xFF1C1C22)
 private val HubBorder    = Color(0xFF2A2A35)
-private val HubDivider   = Color(0xFFFFFFFF).copy(alpha = 0.04f)
+private val HubDivider   = Color(0xFFFFFFFF).copy(alpha = 0.09f)
 private val HubPrimary   = Color(0xFF6C5CE7)
 private val HubTextMain  = Color(0xFFFFFFFF)
 private val HubTextMuted = Color(0xFF8E8E93)
@@ -640,7 +640,7 @@ private fun ScooterRow(scooter: HubScooter, onClick: () -> Unit) {
         )
 
         // Статус + время
-        Column(horizontalAlignment = Alignment.End) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 statusLabel(scooter.status),
                 color = color,

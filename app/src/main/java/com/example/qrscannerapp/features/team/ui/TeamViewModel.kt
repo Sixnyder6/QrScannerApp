@@ -285,15 +285,7 @@ class TeamViewModel @Inject constructor() : ViewModel() {
                     "registrationTimestamp" to System.currentTimeMillis(),
                     "appVersion" to "1.0.0",
                     "lastAppUpdate" to System.currentTimeMillis(),
-                    "lastBatteryLevel" to 100,
-                    "deviceInfo" to "Created by Admin",
-                    "batteryHealth" to "Unknown",
-                    "isCharging" to false,
-                    "isPowerSaveMode" to false,
-                    "networkState" to "None",
-                    "freeRam" to "N/A",
-                    "freeStorage" to "N/A",
-                    "deviceUptime" to "N/A"
+                    "deviceInfo" to "Created by Admin"
                 )
                 db.collection("internal_users").add(newUser).await()
             } catch (e: Exception) {

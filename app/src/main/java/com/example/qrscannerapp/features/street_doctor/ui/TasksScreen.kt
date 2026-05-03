@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,10 +17,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -35,7 +45,7 @@ private val SdPrimaryDim    = Color(0xFF6C5CE7).copy(alpha = 0.12f)
 private val SdPrimaryBorder = Color(0xFF6C5CE7).copy(alpha = 0.3f)
 private val SdTextMain      = Color(0xFFFFFFFF)
 private val SdTextMuted     = Color(0xFF8E8E93)
-private val SdDivider       = Color(0xFFFFFFFF).copy(alpha = 0.05f)
+private val SdDivider       = Color(0xFFFFFFFF).copy(alpha = 0.10f)
 private val SdStatusNew     = Color(0xFF3B82F6)
 private val SdStatusWork    = Color(0xFFF59E0B)
 private val SdStatusDone    = Color(0xFF10B981)
@@ -117,9 +127,29 @@ private fun WorkerBox(scooter: StreetScooter) {
                 Text(scooter.workerRole ?: "", color = SdTextMuted, fontSize = 11.sp)
             }
         }
-        Column(horizontalAlignment = Alignment.End) {
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("В РЕМОНТЕ", color = SdTextMuted, fontSize = 10.sp, letterSpacing = 0.5.sp)
             Text(formatElapsed(elapsed), color = SdStatusWork, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        }
+    }
+}
+
+@Composable
+private fun FullscreenPhotoDialog(url: String, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black).clickable { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
@@ -128,11 +158,16 @@ private fun WorkerBox(scooter: StreetScooter) {
 private fun ScooterCard(
     scooter: StreetScooter,
     isExpanded: Boolean,
+    isNearest: Boolean = false,
     onToggle: () -> Unit,
-    onTakeWork: () -> Unit,      // берёт в работу → открывает паспорт
-    onOpenPassport: () -> Unit,  // открыть паспорт для завершения (IN_PROGRESS)
+    onTakeWork: () -> Unit,
+    onOpenPassport: () -> Unit,
     onNotFound: () -> Unit,
 ) {
+    var fullscreenUrl by remember { mutableStateOf<String?>(null) }
+    if (fullscreenUrl != null) {
+        FullscreenPhotoDialog(url = fullscreenUrl!!, onDismiss = { fullscreenUrl = null })
+    }
     val isDone = scooter.status == ScooterFieldStatus.DONE ||
             scooter.status == ScooterFieldStatus.TO_STORAGE ||
             scooter.status == ScooterFieldStatus.NOT_FOUND
@@ -140,7 +175,7 @@ private fun ScooterCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, if (isExpanded) SdPrimaryBorder else Color.Transparent, RoundedCornerShape(16.dp)),
+            .border(1.dp, if (isExpanded) SdPrimaryBorder else SdDivider, RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = if (isExpanded) SdCardOpen else SdCard)
     ) {
@@ -172,6 +207,22 @@ private fun ScooterCard(
                             tint = if (isExpanded) SdPrimary else SdTextMuted,
                             modifier = Modifier.size(20.dp)
                         )
+                        if (isNearest) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(SdStatusDone.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    "БЛИЖАЙШИЙ",
+                                    fontSize = 9.sp,
+                                    color = SdStatusDone,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(
@@ -292,6 +343,24 @@ private fun ScooterCard(
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
+                            if (scooter.photoUrls.isNotEmpty()) {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(scooter.photoUrls) { url ->
+                                        AsyncImage(
+                                            model = url,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(72.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { fullscreenUrl = url }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -321,6 +390,13 @@ fun TasksScreen(
         }
     }
 
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) viewModel.updateDistances() }
+    LaunchedEffect(Unit) {
+        locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
     val scooters = uiState.scooters
     val activeList = scooters.filter {
         it.status == ScooterFieldStatus.NEW || it.status == ScooterFieldStatus.IN_PROGRESS
@@ -334,6 +410,10 @@ fun TasksScreen(
     if (searchQuery.isNotBlank()) {
         listData = listData.filter { it.code.contains(searchQuery.trim(), ignoreCase = true) }
     }
+
+    val activeTask = scooters.firstOrNull { it.isMine && it.status == ScooterFieldStatus.IN_PROGRESS }
+    val nearestNewId = scooters.filter { it.status == ScooterFieldStatus.NEW }
+        .minByOrNull { it.distanceMeters }?.id
 
     Scaffold(
         containerColor = SdBg,
@@ -393,6 +473,35 @@ fun TasksScreen(
                         )
                     }
 
+                    // Прогресс смены
+                    if (scooters.isNotEmpty()) {
+                        val progress = doneList.size.toFloat() / scooters.size.toFloat()
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Прогресс смены", color = SdTextMuted, fontSize = 11.sp)
+                                Text("${doneList.size} из ${scooters.size}", color = SdTextMuted, fontSize = 11.sp)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(SdCard)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(progress)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(if (progress >= 1f) SdStatusDone else SdPrimary)
+                                )
+                            }
+                        }
+                    }
+
                     // Поиск
                     Row(
                         modifier = Modifier
@@ -424,6 +533,18 @@ fun TasksScreen(
                                 Icon(Icons.Default.Close, null, tint = SdTextMuted)
                             }
                         }
+                    }
+                }
+            }
+
+            // ── Активный ремонт ──
+            activeTask?.let { task ->
+                item(key = "active_banner") {
+                    Box(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
+                        ActiveRepairBanner(
+                            scooter = task,
+                            onResume = { onOpenPassport(task) }
+                        )
                     }
                 }
             }
@@ -477,6 +598,7 @@ fun TasksScreen(
                         ScooterCard(
                             scooter = scooter,
                             isExpanded = expandedId == scooter.id,
+                            isNearest = scooter.id == nearestNewId && scooter.status == ScooterFieldStatus.NEW,
                             onToggle = {
                                 expandedId = if (expandedId == scooter.id) null else scooter.id
                             },
@@ -500,6 +622,78 @@ fun TasksScreen(
                     Spacer(Modifier.height(10.dp))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ActiveRepairBanner(scooter: StreetScooter, onResume: () -> Unit) {
+    val elapsed = rememberElapsed(scooter.workStartTime)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(SdPrimary.copy(alpha = 0.10f))
+            .border(1.dp, SdPrimaryBorder, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "СЕЙЧАС В РАБОТЕ",
+                    fontSize = 10.sp,
+                    color = SdPrimary,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.5.sp
+                )
+                Text(
+                    scooter.code,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = SdTextMain,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("ВРЕМЯ", fontSize = 10.sp, color = SdTextMuted, letterSpacing = 1.sp)
+                Text(
+                    formatElapsed(elapsed),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SdStatusWork,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+        if (scooter.address.isNotBlank()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Outlined.LocationOn, null, tint = SdTextMuted, modifier = Modifier.size(14.dp))
+                Text(
+                    scooter.address,
+                    color = SdTextMuted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Button(
+            onClick = onResume,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = SdPrimary)
+        ) {
+            Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Продолжить ремонт", fontWeight = FontWeight.Bold)
         }
     }
 }
