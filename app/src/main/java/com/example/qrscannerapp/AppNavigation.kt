@@ -56,10 +56,10 @@ import coil.request.ImageRequest
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.common.ui.ChatNotification
 import com.example.qrscannerapp.common.ui.ChatNotificationBanner
-import com.example.qrscannerapp.common.ui.iosSlideIn
-import com.example.qrscannerapp.common.ui.iosSlideOutParallax
-import com.example.qrscannerapp.common.ui.iosPopEnterParallax
-import com.example.qrscannerapp.common.ui.iosPopSlideOut
+import com.example.qrscannerapp.common.ui.macZoomIn
+import com.example.qrscannerapp.common.ui.macZoomExitShrink
+import com.example.qrscannerapp.common.ui.macZoomPopEnter
+import com.example.qrscannerapp.common.ui.macZoomPopExit
 import com.example.qrscannerapp.common.ui.smoothFadeIn
 import com.example.qrscannerapp.common.ui.smoothFadeOut
 import com.example.qrscannerapp.features.chat.domain.model.ChatRoom
@@ -106,26 +106,32 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 
 // ============================================================================================
-// ЦВЕТА ИКОНОК
+// VISIONOS PRO — ЦВЕТА АКЦЕНТОВ И GLOW
 // ============================================================================================
-private val IconColorScanner     = Color(0xFF6A5AE0)
-private val IconColorInteraction = Color(0xFF00BCD4)
-private val IconColorTasks       = Color(0xFFFFA726)
-private val IconColorPallet      = Color(0xFF4CAF50)
-private val IconColorStorage     = Color(0xFF26C6DA)
-private val IconColorWarehouse   = Color(0xFF7E57C2)
-private val IconColorDelivery    = Color(0xFF29B6F6)
-private val IconColorDashboard   = Color(0xFFEC407A)
-private val IconColorVehicle     = Color(0xFFFF7043)
-private val IconColorQr          = Color(0xFF66BB6A)
-private val IconColorSettings    = Color(0xFF78909C)
-private val IconColorHistory     = Color(0xFFAB47BC)
-private val IconColorChat        = Color(0xFF26A69A)
-private val IconColorTeam        = Color(0xFF26A69A)
-private val IconColorSecurity    = Color(0xFFD85A30)
-private val IconColorFieldRepair = Color(0xFF6C5CE7)
+private val IconColorScanner     = Color(0xFF8B7FFF)
+private val IconColorInteraction = Color(0xFF22D3EE)
+private val IconColorTasks       = Color(0xFFFBBF24)
+private val IconColorPallet      = Color(0xFF34D399)
+private val IconColorStorage     = Color(0xFF22D3EE)
+private val IconColorWarehouse   = Color(0xFFA78BFA)
+private val IconColorDelivery    = Color(0xFF38BDF8)
+private val IconColorDashboard   = Color(0xFFF472B6)
+private val IconColorVehicle     = Color(0xFFFB923C)
+private val IconColorQr          = Color(0xFF4ADE80)
+private val IconColorSettings    = Color(0xFF94A3B8)
+private val IconColorHistory     = Color(0xFFC084FC)
+private val IconColorChat        = Color(0xFF2DD4BF)
+private val IconColorTeam        = Color(0xFF2DD4BF)
+private val IconColorSecurity    = Color(0xFFF87171)
+private val IconColorFieldRepair = Color(0xFF818CF8)
+
+private val DrawerSurface       = Color(0xFF111114)
+private val DrawerSurfaceTop    = Color(0xFF1A1A22)
+private val DrawerStroke        = Color(0xFFFFFFFF)
 
 private fun chatRoomAccent(room: ChatRoom): Color = when (room) {
     ChatRoom.GENERAL  -> Color(0xFF6A5AE0)
@@ -133,6 +139,19 @@ private fun chatRoomAccent(room: ChatRoom): Color = when (room) {
     ChatRoom.MANAGERS -> Color(0xFF4CAF50)
     ChatRoom.SHIFTS   -> Color(0xFFFFA726)
     ChatRoom.ALERTS   -> Color(0xFFF44336)
+}
+
+// Squircle — настоящая iOS-форма (smoother чем RoundedCornerShape)
+private val Squircle12 = androidx.compose.foundation.shape.GenericShape { size, _ ->
+    val w = size.width
+    val h = size.height
+    val r = 12f * (size.minDimension / 100f).coerceAtLeast(0.3f)
+    moveTo(0f, h * 0.5f)
+    cubicTo(0f, r, r, 0f, w * 0.5f, 0f)
+    cubicTo(w - r, 0f, w, r, w, h * 0.5f)
+    cubicTo(w, h - r, w - r, h, w * 0.5f, h)
+    cubicTo(r, h, 0f, h - r, 0f, h * 0.5f)
+    close()
 }
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
@@ -441,9 +460,30 @@ fun MainApp(
                 drawerContent = {
                     ModalDrawerSheet(
                         drawerContainerColor = Color.Transparent,
-                        modifier = Modifier.background(
-                            Brush.verticalGradient(colors = listOf(Color(0xFF141418), Color(0xFF1E1E26)))
-                        )
+                        modifier = Modifier
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        DrawerSurfaceTop,
+                                        DrawerSurface
+                                    )
+                                )
+                            )
+                            .drawBehind {
+                                drawLine(
+                                    color = DrawerStroke.copy(alpha = 0.06f),
+                                    start = Offset(size.width - 0.5f, 0f),
+                                    end = Offset(size.width - 0.5f, size.height),
+                                    strokeWidth = 1f
+                                )
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        listOf(IconColorScanner.copy(alpha = 0.12f), Color.Transparent),
+                                        center = Offset(size.width, 0f),
+                                        radius = size.width * 0.8f
+                                    )
+                                )
+                            }
                     ) {
                         Column(modifier = Modifier.fillMaxHeight()) {
                             DrawerHeader(authState = authState, warehouseName = "Бестужевская 10")
@@ -452,11 +492,69 @@ fun MainApp(
                                     Text(text = group.label.uppercase(), color = StardustTextSecondary.copy(alpha = 0.5f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, modifier = Modifier.padding(start = 28.dp, top = 16.dp, bottom = 4.dp))
                                     group.screens.forEach { screen ->
                                         val isSelected = currentRoute == screen.route
-                                        val iconColor = if (isSelected) Color.White else iconColorFor(screen.route)
+                                        val accentColor = iconColorFor(screen.route)
                                         NavigationDrawerItem(
                                             icon = {
-                                                Box(modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(if (isSelected) Color.White.copy(alpha = 0.2f) else iconColorFor(screen.route).copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
-                                                    Icon(screen.icon, contentDescription = screen.title, tint = iconColor, modifier = Modifier.size(18.dp))
+                                                Box(
+                                                    modifier = Modifier.size(40.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (isSelected) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .matchParentSize()
+                                                                .drawBehind {
+                                                                    drawCircle(
+                                                                        brush = Brush.radialGradient(
+                                                                            listOf(
+                                                                                accentColor.copy(alpha = 0.5f),
+                                                                                accentColor.copy(alpha = 0.15f),
+                                                                                Color.Transparent
+                                                                            ),
+                                                                            radius = size.maxDimension
+                                                                        )
+                                                                    )
+                                                                }
+                                                        )
+                                                    }
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(36.dp)
+                                                            .clip(Squircle12)
+                                                            .background(
+                                                                Brush.verticalGradient(
+                                                                    if (isSelected) listOf(
+                                                                        accentColor.copy(alpha = 0.45f),
+                                                                        accentColor.copy(alpha = 0.2f)
+                                                                    ) else listOf(
+                                                                        accentColor.copy(alpha = 0.18f),
+                                                                        accentColor.copy(alpha = 0.08f)
+                                                                    )
+                                                                )
+                                                            )
+                                                            .drawBehind {
+                                                                drawLine(
+                                                                    color = Color.White.copy(alpha = if (isSelected) 0.25f else 0.1f),
+                                                                    start = Offset(size.width * 0.2f, 1.5f),
+                                                                    end = Offset(size.width * 0.8f, 1.5f),
+                                                                    strokeWidth = 1f
+                                                                )
+                                                                drawLine(
+                                                                    color = accentColor.copy(alpha = if (isSelected) 0.7f else 0.25f),
+                                                                    start = Offset(0f, size.height - 0.5f),
+                                                                    end = Offset(size.width, size.height - 0.5f),
+                                                                    strokeWidth = 1f
+                                                                )
+                                                            },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            screen.icon,
+                                                            contentDescription = screen.title,
+                                                            tint = if (isSelected) Color.White else accentColor,
+                                                            modifier = Modifier.size(19.dp)
+                                                        )
+                                                    }
                                                 }
                                             },
                                             label = {
@@ -629,7 +727,31 @@ fun DrawerHeader(authState: AuthState, warehouseName: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(colors = listOf(Color(0xFF6A5AE0).copy(alpha = 0.3f), Color.Transparent)))
+            .drawBehind {
+                drawRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF1E1B4B).copy(alpha = 0.4f),
+                            Color.Transparent
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, size.height)
+                    )
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(IconColorScanner.copy(alpha = 0.25f), Color.Transparent),
+                        center = Offset(size.width * 0.85f, size.height * 0.7f),
+                        radius = size.maxDimension * 0.6f
+                    )
+                )
+                drawLine(
+                    color = Color.White.copy(alpha = 0.06f),
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 1f
+                )
+            }
             .padding(horizontal = 20.dp, vertical = 20.dp)
     ) {
         Column {
@@ -650,10 +772,16 @@ fun DrawerHeader(authState: AuthState, warehouseName: String) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = weather!!.emoji,
-                            fontSize = 32.sp
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.07f))
+                                .border(0.5.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = weather!!.emoji, fontSize = 28.sp)
+                        }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
@@ -661,7 +789,15 @@ fun DrawerHeader(authState: AuthState, warehouseName: String) {
                                 color = Color.White,
                                 fontSize = 32.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = (-1).sp
+                                letterSpacing = (-1).sp,
+                                modifier = Modifier.drawBehind {
+                                    drawCircle(
+                                        brush = Brush.radialGradient(
+                                            listOf(StardustPrimary.copy(alpha = 0.25f), Color.Transparent),
+                                            radius = size.maxDimension
+                                        )
+                                    )
+                                }
                             )
                             Text(
                                 text = weather!!.description,
@@ -736,28 +872,43 @@ fun DrawerFooter(authState: AuthState, appVersionName: String, telemetryManager:
     val batteryColor = when { isCharging -> Color(0xFF4CAF50); batteryLevel > 50 -> Color(0xFF4CAF50); batteryLevel > 20 -> Color(0xFFFFC107); else -> Color(0xFFF44336) }
     val batteryIcon = when { isCharging -> Icons.Default.BatteryChargingFull; batteryLevel > 80 -> Icons.Default.BatteryFull; batteryLevel > 50 -> Icons.Default.Battery5Bar; batteryLevel > 20 -> Icons.Default.Battery3Bar; else -> Icons.Default.Battery1Bar }
     Column {
-        HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(horizontal = 16.dp))
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val isOnline = pingText != "Offline" && pingText != "Timeout" && pingText != "..."
-                if (isOnline) { val infiniteTransition = rememberInfiniteTransition(label = "ping_pulse"); val alpha by infiniteTransition.animateFloat(initialValue = 0.4f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "pulse"); Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(pingColor.copy(alpha = alpha))) } else { Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color(0xFFF44336))) }
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(text = if (pingText == "...") "—" else pingText, color = pingColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.06f),
+                            Color.White.copy(alpha = 0.03f)
+                        )
+                    )
+                )
+                .border(0.5.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(20.dp))
+        ) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isOnline = pingText != "Offline" && pingText != "Timeout" && pingText != "..."
+                    if (isOnline) { val infiniteTransition = rememberInfiniteTransition(label = "ping_pulse"); val alpha by infiniteTransition.animateFloat(initialValue = 0.4f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "pulse"); Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(pingColor.copy(alpha = alpha))) } else { Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color(0xFFF44336))) }
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(text = if (pingText == "...") "—" else pingText, color = pingColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text("·", color = StardustTextSecondary.copy(alpha = 0.4f), fontSize = 11.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(batteryIcon, null, tint = batteryColor, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(text = if (batteryLevel > 0) "$batteryLevel%" else "—", color = batteryColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text("·", color = StardustTextSecondary.copy(alpha = 0.4f), fontSize = 11.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = when { networkState.contains("WiFi") -> Icons.Default.Wifi; networkState.contains("Cellular") -> Icons.Default.SignalCellularAlt; else -> Icons.Default.WifiOff }, contentDescription = null, tint = if (networkState == "Offline") Color(0xFFF44336) else StardustTextSecondary, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(text = networkState.replace("Cellular ", "").take(6), color = StardustTextSecondary, fontSize = 11.sp)
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                Text(text = appVersionName, color = StardustTextSecondary.copy(alpha = 0.4f), fontSize = 11.sp)
             }
-            Text("·", color = StardustTextSecondary.copy(alpha = 0.4f), fontSize = 11.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(batteryIcon, null, tint = batteryColor, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(3.dp))
-                Text(text = if (batteryLevel > 0) "$batteryLevel%" else "—", color = batteryColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Text("·", color = StardustTextSecondary.copy(alpha = 0.4f), fontSize = 11.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = when { networkState.contains("WiFi") -> Icons.Default.Wifi; networkState.contains("Cellular") -> Icons.Default.SignalCellularAlt; else -> Icons.Default.WifiOff }, contentDescription = null, tint = if (networkState == "Offline") Color(0xFFF44336) else StardustTextSecondary, modifier = Modifier.size(13.dp))
-                Spacer(modifier = Modifier.width(3.dp))
-                Text(text = networkState.replace("Cellular ", "").take(6), color = StardustTextSecondary, fontSize = 11.sp)
-            }
-            Spacer(modifier = Modifier.weight(1f))
-            Text(text = appVersionName, color = StardustTextSecondary.copy(alpha = 0.4f), fontSize = 11.sp)
         }
         HorizontalDivider(color = Color.White.copy(alpha = 0.06f), modifier = Modifier.padding(horizontal = 16.dp))
         if (authState.isLoggedIn) {
@@ -806,10 +957,10 @@ fun AppNavHost(
     val authState by authManager.authState.collectAsState()
     if (authState.isLoading) { LoadingScreen(); return }
 
-    val iosEnter    = iosSlideIn()
-    val iosExit     = iosSlideOutParallax()
-    val iosPopEnter = iosPopEnterParallax()
-    val iosPopExit  = iosPopSlideOut()
+    val iosEnter    = macZoomIn()
+    val iosExit     = macZoomExitShrink()
+    val iosPopEnter = macZoomPopEnter()
+    val iosPopExit  = macZoomPopExit()
     val modalEnter  = smoothFadeIn()
     val modalExit   = smoothFadeOut()
 

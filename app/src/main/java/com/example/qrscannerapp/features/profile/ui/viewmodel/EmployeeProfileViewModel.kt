@@ -13,6 +13,8 @@ import com.example.qrscannerapp.features.profile.data.repository.EmployeeProfile
 import com.example.qrscannerapp.features.profile.domain.model.EmployeeProfileUiState
 import com.example.qrscannerapp.features.profile.domain.model.InteractionStats
 import com.example.qrscannerapp.features.profile.domain.model.OperationStat
+import com.example.qrscannerapp.features.profile.domain.model.PerformanceClass
+import com.example.qrscannerapp.features.profile.domain.model.UserActivityLog
 import com.example.qrscannerapp.worker.TelemetryWorker
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -236,7 +238,13 @@ class EmployeeProfileViewModel @Inject constructor(
 
             repository.getUserProfile(userId)
                 .onSuccess { userProfile ->
-                    _uiState.update { it.copy(userProfile = userProfile) }
+                    val performanceFromTelemetry = repository.getPerformanceDetails(
+                        UserActivityLog(totalRamInGb = userProfile.totalRamInGb)
+                    )
+                    _uiState.update { it.copy(
+                        userProfile = userProfile,
+                        performanceDetails = performanceFromTelemetry
+                    )}
                 }
                 .onFailure { error ->
                     _uiState.update {
@@ -257,13 +265,15 @@ class EmployeeProfileViewModel @Inject constructor(
             .onEach { result ->
                 result
                     .onSuccess { lastActivityLog ->
-                        val performanceDetails = repository.getPerformanceDetails(lastActivityLog)
+                        val newPerformance = repository.getPerformanceDetails(lastActivityLog)
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
                                 error = null,
                                 activityHistory = listOfNotNull(lastActivityLog),
-                                performanceDetails = performanceDetails
+                                // Не перезаписывать данными UNKNOWN, если уже загружены из device_telemetry
+                                performanceDetails = if (newPerformance.performanceClass != PerformanceClass.UNKNOWN)
+                                    newPerformance else it.performanceDetails
                             )
                         }
                     }

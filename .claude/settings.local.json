@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\pankr\\\\.gradle\\\\caches\\\\modules-2\\\\files-2.1\\\\dev.chrisbanes.haze\\\\haze-android /a /b\"; cmd /c \"dir C:\\\\Users\\\\pankr\\\\.gradle\\\\caches\\\\modules-2\\\\files-2.1\\\\dev.chrisbanes.haze\\\\haze-materials-android /a /b\")"
+    ]
+  }
+}

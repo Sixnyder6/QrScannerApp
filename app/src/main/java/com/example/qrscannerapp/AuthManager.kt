@@ -231,6 +231,7 @@ class AuthManager(
                             "freeStorage" to telemetry["freeStorage"],
                             "deviceUptime" to telemetry["deviceUptime"],
                             "deviceInfo" to telemetry["deviceInfo"],
+                            "totalRamInGb" to telemetry["totalRamInGb"],
                             "activeDeviceId" to deviceId,
                             "appVersion" to (telemetry["appVersion"]?.toString() ?: ""),
                             "locationLat" to (location?.latitude ?: FieldValue.delete()),

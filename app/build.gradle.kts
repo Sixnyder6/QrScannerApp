@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.qrscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 35
-        versionName = "1.4.5"
+        versionCode = 36
+        versionName = "1.4.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -203,4 +203,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
         // exel
     implementation("org.dhatim:fastexcel:0.16.4")
+
+    // Haze — backdrop blur
+    implementation("dev.chrisbanes.haze:haze:0.6.2")
+    implementation("dev.chrisbanes.haze:haze-materials:0.6.2")
 }

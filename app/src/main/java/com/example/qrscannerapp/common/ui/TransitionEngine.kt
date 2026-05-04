@@ -132,6 +132,52 @@ fun iosPopSlideOut(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> Ex
     // НЕТ + fadeOut(...) — экран плотно уезжает без растворения
 }
 
+// ─── macOS / iOS ZOOM TRANSITIONS (scale in/out, no slide jank) ──────────────
+
+/**
+ * FORWARD enter: экран "разжимается" из центра (как открытие окна на macOS)
+ */
+fun macZoomIn(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
+    fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing)) +
+    scaleIn(
+        animationSpec = spring(dampingRatio = 0.80f, stiffness = 420f),
+        initialScale = 0.88f
+    )
+}
+
+/**
+ * FORWARD exit: текущий экран чуть "уходит вглубь" (iOS card depth)
+ */
+fun macZoomExitShrink(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
+    fadeOut(animationSpec = tween(200, easing = FastOutLinearInEasing), targetAlpha = 0.45f) +
+    scaleOut(
+        animationSpec = tween(200, easing = FastOutLinearInEasing),
+        targetScale = 0.95f
+    )
+}
+
+/**
+ * BACK enter: фоновый экран "возвращается" из глубины
+ */
+fun macZoomPopEnter(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
+    fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing), initialAlpha = 0.45f) +
+    scaleIn(
+        animationSpec = tween(260, easing = FastOutSlowInEasing),
+        initialScale = 0.95f
+    )
+}
+
+/**
+ * BACK exit: текущий экран "сжимается" и исчезает
+ */
+fun macZoomPopExit(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
+    fadeOut(animationSpec = tween(220, easing = FastOutLinearInEasing)) +
+    scaleOut(
+        animationSpec = spring(dampingRatio = 0.80f, stiffness = 420f),
+        targetScale = 0.88f
+    )
+}
+
 // ─── Упрощённые fade-переходы (для модальных/особых экранов) ─────────────────
 
 /**

@@ -21,6 +21,7 @@ import com.example.qrscannerapp.features.scanner.data.local.entity.ScanSessionEn
 import com.example.qrscannerapp.features.scanner.data.repository.ScanSessionRepository
 import com.example.qrscannerapp.features.scanner.domain.model.ScanItem
 import com.example.qrscannerapp.features.scanner.domain.model.ScanSession
+import com.example.qrscannerapp.features.scanner.domain.util.ScannerCodeUtils
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -100,6 +101,7 @@ class QrScannerViewModel @Inject constructor(
 ) : AndroidViewModel(application) {
     private val firestore = Firebase.firestore
     private var storageActivityListener: ListenerRegistration? = null
+    private var palletLogListener: ListenerRegistration? = null
 
     private val _scooterCodes = mutableStateListOf<ScanItem>()
     val scooterCodes: List<ScanItem> = _scooterCodes
@@ -599,33 +601,13 @@ class QrScannerViewModel @Inject constructor(
         lastProcessedTime = currentTime
 
         viewModelScope.launch {
-            var extractedScooterCode: String? = null
-
-            if (rawCode.contains("number=")) {
-                try { extractedScooterCode = rawCode.substringAfter("number=").split('&', '?', '#').firstOrNull() }
-                catch (e: Exception) { Log.e("VM_SCAN", "Parse error", e) }
-            }
-
-            if (extractedScooterCode == null && rawCode.contains('/')) {
-                try {
-                    val segment = rawCode.split('/').lastOrNull { it.isNotEmpty() }
-                    if (segment != null && segment.matches(Regex("[A-Za-z0-9]{2,10}"))) extractedScooterCode = segment
-                } catch (e: Exception) { Log.e("VM_SCAN", "Parse error", e) }
-            }
-
-            if (extractedScooterCode == null
-                && rawCode.matches(Regex("[A-Za-z0-9]{2,10}"))
-                && !rawCode.startsWith("4BB") && !rawCode.startsWith("4BZ")
-                && !rawCode.startsWith("5BB") && !rawCode.startsWith("SF")) {
-                extractedScooterCode = rawCode
-            }
-
             // РЕЖИМ ПОИСКА
             if (_isSearchMode.value) {
                 when (_activeTab.value) {
                     ActiveTab.SCOOTERS -> {
                         if (_isSearchingForScooter.value || _scooterSearchResult.value != null) return@launch
-                        searchForScooter(extractedScooterCode ?: rawCode)
+                        val extractedCode = ScannerCodeUtils.extractScooterCode(rawCode)
+                        searchForScooter(extractedCode ?: rawCode)
                     }
                     ActiveTab.BATTERIES, ActiveTab.NEW_BATTERIES -> {
                         if (_searchResult.value != null || _isSearching.value) return@launch
@@ -638,20 +620,18 @@ class QrScannerViewModel @Inject constructor(
 
             startSessionTimerIfNeeded()
 
-            // Сначала пробуем распознать как батарею
             val batteryType = processBatteryCodeType(rawCode)
+            if (batteryType != null) {
+                val (type, fullCode) = batteryType
+                processBatteryByType(type, fullCode)
+                return@launch
+            }
 
-            when {
-                batteryType != null -> {
-                    val (type, fullCode) = batteryType
-                    processBatteryByType(type, fullCode)
-                }
-                extractedScooterCode != null && extractedScooterCode.length < 10 -> {
-                    processScooterCode(extractedScooterCode)
-                }
-                else -> {
-                    updateStatus("❌ Неизвестный формат: $rawCode", isError = true)
-                }
+            val extractedCode = ScannerCodeUtils.extractScooterCode(rawCode)
+            if (extractedCode != null) {
+                processScooterCode(extractedCode)
+            } else {
+                updateStatus("❌ Неизвестный формат: $rawCode", isError = true)
             }
         }
     }
@@ -782,7 +762,25 @@ class QrScannerViewModel @Inject constructor(
                 creatorId = currentUser.userId, creatorName = currentUser.userName ?: "Анонимус"
             )
             try {
-                firestore.collection("scan_sessions").document(sessionToUpload.id).set(sessionToUpload).await()
+                val itemMaps = sessionToUpload.items.map { item ->
+                    buildMap<String, Any?> {
+                        put("id", item.id)
+                        put("code", item.code)
+                        put("timestamp", item.timestamp)
+                    }
+                }
+                val sessionMap = buildMap<String, Any?> {
+                    put("id", sessionToUpload.id)
+                    put("timestamp", sessionToUpload.timestamp)
+                    put("type", sessionToUpload.type.name)
+                    put("items", itemMaps)
+                    sessionToUpload.name?.let { put("name", it) }
+                    sessionToUpload.creatorId?.let { put("creatorId", it) }
+                    sessionToUpload.creatorName
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { put("creatorName", it) }
+                }
+                firestore.collection("scan_sessions").document(sessionToUpload.id).set(sessionMap).await()
             } catch (e: Exception) {
                 Log.w("ViewModel", "В облако не улетело. Сохраняем локально.", e)
                 sessionRepository.saveSessionLocally(ScanSessionEntity(
@@ -833,6 +831,8 @@ class QrScannerViewModel @Inject constructor(
         super.onCleared()
         historyListener?.remove()
         storageActivityListener?.remove()
+        palletLogListener?.remove()
+        cellLogListener?.remove()
         storageRepository.stopCellsRealtimeSync()
         storageRepository.stopPalletsRealtimeSync()
     }
@@ -1248,7 +1248,8 @@ class QrScannerViewModel @Inject constructor(
     // ============================================================================================
 
     private fun startPalletActivityLogListener() {
-        firestore.collection("pallet_activity_log").orderBy("timestamp", Query.Direction.DESCENDING).limit(100)
+        palletLogListener?.remove()
+        palletLogListener = firestore.collection("pallet_activity_log").orderBy("timestamp", Query.Direction.DESCENDING).limit(100)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) { Log.e("PalletLog", "Listen failed.", e); return@addSnapshotListener }
                 if (snapshot != null) {
@@ -1288,9 +1289,11 @@ class QrScannerViewModel @Inject constructor(
             _palletDistributionState.update { it.copy(isDistributing = true) }
             try {
                 val snapshot = firestore.collection("pallet_activity_log").get().await()
-                val batch = firestore.batch()
-                snapshot.documents.forEach { batch.delete(it.reference) }
-                batch.commit().await()
+                snapshot.documents.chunked(499).forEach { chunk ->
+                    val batch = firestore.batch()
+                    chunk.forEach { batch.delete(it.reference) }
+                    batch.commit().await()
+                }
                 _palletDistributionState.update { it.copy(isDistributing = false, distributionResult = "История операций успешно очищена.") }
             } catch (e: Exception) {
                 _palletDistributionState.update { it.copy(isDistributing = false, error = "Не удалось очистить историю: ${e.message}") }

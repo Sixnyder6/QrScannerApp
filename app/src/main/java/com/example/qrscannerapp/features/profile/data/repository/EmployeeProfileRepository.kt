@@ -66,6 +66,7 @@ class EmployeeProfileRepository @Inject constructor(
                 activeDeviceId = telemetrySource.getString("activeDeviceId") ?: "",
                 appVersion = telemetrySource.getString("appVersion") ?: "-",
                 lastBatteryLevel = telemetrySource.getLong("lastBatteryLevel")?.toInt() ?: -1,
+                totalRamInGb = telemetrySource.getDouble("totalRamInGb"),
                 isShiftActive = isShiftActive,
                 isAllowedToWork = isAllowedToWork,
                 shiftRequestStatus = shiftRequestStatus

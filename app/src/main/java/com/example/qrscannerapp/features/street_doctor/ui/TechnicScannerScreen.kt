@@ -49,6 +49,7 @@ import com.example.qrscannerapp.TelemetryManager
 import com.example.qrscannerapp.features.scanner.ui.components.CameraView
 import com.example.qrscannerapp.features.street_doctor.domain.model.ScooterFieldStatus
 import com.example.qrscannerapp.features.street_doctor.domain.model.StreetScooter
+import com.example.qrscannerapp.features.scanner.domain.util.ScannerCodeUtils
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
@@ -304,26 +305,8 @@ class TechnicScannerViewModel @Inject constructor(
     }
 
     // ── Парсинг номера самоката из QR ─────────────────────────────────────────
-    private fun extractScooterCode(raw: String): String {
-        if (raw.contains("number=")) {
-            val extracted = raw.substringAfter("number=")
-                .split('&', '?', '#').firstOrNull()?.trim()
-            if (!extracted.isNullOrBlank()) return extracted.uppercase()
-        }
-        if (raw.contains('/')) {
-            val segment = raw.split('/').lastOrNull { it.isNotBlank() }
-            if (!segment.isNullOrBlank() && segment.matches(Regex("[A-Za-z0-9]{2,12}"))) {
-                return segment.uppercase()
-            }
-        }
-        val cleaned = raw.trim()
-        if (cleaned.matches(Regex("[A-Za-z0-9]{2,12}"))
-            && !cleaned.startsWith("4BB") && !cleaned.startsWith("4BZ")
-            && !cleaned.startsWith("5BB") && !cleaned.startsWith("SF")) {
-            return cleaned.uppercase()
-        }
-        return ""
-    }
+    private fun extractScooterCode(raw: String): String =
+        ScannerCodeUtils.extractScooterCode(raw) ?: ""
 
     override fun onCleared() {
         super.onCleared()

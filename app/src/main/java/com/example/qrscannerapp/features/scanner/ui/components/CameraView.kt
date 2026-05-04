@@ -247,7 +247,7 @@ class QrCodeAnalyzer(
     private val onCodeScanned: (String) -> Unit,
     private val onStatusUpdate: (String) -> Unit
 ) : ImageAnalysis.Analyzer {
-    private var isProcessing = false
+    @Volatile private var isProcessing = false
     private var lastAnalyzedTimestamp = 0L
     private val THROTTLE_DURATION = 300L
     private var cachedImageWidth = 0
