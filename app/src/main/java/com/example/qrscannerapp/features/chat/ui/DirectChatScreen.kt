@@ -21,7 +21,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -68,11 +71,14 @@ fun DirectChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     var inputText by remember { mutableStateOf("") }
     var messageToDelete by remember { mutableStateOf<DirectMessage?>(null) }
     val currentUserId = viewModel.currentUserId
     val accentColor = dmRoleColor(peerRole)
+    val isAtBottom by remember { derivedStateOf { listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index == 0 } }
+    val showScrollToBottom by remember { derivedStateOf { !isAtBottom && listState.layoutInfo.totalItemsCount > 0 } }
 
     LaunchedEffect(peerId) {
         viewModel.openConversation(peerId, peerName, peerRole)
@@ -205,14 +211,38 @@ fun DirectChatScreen(
                 )
                 // НОВОЕ: анимированный статус под именем
                 AnimatedContent(
-                    targetState = uiState.isPeerTyping,
+                    targetState = Pair(uiState.isPeerTyping, uiState.isPeerOnline),
                     transitionSpec = {
                         fadeIn(tween(200)) togetherWith fadeOut(tween(200))
                     },
                     label = "typing_status"
-                ) { isTyping ->
+                ) { (isTyping, isOnline) ->
                     if (isTyping) {
                         DmTypingDots(accentColor = accentColor)
+                    } else if (isOnline) {
+                        val pulseTransition = rememberInfiniteTransition(label = "dm_online_pulse")
+                        val pAlpha by pulseTransition.animateFloat(
+                            0.5f, 1f,
+                            infiniteRepeatable(tween(1200), RepeatMode.Reverse),
+                            label = "pa"
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF4CAF50).copy(alpha = pAlpha))
+                            )
+                            Text(
+                                "онлайн",
+                                color = Color(0xFF4CAF50),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     } else {
                         val label = dmRoleLabel(peerRole)
                         if (label.isNotBlank()) {
@@ -277,7 +307,7 @@ fun DirectChatScreen(
                 }
             }
 
-            // НОВОЕ: баннер "печатает" снизу контентной зоны
+            // Баннер "печатает" снизу контентной зоны
             if (uiState.isPeerTyping) {
                 Row(
                     modifier = Modifier
@@ -296,6 +326,35 @@ fun DirectChatScreen(
                         fontSize = 12.sp,
                         fontStyle = FontStyle.Italic
                     )
+                }
+            }
+
+            // Кнопка "прокрутить вниз"
+            val scrollBtnAlpha by animateFloatAsState(
+                targetValue = if (showScrollToBottom) 1f else 0f,
+                animationSpec = tween(200),
+                label = "dm_scroll_alpha"
+            )
+            val scrollBtnScale by animateFloatAsState(
+                targetValue = if (showScrollToBottom) 1f else 0.7f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                label = "dm_scroll_scale"
+            )
+            if (scrollBtnAlpha > 0f) {
+                FloatingActionButton(
+                    onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = if (uiState.isPeerTyping) 52.dp else 8.dp)
+                        .size(42.dp)
+                        .alpha(scrollBtnAlpha)
+                        .scale(scrollBtnScale),
+                    shape = CircleShape,
+                    containerColor = accentColor,
+                    contentColor = Color.White,
+                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                ) {
+                    Icon(Icons.Default.KeyboardArrowDown, "Вниз", modifier = Modifier.size(22.dp))
                 }
             }
         }

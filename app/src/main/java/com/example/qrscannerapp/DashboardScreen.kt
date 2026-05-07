@@ -34,6 +34,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.common.ui.SkeletonBlock
 import com.example.qrscannerapp.features.tasks.domain.model.Task
+import com.example.qrscannerapp.features.tasks.domain.model.TaskPriority
 import com.example.qrscannerapp.features.tasks.domain.model.TaskStatus
 import java.text.SimpleDateFormat
 import java.util.*
@@ -92,7 +93,11 @@ fun DashboardScreen(
         DashboardTaskDetailsSheet(
             task = selectedTaskForDetails.value!!,
             sheetState = taskDetailsSheetState,
-            onDismiss = { selectedTaskForDetails.value = null }
+            onDismiss = { selectedTaskForDetails.value = null },
+            onDeleteTask = { taskId ->
+                viewModel.deleteTask(taskId)
+                selectedTaskForDetails.value = null
+            }
         )
     }
 
@@ -398,32 +403,120 @@ private fun TeamExpandPanel(employees: List<EmployeeActivity>, allEmployees: Lis
 @Composable
 private fun TasksExpandPanel(tasks: List<Task>, onTaskClick: (Task) -> Unit, onCreateTask: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(StardustGlassBg).border(0.5.dp, StardustPrimary.copy(alpha = 0.3f), RoundedCornerShape(14.dp)).padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(StardustGlassBg)
+            .border(0.5.dp, StardustPrimary.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         if (tasks.isEmpty()) {
-            Text("Нет активных задач", color = StardustTextSecondary, fontSize = 13.sp)
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Нет активных задач", color = StardustTextSecondary, fontSize = 13.sp)
+            }
         } else {
             tasks.take(5).forEach { task ->
-                val timeString = remember(task.createdAt) { task.createdAt?.let { SimpleDateFormat("HH:mm", Locale.getDefault()).format(it) } ?: "--:--" }
-                val statusColor = when (task.status) { TaskStatus.NEW -> StardustPrimary; TaskStatus.IN_PROGRESS -> StardustWarning; TaskStatus.COMPLETED -> StardustSuccess; TaskStatus.CANCELED -> StardustError; else -> StardustTextSecondary }
-                Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onTaskClick(task) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(statusColor))
-                    Text(task.title, color = StardustTextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (task.assigneeName.isNotBlank()) Text(task.assigneeName.split(" ").firstOrNull() ?: "", color = StardustTextSecondary, fontSize = 11.sp)
-                    Text(timeString, color = StardustTextSecondary, fontSize = 10.sp)
+                val timeString = remember(task.createdAt) {
+                    task.createdAt?.let { SimpleDateFormat("HH:mm", Locale.getDefault()).format(it) } ?: "--:--"
+                }
+                val statusColor = when (task.status) {
+                    TaskStatus.NEW -> StardustPrimary
+                    TaskStatus.IN_PROGRESS -> StardustWarning
+                    TaskStatus.COMPLETED -> StardustSuccess
+                    TaskStatus.CANCELED -> StardustError
+                    else -> StardustTextSecondary
+                }
+                val priorityColor = when (TaskPriority.fromInt(task.priority)) {
+                    TaskPriority.HIGH -> StardustError
+                    TaskPriority.MEDIUM -> StardustPrimary
+                    TaskPriority.LOW -> StardustTextSecondary
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(StardustItemBg)
+                        .clickable { onTaskClick(task) }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .height(32.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(priorityColor)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            task.title,
+                            color = StardustTextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (task.assigneeName.isNotBlank()) {
+                            Text(
+                                task.assigneeName,
+                                color = StardustTextSecondary,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(statusColor.copy(alpha = 0.15f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = when (task.status) {
+                                    TaskStatus.NEW -> "Новая"
+                                    TaskStatus.IN_PROGRESS -> "В работе"
+                                    TaskStatus.COMPLETED -> "Готово"
+                                    TaskStatus.CANCELED -> "Отменена"
+                                    else -> "—"
+                                },
+                                color = statusColor,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(timeString, color = StardustTextSecondary, fontSize = 10.sp)
+                    }
                 }
             }
-            if (tasks.size > 5) Text("ещё ${tasks.size - 5} задач", color = StardustTextSecondary, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+            if (tasks.size > 5) {
+                Text(
+                    "ещё ${tasks.size - 5} задач",
+                    color = StardustTextSecondary,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                )
+            }
         }
-        HorizontalDivider(color = StardustItemBg)
-        OutlinedButton(
-            onClick = onCreateTask, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.4f)),
-            contentPadding = PaddingValues(vertical = 8.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = StardustPrimary)
+        HorizontalDivider(color = StardustItemBg, modifier = Modifier.padding(vertical = 4.dp))
+        Button(
+            onClick = onCreateTask,
+            modifier = Modifier.fillMaxWidth().height(40.dp),
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = StardustPrimary.copy(alpha = 0.15f),
+                contentColor = StardustPrimary
+            ),
+            contentPadding = PaddingValues(vertical = 0.dp)
         ) {
-            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
+            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
             Text("Создать задачу", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
@@ -557,51 +650,186 @@ fun HourlyActivityCard(points: List<HourlyActivityPoint>, chartMode: ActivityCha
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardTaskDetailsSheet(task: Task, sheetState: SheetState, onDismiss: () -> Unit) {
-    val timeString = remember(task.createdAt) { task.createdAt?.let { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(it) } ?: "-" }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = StardustModalBg, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
-        Column(modifier = Modifier.padding(24.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(task.title, color = StardustTextPrimary, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, null, tint = StardustTextSecondary, modifier = Modifier.size(24.dp)) }
+fun DashboardTaskDetailsSheet(
+    task: Task,
+    sheetState: SheetState,
+    onDismiss: () -> Unit,
+    onDeleteTask: (String) -> Unit = {}
+) {
+    val timeString = remember(task.createdAt) {
+        task.createdAt?.let { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(it) } ?: "—"
+    }
+    val priority = remember(task.priority) { TaskPriority.fromInt(task.priority) }
+    val priorityColor = when (priority) {
+        TaskPriority.HIGH -> StardustError
+        TaskPriority.MEDIUM -> StardustPrimary
+        TaskPriority.LOW -> StardustTextSecondary
+    }
+    val priorityLabel = when (priority) {
+        TaskPriority.HIGH -> "Высокий"
+        TaskPriority.MEDIUM -> "Средний"
+        TaskPriority.LOW -> "Низкий"
+    }
+    val statusColor = when (task.status) {
+        TaskStatus.NEW -> StardustPrimary
+        TaskStatus.IN_PROGRESS -> StardustWarning
+        TaskStatus.COMPLETED -> StardustSuccess
+        TaskStatus.CANCELED -> StardustError
+        else -> StardustTextSecondary
+    }
+    val statusLabel = when (task.status) {
+        TaskStatus.NEW -> "Новая"
+        TaskStatus.IN_PROGRESS -> "В работе"
+        TaskStatus.COMPLETED -> "Завершена"
+        TaskStatus.CANCELED -> "Отменена"
+        else -> "Неизвестно"
+    }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Удалить задачу?", color = StardustTextPrimary, fontWeight = FontWeight.Bold) },
+            text = { Text("«${task.title}» будет удалена без возможности восстановления.", color = StardustTextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = { showDeleteConfirm = false; onDeleteTask(task.id) },
+                    colors = ButtonDefaults.buttonColors(containerColor = StardustError)
+                ) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Отмена", color = StardustTextSecondary) }
+            },
+            containerColor = StardustModalBg,
+            titleContentColor = StardustTextPrimary,
+            textContentColor = StardustTextSecondary
+        )
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = StardustModalBg,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    ) {
+        Column(modifier = Modifier.padding(bottom = 32.dp)) {
+            // Priority accent bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(priorityColor.copy(alpha = 0.7f))
+            )
+
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Header
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            task.title,
+                            color = StardustTextPrimary,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        // Status chip
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(statusColor.copy(alpha = 0.15f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(statusLabel, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(StardustItemBg)
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Close, null, tint = StardustTextSecondary, modifier = Modifier.size(18.dp))
+                    }
+                }
+
+                // Description
+                if (task.description.isNotBlank()) {
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = StardustItemBg),
+                        elevation = CardDefaults.cardElevation(0.dp)
+                    ) {
+                        Text(
+                            task.description,
+                            color = StardustTextPrimary.copy(alpha = 0.85f),
+                            modifier = Modifier.padding(14.dp),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+
+                // Info card
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = StardustItemBg),
+                    elevation = CardDefaults.cardElevation(0.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TaskSheetInfoRow("Приоритет") {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(priorityColor))
+                                Text(priorityLabel, color = priorityColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        HorizontalDivider(color = StardustGlassBg)
+                        TaskSheetInfoRow("Назначен", if (task.assigneeName.isNotBlank()) task.assigneeName else "—")
+                        HorizontalDivider(color = StardustGlassBg)
+                        TaskSheetInfoRow("Создал", if (task.creatorName.isNotBlank()) task.creatorName else "—")
+                        HorizontalDivider(color = StardustGlassBg)
+                        TaskSheetInfoRow("Создана", timeString)
+                    }
+                }
+
+                // Delete button
+                Button(
+                    onClick = { showDeleteConfirm = true },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = StardustError.copy(alpha = 0.12f),
+                        contentColor = StardustError
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(0.dp)
+                ) {
+                    Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Удалить задачу", fontWeight = FontWeight.SemiBold)
+                }
             }
-            if (task.description.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text(task.description, color = StardustTextPrimary.copy(alpha = 0.8f), maxLines = 3, overflow = TextOverflow.Ellipsis) }
-            Spacer(Modifier.height(16.dp)); HorizontalDivider(color = StardustItemBg); Spacer(Modifier.height(12.dp))
-            DetailRow("Статус") { TaskStatusIndicator(task = task) }
-            DetailRow("Создал", task.creatorName); DetailRow("Назначен", task.assigneeName); DetailRow("Создана", timeString)
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
-private fun DetailRow(label: String, content: @Composable RowScope.() -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("$label:", color = StardustTextSecondary, modifier = Modifier.weight(0.4f), fontWeight = FontWeight.SemiBold)
-        Row(modifier = Modifier.weight(0.6f)) { content() }
+private fun TaskSheetInfoRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = StardustTextSecondary, fontSize = 12.sp, modifier = Modifier.weight(0.45f), fontWeight = FontWeight.Medium)
+        Text(value, color = StardustTextPrimary, fontSize = 13.sp, modifier = Modifier.weight(0.55f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text("$label:", color = StardustTextSecondary, modifier = Modifier.weight(0.4f), fontWeight = FontWeight.SemiBold)
-        Text(value, color = StardustTextPrimary, modifier = Modifier.weight(0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-fun TaskStatusIndicator(task: Task) {
-    when (task.status) {
-        TaskStatus.NEW -> Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.FiberNew, null, tint = StardustPrimary, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Новая", color = StardustPrimary, fontWeight = FontWeight.Bold) }
-        TaskStatus.IN_PROGRESS -> Row(verticalAlignment = Alignment.CenterVertically) {
-            val transition = rememberInfiniteTransition("rotate_task")
-            val angle by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(2000, easing = LinearEasing)), label = "rotate")
-            Icon(Icons.Default.Settings, null, tint = StardustWarning, modifier = Modifier.size(20.dp).rotate(angle)); Spacer(Modifier.width(8.dp)); Text("В работе", color = StardustWarning, fontWeight = FontWeight.Bold)
-        }
-        TaskStatus.COMPLETED -> Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.CheckCircle, null, tint = StardustSuccess, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Завершена", color = StardustSuccess, fontWeight = FontWeight.Bold) }
-        TaskStatus.CANCELED  -> Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Cancel, null, tint = StardustError, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Отменена", color = StardustError, fontWeight = FontWeight.Bold) }
-        else -> Text(task.status.name, color = StardustTextSecondary)
+private fun TaskSheetInfoRow(label: String, content: @Composable RowScope.() -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = StardustTextSecondary, fontSize = 12.sp, modifier = Modifier.weight(0.45f), fontWeight = FontWeight.Medium)
+        Row(modifier = Modifier.weight(0.55f)) { content() }
     }
 }
 

@@ -1,19 +1,28 @@
-// File: features/tasks/ui/creation/TaskCreationScreen.kt
-
 package com.example.qrscannerapp.features.tasks.ui.creation
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AssignmentInd
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Title
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.example.qrscannerapp.EmployeeInfo
@@ -47,31 +56,26 @@ fun TaskCreationScreen(
     LaunchedEffect(Unit) {
         viewModel.events.collectLatest { event ->
             when (event) {
-                is TaskCreationEvent.TaskSavedSuccessfully -> {
-                    navController.popBackStack()
-                }
-                is TaskCreationEvent.Error -> {
-                    snackbarHostState.showSnackbar(event.message)
-                }
+                is TaskCreationEvent.TaskSavedSuccessfully -> navController.popBackStack()
+                is TaskCreationEvent.Error -> snackbarHostState.showSnackbar(event.message)
             }
         }
     }
 
-    // V-- НАЧАЛО ИЗМЕНЕНИЙ: ИНТЕГРАЦИЯ APPBACKGROUND --V
-    // AppBackground теперь корневой элемент, занимающий весь экран.
     AppBackground {
-        // Scaffold находится внутри фона и сделан прозрачным.
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Создать Задачу", color = StardustTextPrimary, fontWeight = FontWeight.Bold) },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, titleContentColor = StardustTextPrimary)
-                )
+            snackbarHost = {
+                SnackbarHost(snackbarHostState) { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        containerColor = Color(0xFF2C2C2E),
+                        contentColor = StardustTextPrimary,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
             },
-            snackbarHost = { SnackbarHost(snackbarHostState) },
             containerColor = Color.Transparent
         ) { paddingValues ->
-            // Отступы от Scaffold передаются в контент, а не в фон.
             TaskCreationContent(
                 modifier = Modifier.padding(paddingValues),
                 uiState = uiState,
@@ -83,12 +87,11 @@ fun TaskCreationScreen(
             )
         }
     }
-    // ^-- КОНЕЦ ИЗМЕНЕНИЙ --^
 }
 
 @Composable
 private fun TaskCreationContent(
-    modifier: Modifier = Modifier, // <-- Добавлен параметр modifier
+    modifier: Modifier = Modifier,
     uiState: TaskCreationUiState,
     onTitleChanged: (String) -> Unit,
     onDescriptionChanged: (String) -> Unit,
@@ -96,42 +99,47 @@ private fun TaskCreationContent(
     onEmployeeSelected: (EmployeeInfo) -> Unit,
     onSaveClick: () -> Unit
 ) {
-    LazyColumn(
-        // Применяем переданный modifier, который содержит отступы от Scaffold.
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(vertical = 24.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        item {
-            StardustTextField(
+        // ── Название ──────────────────────────────────────────────────────────────
+        CreationSection(label = "Название задачи") {
+            CreationTextField(
                 value = uiState.title,
                 onValueChange = onTitleChanged,
-                label = "Название задачи",
+                placeholder = "Например: Провести инвентаризацию",
+                leadingIcon = Icons.Default.Title,
                 isError = uiState.titleError != null,
-                supportingText = uiState.titleError
+                errorText = uiState.titleError
             )
         }
 
-        item {
-            StardustTextField(
+        // ── Описание ──────────────────────────────────────────────────────────────
+        CreationSection(label = "Описание") {
+            CreationTextField(
                 value = uiState.description,
                 onValueChange = onDescriptionChanged,
-                label = "Описание (необязательно)",
-                modifier = Modifier.height(120.dp),
-                singleLine = false
+                placeholder = "Дополнительные детали (необязательно)",
+                leadingIcon = Icons.Default.Edit,
+                singleLine = false,
+                minLines = 3
             )
         }
 
-        item {
-            PrioritySelector(
+        // ── Приоритет ─────────────────────────────────────────────────────────────
+        CreationSection(label = "Приоритет") {
+            PrioritySegmentControl(
                 selectedPriority = uiState.priority,
                 onPrioritySelected = onPrioritySelected
             )
         }
 
-        item {
+        // ── Исполнитель ───────────────────────────────────────────────────────────
+        CreationSection(label = "Исполнитель") {
             EmployeeDropdown(
                 employees = uiState.availableEmployees,
                 selectedEmployee = uiState.selectedEmployee,
@@ -141,111 +149,147 @@ private fun TaskCreationContent(
             )
         }
 
-        item {
-            Text("Шаги (в разработке)", style = MaterialTheme.typography.titleMedium, color = StardustTextSecondary)
-        }
+        Spacer(Modifier.height(8.dp))
 
-        item {
-            Button(
-                onClick = onSaveClick,
-                enabled = !uiState.isSaving,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
-            ) {
-                AnimatedContent(targetState = uiState.isSaving, label = "SaveButtonAnimation") { isSaving ->
-                    if (isSaving) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text("Сохранить задачу", fontWeight = FontWeight.Bold)
+        // ── Кнопка сохранения ────────────────────────────────────────────────────
+        Button(
+            onClick = onSaveClick,
+            enabled = !uiState.isSaving,
+            modifier = Modifier.fillMaxWidth().height(54.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = StardustPrimary,
+                disabledContainerColor = StardustPrimary.copy(alpha = 0.4f)
+            ),
+            elevation = ButtonDefaults.buttonElevation(0.dp)
+        ) {
+            AnimatedContent(targetState = uiState.isSaving, label = "save_btn") { saving ->
+                if (saving) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                        Text("Сохранение...", fontWeight = FontWeight.Bold)
                     }
+                } else {
+                    Text("Создать задачу", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
     }
 }
 
-// =================================================================================
-// СТИЛИЗОВАННЫЙ TEXT FIELD (Stable)
-// =================================================================================
+// ── Section wrapper ───────────────────────────────────────────────────────────────
 
 @Composable
-fun StardustTextField(
+private fun CreationSection(label: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = label.uppercase(),
+            color = StardustTextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
+        content()
+    }
+}
+
+// ── Text field ────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun CreationTextField(
     value: String,
     onValueChange: (String) -> Unit,
-    label: String,
-    modifier: Modifier = Modifier.fillMaxWidth(),
+    placeholder: String,
+    leadingIcon: ImageVector,
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = true,
+    minLines: Int = 1,
     isError: Boolean = false,
-    supportingText: String? = null,
-    singleLine: Boolean = true
+    errorText: String? = null
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
-        modifier = modifier,
-        singleLine = singleLine,
-        isError = isError,
-        supportingText = {
-            if (supportingText != null) {
-                Text(supportingText, color = if (isError) StardustError else StardustTextSecondary)
-            }
+        placeholder = { Text(placeholder, color = StardustTextSecondary.copy(alpha = 0.6f), fontSize = 14.sp) },
+        leadingIcon = {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                tint = if (isError) StardustError else StardustTextSecondary,
+                modifier = Modifier.size(20.dp)
+            )
         },
-        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.fillMaxWidth(),
+        singleLine = singleLine,
+        minLines = minLines,
+        isError = isError,
+        supportingText = errorText?.let { { Text(it, color = StardustError, fontSize = 12.sp) } },
+        shape = RoundedCornerShape(12.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = StardustItemBg, unfocusedContainerColor = StardustItemBg,
-            focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary,
+            focusedContainerColor = StardustItemBg,
+            unfocusedContainerColor = StardustItemBg,
+            focusedTextColor = StardustTextPrimary,
+            unfocusedTextColor = StardustTextPrimary,
             cursorColor = StardustPrimary,
-            focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg, errorBorderColor = StardustError,
-            focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, errorLabelColor = StardustError,
+            focusedBorderColor = StardustPrimary,
+            unfocusedBorderColor = Color.Transparent,
+            errorBorderColor = StardustError,
+            errorContainerColor = StardustError.copy(alpha = 0.06f),
+            focusedLeadingIconColor = StardustPrimary,
+            unfocusedLeadingIconColor = StardustTextSecondary
         )
     )
 }
 
-// =================================================================================
-// PRIORITY SELECTOR (Stable - Использует кнопки вместо FilterChip)
-// =================================================================================
+// ── Priority segmented control ────────────────────────────────────────────────────
 
 @Composable
-private fun PrioritySelector(
+private fun PrioritySegmentControl(
     selectedPriority: TaskPriority,
     onPrioritySelected: (TaskPriority) -> Unit
 ) {
-    Column {
-        Text("Приоритет", style = MaterialTheme.typography.labelLarge, color = StardustTextSecondary)
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TaskPriority.entries.forEach { priority ->
-                val priorityColor = when (priority) {
-                    TaskPriority.HIGH -> StardustError
-                    TaskPriority.MEDIUM -> StardustPrimary
-                    TaskPriority.LOW -> Color.Gray
-                }
-                val isSelected = priority == selectedPriority
-
-                Button(
-                    onClick = { onPrioritySelected(priority) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isSelected) priorityColor.copy(alpha = 0.8f) else StardustItemBg,
-                        contentColor = if (isSelected) StardustTextPrimary else StardustTextSecondary
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
-                ) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(StardustItemBg)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        val priorities = listOf(
+            TaskPriority.HIGH   to ("Высокий" to StardustError),
+            TaskPriority.MEDIUM to ("Средний"  to StardustPrimary),
+            TaskPriority.LOW    to ("Низкий"   to StardustTextSecondary)
+        )
+        priorities.forEach { (priority, meta) ->
+            val (label, color) = meta
+            val isSelected = selectedPriority == priority
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (isSelected) color.copy(alpha = 0.18f) else Color.Transparent)
+                    .border(
+                        width = if (isSelected) 1.dp else 0.dp,
+                        color = if (isSelected) color.copy(alpha = 0.5f) else Color.Transparent,
+                        shape = RoundedCornerShape(9.dp)
+                    )
+                    .clickable { onPrioritySelected(priority) }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(if (isSelected) color else StardustTextSecondary.copy(alpha = 0.4f))
+                    )
                     Text(
-                        text = when(priority) {
-                            TaskPriority.HIGH -> "Высокий"
-                            TaskPriority.MEDIUM -> "Средний"
-                            TaskPriority.LOW -> "Низкий"
-                        },
-                        fontWeight = FontWeight.SemiBold
+                        text = label,
+                        fontSize = 13.sp,
+                        color = if (isSelected) color else StardustTextSecondary,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                     )
                 }
             }
@@ -253,9 +297,7 @@ private fun PrioritySelector(
     }
 }
 
-// =================================================================================
-// EMPLOYEE DROPDOWN (Stable - Фикс белого фона)
-// =================================================================================
+// ── Employee dropdown ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -277,7 +319,10 @@ private fun EmployeeDropdown(
             value = selectedEmployee?.name ?: "",
             onValueChange = {},
             readOnly = true,
-            label = { Text("Назначить исполнителю") },
+            placeholder = { Text("Выберите сотрудника", color = StardustTextSecondary.copy(alpha = 0.6f), fontSize = 14.sp) },
+            leadingIcon = {
+                Icon(Icons.Default.AssignmentInd, null, tint = if (error != null) StardustError else StardustTextSecondary, modifier = Modifier.size(20.dp))
+            },
             trailingIcon = {
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = StardustPrimary)
@@ -285,46 +330,35 @@ private fun EmployeeDropdown(
                     ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
                 }
             },
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth(),
+            modifier = Modifier.menuAnchor().fillMaxWidth(),
             isError = error != null,
-            supportingText = {
-                if (error != null) {
-                    Text(error, color = StardustError)
-                } else if (selectedEmployee == null && !isLoading && employees.isNotEmpty()) {
-                    Text("Необходимо выбрать исполнителя", color = StardustTextSecondary)
-                }
-            },
-            shape = RoundedCornerShape(16.dp),
+            supportingText = error?.let { { Text(it, color = StardustError, fontSize = 12.sp) } },
+            shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = StardustItemBg, unfocusedContainerColor = StardustItemBg,
-                focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary,
+                focusedContainerColor = StardustItemBg,
+                unfocusedContainerColor = StardustItemBg,
+                focusedTextColor = StardustTextPrimary,
+                unfocusedTextColor = StardustTextPrimary,
                 cursorColor = StardustPrimary,
-                focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg, errorBorderColor = StardustError,
-                focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, errorLabelColor = StardustError,
+                focusedBorderColor = StardustPrimary,
+                unfocusedBorderColor = Color.Transparent,
+                errorBorderColor = StardustError,
+                errorContainerColor = StardustError.copy(alpha = 0.06f),
+                focusedLeadingIconColor = StardustPrimary,
+                unfocusedLeadingIconColor = StardustTextSecondary
             )
         )
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier
-                .background(Color(0xFF2a2a2e))
-                .width(IntrinsicSize.Max)
+            modifier = Modifier.background(Color(0xFF2A2A2E))
         ) {
             employees.forEach { employee ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onEmployeeSelected(employee); expanded = false }
-                        .background(Color.Transparent)
-                ) {
-                    Text(
-                        text = employee.name,
-                        color = StardustTextPrimary,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
+                DropdownMenuItem(
+                    text = { Text(employee.name, color = StardustTextPrimary, fontSize = 14.sp) },
+                    onClick = { onEmployeeSelected(employee); expanded = false },
+                    modifier = Modifier.background(Color.Transparent)
+                )
             }
         }
     }

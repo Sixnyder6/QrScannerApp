@@ -93,7 +93,8 @@ fun EmployeeDetailScreen(
     userRole: String,
     onBack: () -> Unit,
     onWriteDm: () -> Unit,
-    onEdit: () -> Unit = {}
+    onEdit: () -> Unit = {},
+    isAdmin: Boolean = false
 ) {
     val profileViewModel: EmployeeProfileViewModel = hiltViewModel()
     val profileState by profileViewModel.uiState.collectAsState()
@@ -293,14 +294,13 @@ fun EmployeeDetailScreen(
                         DevicePerformanceCard(details = profileState.performanceDetails)
                     }
 
-                    // УСТРОЙСТВО + GPS — живые данные realtime
-                    if (telemetry.isLoaded) {
+                    // УСТРОЙСТВО + GPS — только для администраторов
+                    if (isAdmin && telemetry.isLoaded) {
                         item {
                             SectionLabel("Устройство")
                             LiveDeviceCard(telemetry = telemetry)
                         }
 
-                        // Карта показывается если есть свежие координаты (не старше 15 минут)
                         val hasLocation = telemetry.locationLat != null && telemetry.locationLng != null
                         val locationFresh = hasLocation &&
                                 (System.currentTimeMillis() - telemetry.locationTimestamp) < 15 * 60 * 1000L
@@ -319,13 +319,15 @@ fun EmployeeDetailScreen(
                         }
                     }
 
-                    // ПУЛЬТ АДМИНА
-                    item {
-                        AdminControlCard(
-                            profile = profileState.userProfile,
-                            onForceEndShift = { profileViewModel.forceEndShift() },
-                            onSetWorkAccess = { isAllowed -> profileViewModel.setWorkAccess(isAllowed) }
-                        )
+                    // ПУЛЬТ АДМИНА — только для администраторов
+                    if (isAdmin) {
+                        item {
+                            AdminControlCard(
+                                profile = profileState.userProfile,
+                                onForceEndShift = { profileViewModel.forceEndShift() },
+                                onSetWorkAccess = { isAllowed -> profileViewModel.setWorkAccess(isAllowed) }
+                            )
+                        }
                     }
 
                     // ДЕЙСТВИЯ

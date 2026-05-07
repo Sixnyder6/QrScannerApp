@@ -1,5 +1,3 @@
-// Полная, исправленная версия файла: features/tasks/ui/MyTasksScreen.kt
-
 package com.example.qrscannerapp.features.tasks.ui
 
 import androidx.compose.animation.core.*
@@ -10,10 +8,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.HelpOutline // V-- ИСПРАВЛЕНИЕ 1 из 2: Добавлен правильный импорт --V
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,10 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,29 +66,41 @@ fun MyTasksScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val selectedTaskId = remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
     val taskToDeleteId = remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(uiState.error) {
+        val msg = uiState.error ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(msg)
+        viewModel.clearError()
+    }
 
     AppBackground {
         Scaffold(
-            containerColor = Color.Transparent
+            containerColor = Color.Transparent,
+            snackbarHost = {
+                SnackbarHost(snackbarHostState) { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        containerColor = StardustModalBg,
+                        contentColor = StardustTextPrimary,
+                        actionColor = StardustError,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
         ) { paddingValues ->
             MyTasksContent(
                 modifier = Modifier.padding(paddingValues),
                 uiState = uiState,
-                onTaskClick = { taskId ->
-                    selectedTaskId.value = taskId
-                },
-                onDeleteClick = { taskId ->
-                    taskToDeleteId.value = taskId
-                }
+                onTaskClick = { taskId -> selectedTaskId.value = taskId },
+                onDeleteClick = { taskId -> taskToDeleteId.value = taskId }
             )
         }
     }
-
 
     if (selectedTaskId.value != null) {
         TaskDetailModal(
@@ -112,8 +122,8 @@ fun MyTasksScreen(
         if (task != null) {
             AlertDialog(
                 onDismissRequest = { taskToDeleteId.value = null },
-                title = { Text("Подтверждение удаления") },
-                text = { Text("Вы уверены, что хотите удалить задачу \"${task.title}\"? Это действие необратимо.") },
+                title = { Text("Удалить задачу?", color = StardustTextPrimary, fontWeight = FontWeight.Bold) },
+                text = { Text("«${task.title}» будет удалена без возможности восстановления.", color = StardustTextSecondary) },
                 confirmButton = {
                     Button(
                         onClick = {
@@ -121,15 +131,15 @@ fun MyTasksScreen(
                             taskToDeleteId.value = null
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = StardustError)
-                    ) {
-                        Text("Удалить")
-                    }
+                    ) { Text("Удалить", fontWeight = FontWeight.Bold) }
                 },
                 dismissButton = {
-                    OutlinedButton(onClick = { taskToDeleteId.value = null }) {
-                        Text("Отмена")
+                    TextButton(onClick = { taskToDeleteId.value = null }) {
+                        Text("Отмена", color = StardustTextSecondary)
                     }
-                }
+                },
+                containerColor = StardustModalBg,
+                titleContentColor = StardustTextPrimary
             )
         }
     }
@@ -199,60 +209,60 @@ private fun TaskListItem(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
     ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+        ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.7f)
+                    .width(4.dp)
                     .fillMaxHeight()
-                    .align(Alignment.CenterStart)
-                    .background(
-                        Brush.horizontalGradient(
-                            colors = listOf(priorityColor.copy(alpha = 0.25f), Color.Transparent)
-                        )
-                    )
+                    .background(priorityColor)
             )
-
-            Row(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .weight(1f)
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = task.title,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        color = StardustTextPrimary
+                        color = StardustTextPrimary,
+                        modifier = Modifier.weight(1f)
                     )
+                    if (task.status == TaskStatus.COMPLETED || task.status == TaskStatus.CANCELED) {
+                        IconButton(
+                            onClick = onDeleteClick,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Удалить задачу",
+                                tint = StardustError.copy(alpha = 0.7f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+                if (task.description.isNotBlank()) {
                     Text(
                         text = task.description,
                         color = StardustTextSecondary,
-                        fontSize = 14.sp,
-                        maxLines = 1,
+                        fontSize = 13.sp,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    StatusChip(status = task.status)
                 }
-
-                if (task.status == TaskStatus.COMPLETED || task.status == TaskStatus.CANCELED) {
-                    IconButton(
-                        onClick = onDeleteClick,
-                        modifier = Modifier.padding(start = 8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Удалить задачу",
-                            tint = StardustError.copy(alpha = 0.7f)
-                        )
-                    }
-                }
+                StatusChip(status = task.status)
             }
         }
     }
@@ -265,9 +275,7 @@ fun StatusChip(status: TaskStatus) {
         TaskStatus.IN_PROGRESS -> Triple("В работе", Color(0xFF00C2FF), Icons.Default.Sync)
         TaskStatus.COMPLETED -> Triple("Выполнена", StardustSuccess, Icons.Default.CheckCircle)
         TaskStatus.CANCELED -> Triple("Отменена", StardustTextSecondary.copy(alpha = 0.7f), Icons.Default.Cancel)
-        // V-- ИСПРАВЛЕНИЕ 2 из 2: Заменен путь к иконке --V
         TaskStatus.UNKNOWN -> Triple("Неизвестно", StardustTextSecondary, Icons.AutoMirrored.Filled.HelpOutline)
-        // ^-- КОНЕЦ ИСПРАВЛЕНИЯ --^
     }
 
     Row(
@@ -326,59 +334,74 @@ fun TaskDetailModal(
         containerColor = StardustModalBg,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
-
         val taskData = uiState.task
 
         Column(modifier = Modifier.padding(bottom = 32.dp)) {
             when {
                 uiState.isLoading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally).padding(40.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(40.dp),
+                        color = StardustPrimary
+                    )
                 }
                 uiState.error != null -> {
-                    Text(uiState.error!!, color = StardustError, modifier = Modifier.align(Alignment.CenterHorizontally).padding(20.dp))
+                    Text(
+                        uiState.error!!,
+                        color = StardustError,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(20.dp)
+                    )
                 }
                 taskData != null -> {
                     Column(
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp)
                     ) {
-                        Text(
-                            text = taskData.title,
-                            color = StardustTextPrimary,
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (taskData.description.isNotBlank()) {
+                        // Заголовок: чипы статуса/приоритета + название + описание
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                StatusChip(status = taskData.status)
+                                TaskPriorityBadge(priorityValue = taskData.priority)
+                            }
                             Text(
-                                text = taskData.description,
-                                color = StardustTextSecondary,
-                                style = MaterialTheme.typography.bodyLarge
+                                text = taskData.title,
+                                color = StardustTextPrimary,
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold
                             )
-                        }
-
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
-                        ) {
-                            Box(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                                TaskStatusIndicator(task = taskData)
+                            if (taskData.description.isNotBlank()) {
+                                Text(
+                                    text = taskData.description,
+                                    color = StardustTextSecondary,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    lineHeight = 20.sp
+                                )
                             }
                         }
 
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
-                        ) {
-                            Column(Modifier.padding(16.dp)) {
-                                DetailRow(label = "Приоритет") {
-                                    TaskPriorityIndicator(priorityValue = taskData.priority)
-                                }
-                                Spacer(Modifier.height(12.dp))
+                        // Секция: статус с анимацией
+                        SectionBlock(label = "СТАТУС") {
+                            TaskStatusIndicator(task = taskData)
+                        }
+
+                        // Секция: детали задачи
+                        SectionBlock(label = "ДЕТАЛИ") {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 DetailRow("Создал", taskData.creatorName)
-                                Spacer(Modifier.height(12.dp))
+                                HorizontalDivider(color = Color(0xFF3A3A3E))
                                 DetailRow("Создана", formatTaskDate(taskData.createdAt))
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(16.dp))
 
                         TaskActionButtons(
                             currentStatus = taskData.status,
@@ -399,6 +422,58 @@ fun TaskDetailModal(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SectionBlock(label: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = label,
+            color = StardustTextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(StardustItemBg)
+                .padding(16.dp)
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun TaskPriorityBadge(priorityValue: Int) {
+    val priority = TaskPriority.fromInt(priorityValue)
+    val (text, color) = when (priority) {
+        TaskPriority.HIGH -> "Высокий" to StardustError
+        TaskPriority.MEDIUM -> "Средний" to StardustPrimary
+        TaskPriority.LOW -> "Низкий" to StardustTextSecondary
+    }
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.15f))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .background(color, CircleShape)
+        )
+        Text(
+            text = text,
+            color = color,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -431,29 +506,6 @@ private fun DetailRow(label: String, content: @Composable RowScope.() -> Unit) {
         Row(modifier = Modifier.fillMaxWidth()) {
             content()
         }
-    }
-}
-
-@Composable
-private fun TaskPriorityIndicator(priorityValue: Int) {
-    val priority = TaskPriority.fromInt(priorityValue)
-    val (text, color) = when (priority) {
-        TaskPriority.HIGH -> "Высокий" to StardustError
-        TaskPriority.MEDIUM -> "Средний" to StardustPrimary
-        TaskPriority.LOW -> "Низкий" to StardustTextSecondary
-    }
-
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .background(color, shape = CircleShape)
-        )
-        Text(
-            text = text,
-            color = color,
-            fontWeight = FontWeight.Bold
-        )
     }
 }
 

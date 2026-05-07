@@ -123,6 +123,10 @@ class MyTasksViewModel @Inject constructor(
         }
     }
 
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
+    }
+
     override fun onCleared() {
         super.onCleared()
         Log.d(TAG, "ViewModel cleared.")

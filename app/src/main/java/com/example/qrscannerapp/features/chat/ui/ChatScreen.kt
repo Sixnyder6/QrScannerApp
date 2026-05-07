@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -211,6 +212,7 @@ fun EmojiPickerPopup(
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel(),
+    onBack: () -> Unit = {},
     onOpenDirectChat: (peerId: String, peerName: String, peerRole: String) -> Unit = { _, _, _ -> },
     onOpenProfile: (userId: String, userName: String, userRole: String) -> Unit = { _, _, _ -> },
     onOpenInbox: () -> Unit = {}
@@ -319,6 +321,7 @@ fun ChatScreen(
                     accent = accent, isSearchActive = uiState.isSearchActive,
                     isAutoDeleteEnabled = uiState.isAutoDeleteEnabled, autoDeleteHours = uiState.autoDeleteIntervalHours,
                     isAdmin = isAdmin, isClearingChat = uiState.isClearingChat,
+                    onBack = onBack,
                     onSearchClick = { viewModel.toggleSearch() }, onMembersClick = { viewModel.toggleRoomMenu() },
                     onAutoDeleteClick = { showAutoDeleteSheet = true }, onClearChatClick = { showClearChatDialog = true },
                     onOpenInbox = onOpenInbox
@@ -546,11 +549,12 @@ fun SelectionTopBar(selectedCount: Int, totalDeletable: Int, accent: Color, onCl
 // ============================================================================================
 
 @Composable
-fun ChatTopBar(activeRoom: ChatRoom, messageCount: Int, accent: Color, isSearchActive: Boolean, isAutoDeleteEnabled: Boolean, autoDeleteHours: Int, isAdmin: Boolean, isClearingChat: Boolean, onSearchClick: () -> Unit, onMembersClick: () -> Unit, onAutoDeleteClick: () -> Unit, onClearChatClick: () -> Unit, onOpenInbox: () -> Unit = {}) {
+fun ChatTopBar(activeRoom: ChatRoom, messageCount: Int, accent: Color, isSearchActive: Boolean, isAutoDeleteEnabled: Boolean, autoDeleteHours: Int, isAdmin: Boolean, isClearingChat: Boolean, onBack: () -> Unit = {}, onSearchClick: () -> Unit, onMembersClick: () -> Unit, onAutoDeleteClick: () -> Unit, onClearChatClick: () -> Unit, onOpenInbox: () -> Unit = {}) {
     val gradient = roomGradient(activeRoom)
     Column {
         Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(Brush.horizontalGradient(gradient)))
         Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A22)).padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = StardustTextSecondary, modifier = Modifier.size(20.dp)) }
             Box(modifier = Modifier.size(42.dp).clip(CircleShape).background(Brush.linearGradient(gradient)).clickable { onMembersClick() }, contentAlignment = Alignment.Center) { Text(activeRoom.emoji, fontSize = 20.sp) }
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -658,7 +662,7 @@ fun SearchBar(query: String, resultCount: Int, currentIndex: Int, accent: Color,
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     Row(modifier = Modifier.fillMaxWidth().background(StardustSolidBg).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(Icons.Default.Search, null, tint = accent, modifier = Modifier.size(18.dp))
-        OutlinedTextField(value = query, onValueChange = onQueryChange, modifier = Modifier.weight(1f).height(44.dp).focusRequester(focusRequester), placeholder = { Text("Поиск в чате...", fontSize = 13.sp, color = StardustTextSecondary.copy(alpha = 0.5f)) }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { onNext() }), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = accent.copy(alpha = 0.5f), unfocusedBorderColor = Color.White.copy(alpha = 0.1f), focusedContainerColor = Color.White.copy(alpha = 0.05f), unfocusedContainerColor = Color.White.copy(alpha = 0.03f), cursorColor = accent, focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary), shape = RoundedCornerShape(12.dp), textStyle = TextStyle(fontSize = 13.sp))
+        OutlinedTextField(value = query, onValueChange = onQueryChange, modifier = Modifier.weight(1f).focusRequester(focusRequester), placeholder = { Text("Поиск в чате...", fontSize = 13.sp, color = StardustTextSecondary.copy(alpha = 0.5f)) }, singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { onNext() }), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = accent.copy(alpha = 0.5f), unfocusedBorderColor = Color.White.copy(alpha = 0.1f), focusedContainerColor = Color.White.copy(alpha = 0.05f), unfocusedContainerColor = Color.White.copy(alpha = 0.03f), cursorColor = accent, focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary), shape = RoundedCornerShape(12.dp), textStyle = TextStyle(fontSize = 13.sp))
         if (resultCount > 0) {
             Text("${currentIndex + 1}/$resultCount", color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 36.dp), textAlign = TextAlign.Center)
             IconButton(onClick = onPrev, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.KeyboardArrowUp, null, tint = StardustTextSecondary, modifier = Modifier.size(16.dp)) }

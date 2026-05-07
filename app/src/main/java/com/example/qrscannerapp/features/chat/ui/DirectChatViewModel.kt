@@ -39,8 +39,8 @@ data class DirectChatUiState(
     val isSending: Boolean = false,
     val peerName: String = "",
     val peerRole: String = "",
-    // НОВОЕ: печатает ли собеседник прямо сейчас
-    val isPeerTyping: Boolean = false
+    val isPeerTyping: Boolean = false,
+    val isPeerOnline: Boolean = false
 )
 
 // ============================================================================================
@@ -58,6 +58,7 @@ class DirectChatViewModel @Inject constructor(
 
     private var messagesListener: ListenerRegistration? = null
     private var typingListener: ListenerRegistration? = null
+    private var onlineListener: ListenerRegistration? = null
     private var conversationId: String = ""
     private var peerId: String = ""
 
@@ -79,6 +80,7 @@ class DirectChatViewModel @Inject constructor(
         _uiState.update { it.copy(peerName = peerName, peerRole = peerRole, isLoading = true) }
         startListening()
         startTypingListener()
+        startOnlineListener()
     }
 
     // ============================================================================================
@@ -256,10 +258,27 @@ class DirectChatViewModel @Inject constructor(
             }
     }
 
+    private fun startOnlineListener() {
+        onlineListener?.remove()
+        onlineListener = db.collection("internal_users")
+            .document(peerId)
+            .addSnapshotListener { snapshot, _ ->
+                val lastSeen: Long = when (val raw = snapshot?.get("lastSeen")) {
+                    is Long -> raw
+                    is Number -> raw.toLong()
+                    is com.google.firebase.Timestamp -> raw.toDate().time
+                    else -> 0L
+                }
+                val isOnline = lastSeen > 0 && (System.currentTimeMillis() - lastSeen) < 5 * 60 * 1000L
+                _uiState.update { it.copy(isPeerOnline = isOnline) }
+            }
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopTyping()
         messagesListener?.remove()
         typingListener?.remove()
+        onlineListener?.remove()
     }
 }

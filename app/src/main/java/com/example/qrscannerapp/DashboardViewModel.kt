@@ -366,6 +366,17 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
+    fun deleteTask(taskId: String) {
+        viewModelScope.launch {
+            try {
+                taskRepository.deleteTask(taskId)
+            } catch (e: Exception) {
+                Log.e(tag, "Error deleting task $taskId", e)
+                _uiState.update { it.copy(error = "Не удалось удалить задачу: ${e.message}") }
+            }
+        }
+    }
+
     private fun subscribeToActiveTasks() {
         taskRepository.getAllActiveTasksStream()
             .onEach { tasks -> _uiState.update { it.copy(activeTasks = tasks.sortedByDescending { t -> t.createdAt }) } }

@@ -113,7 +113,7 @@ fun TeamScreen(
                 ) { Text("Удалить") }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showDeleteConfirmDialog = false }) { Text("Отмена") }
+                TextButton(onClick = { showDeleteConfirmDialog = false }) { Text("Отмена") }
             },
             containerColor = StardustModalBg,
             titleContentColor = StardustTextPrimary,
@@ -425,24 +425,10 @@ fun TeamMemberCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                val appVersion = member.info.appVersion
-                if (appVersion != null) {
-                    val currentVersion = remember {
-                        try { BuildConfig.VERSION_NAME } catch (_: Exception) { "" }
-                    }
-                    val isOutdated = remember(appVersion, currentVersion) {
-                        currentVersion.isNotBlank() && appVersion != currentVersion
-                    }
-                    val vColor = if (isOutdated) StardustWarning else StardustSuccess
-                    Surface(color = vColor.copy(alpha = 0.12f), shape = RoundedCornerShape(4.dp)) {
-                        Text(
-                            "${if (isOutdated) "⚠" else "✓"} v$appVersion",
-                            color = vColor, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     val activityText = when {
                         member.minutesSinceLastActivity < 0 -> "нет данных"
                         member.minutesSinceLastActivity < 1 -> "только что"
@@ -450,13 +436,11 @@ fun TeamMemberCard(
                         member.minutesSinceLastActivity < 1440 -> "${member.minutesSinceLastActivity / 60} ч."
                         else -> "${member.minutesSinceLastActivity / 1440} дн."
                     }
-                    Text(activityText, color = StardustTextSecondary.copy(alpha = 0.6f), fontSize = 10.sp)
-
+                    Text(activityText, color = StardustTextSecondary.copy(alpha = 0.6f), fontSize = 11.sp)
                     if (member.batchesToday > 0) {
-                        Text("${member.batchesToday} партий", color = StardustTextSecondary.copy(alpha = 0.6f), fontSize = 10.sp)
+                        Text("· ${member.batchesToday} партий", color = StardustTextSecondary.copy(alpha = 0.5f), fontSize = 11.sp)
                     }
                 }
-
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(onClick = onChatClick, modifier = Modifier.size(30.dp)) {
                         Icon(Icons.AutoMirrored.Filled.Chat, "Написать", tint = StardustPrimary.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
@@ -473,3 +457,4 @@ fun TeamMemberCard(
             }
         }
     }
+}

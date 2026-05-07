@@ -10,6 +10,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -368,6 +369,7 @@ fun MainApp(
 
     val updateManager = remember { UpdateManager(context) }
     val updateState by updateManager.updateState.collectAsState()
+    var updateDismissed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { updateManager.checkForUpdates() }
 
     LaunchedEffect(updateState) {
@@ -417,7 +419,7 @@ fun MainApp(
                     add(Screen.VehicleReport)
                     add(Screen.FieldRepairAdmin)
                 }
-                add(Screen.Team)
+                if (isUserManager) add(Screen.Team)
                 add(Screen.Chat)
                 add(Screen.QrGenerator); add(Screen.Settings); add(Screen.History)
                 if (isSecurity) {
@@ -443,7 +445,7 @@ fun MainApp(
                     else -> 15
                 }
             }.filter {
-                isUserManager || (it.route != Screen.Dashboard.route && it.route != Screen.VehicleReport.route && it.route != Screen.FieldRepairAdmin.route)
+                isUserManager || (it.route != Screen.Dashboard.route && it.route != Screen.VehicleReport.route && it.route != Screen.FieldRepairAdmin.route && it.route != Screen.Team.route)
             }
         }
     }
@@ -699,6 +701,172 @@ fun MainApp(
                     },
                     modifier = Modifier.align(Alignment.TopCenter)
                 )
+            }
+
+            // --- Оверлей обновления (блокирует интерфейс) ---
+            if (updateState is UpdateState.UpdateAvailable && !updateDismissed) {
+                val info = (updateState as UpdateState.UpdateAvailable).info
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(200f)
+                        .background(Color.Black.copy(alpha = 0.75f))
+                        .clickable(enabled = false) {},
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(28.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF14141C)),
+                        border = BorderStroke(
+                            1.dp,
+                            Brush.linearGradient(
+                                listOf(StardustPrimary.copy(alpha = 0.7f), StardustPrimary.copy(alpha = 0.15f))
+                            )
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(CircleShape)
+                                    .background(StardustPrimary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = StardustPrimary,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                "Доступно обновление",
+                                color = StardustTextSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                info.latestVersionName,
+                                color = StardustTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 28.sp
+                            )
+                            if (info.releaseNotes.isNotBlank()) {
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    info.releaseNotes,
+                                    color = StardustTextSecondary,
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                            Spacer(Modifier.height(24.dp))
+                            Button(
+                                onClick = { updateManager.startUpdate(info) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
+                            ) {
+                                Icon(
+                                    Icons.Default.SystemUpdate,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = info.apkSize?.let { "Обновить ($it)" } ?: "Обновить",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            TextButton(
+                                onClick = { updateDismissed = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "Позже",
+                                    color = StardustTextSecondary,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- Баннер прогресса загрузки ---
+            if (updateState is UpdateState.Downloading) {
+                val progress = (updateState as UpdateState.Downloading).progress
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(200f),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF14141C)),
+                        border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.3f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    progress = { progress / 100f },
+                                    modifier = Modifier.size(32.dp),
+                                    color = StardustPrimary,
+                                    strokeWidth = 3.dp
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "Загрузка обновления...",
+                                        color = StardustTextPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        "$progress%",
+                                        color = StardustPrimary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+                            LinearProgressIndicator(
+                                progress = { progress / 100f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(CircleShape),
+                                color = StardustPrimary,
+                                trackColor = StardustItemBg
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1051,7 +1219,7 @@ fun AppNavHost(
                 val userId = backStackEntry.arguments?.getString("userId") ?: ""
                 val userName = URLDecoder.decode(backStackEntry.arguments?.getString("userName") ?: "", "UTF-8")
                 val userRole = URLDecoder.decode(backStackEntry.arguments?.getString("userRole") ?: "", "UTF-8")
-                EmployeeDetailScreen(userId = userId, userName = userName, userRole = userRole, onBack = { navController.popBackStack() }, onWriteDm = { navController.popBackStack(); val encodedName = URLEncoder.encode(userName, "UTF-8"); val encodedRole = URLEncoder.encode(userRole, "UTF-8"); navController.navigate("direct_chat/$userId/$encodedName/$encodedRole") { launchSingleTop = true } })
+                EmployeeDetailScreen(userId = userId, userName = userName, userRole = userRole, isAdmin = isUserManager, onBack = { navController.popBackStack() }, onWriteDm = { navController.popBackStack(); val encodedName = URLEncoder.encode(userName, "UTF-8"); val encodedRole = URLEncoder.encode(userRole, "UTF-8"); navController.navigate("direct_chat/$userId/$encodedName/$encodedRole") { launchSingleTop = true } })
             }
 
             composable(route = Screen.VehicleReport.route, enterTransition = iosEnter, exitTransition = iosExit, popEnterTransition = iosPopEnter, popExitTransition = iosPopExit) { VehicleReportScreen(onNavigateToHistory = { navController.navigate(Screen.VehicleReportHistory.route) }) }
@@ -1090,7 +1258,7 @@ fun AppNavHost(
             composable(route = Screen.TaskCreation.route, enterTransition = iosEnter, exitTransition = iosExit, popEnterTransition = iosPopEnter, popExitTransition = iosPopExit) { TaskCreationScreen(navController = navController) }
 
             composable(route = Screen.Chat.route, enterTransition = iosEnter, exitTransition = iosExit, popEnterTransition = iosPopEnter, popExitTransition = iosPopExit) {
-                ChatScreen(viewModel = chatViewModel, onOpenDirectChat = { peerId, peerName, peerRole -> val encodedName = URLEncoder.encode(peerName, "UTF-8"); val encodedRole = URLEncoder.encode(peerRole, "UTF-8"); navController.navigate("direct_chat/$peerId/$encodedName/$encodedRole") }, onOpenProfile = { uid, name, role -> val encodedName = URLEncoder.encode(name, "UTF-8"); val encodedRole = URLEncoder.encode(role, "UTF-8"); navController.navigate("user_profile/$uid/$encodedName/$encodedRole") }, onOpenInbox = { navController.navigate(Screen.DirectInbox.route) { launchSingleTop = true } })
+                ChatScreen(viewModel = chatViewModel, onBack = { navController.popBackStack() }, onOpenDirectChat = { peerId, peerName, peerRole -> val encodedName = URLEncoder.encode(peerName, "UTF-8"); val encodedRole = URLEncoder.encode(peerRole, "UTF-8"); navController.navigate("direct_chat/$peerId/$encodedName/$encodedRole") }, onOpenProfile = { uid, name, role -> val encodedName = URLEncoder.encode(name, "UTF-8"); val encodedRole = URLEncoder.encode(role, "UTF-8"); navController.navigate("user_profile/$uid/$encodedName/$encodedRole") }, onOpenInbox = { navController.navigate(Screen.DirectInbox.route) { launchSingleTop = true } })
             }
 
             composable(route = Screen.DirectInbox.route, enterTransition = iosEnter, exitTransition = iosExit, popEnterTransition = iosPopEnter, popExitTransition = iosPopExit) { DirectInboxScreen(onBack = { navController.popBackStack() }, onOpenChat = { peerId, peerName, peerRole -> val encodedName = URLEncoder.encode(peerName, "UTF-8"); val encodedRole = URLEncoder.encode(peerRole, "UTF-8"); navController.navigate("direct_chat/$peerId/$encodedName/$encodedRole") }) }

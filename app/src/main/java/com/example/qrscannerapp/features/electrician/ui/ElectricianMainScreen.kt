@@ -239,6 +239,22 @@
             }
         )
 
+        var hasLocationPermission by remember {
+            mutableStateOf(
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            )
+        }
+
+        val locationPermissionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestMultiplePermissions(),
+            onResult = { permissions ->
+                hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                        permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                if (!hasLocationPermission) Toast.makeText(context, "Геолокация необходима для определения ближайших задач.", Toast.LENGTH_LONG).show()
+            }
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -252,11 +268,11 @@
                 colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
             ) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                    SettingsRow(icon = Icons.Default.Person, title = "Имя",   value = authState.userName ?: "...")
+                    SettingsRow(icon = Icons.Default.Person, iconColor = StardustPrimary, title = "Имя",   value = authState.userName ?: "...")
                     HorizontalDivider(color = StardustItemBg)
-                    SettingsRow(icon = Icons.Default.Shield, title = "Роль",  value = authState.role.displayName)
+                    SettingsRow(icon = Icons.Default.Shield, iconColor = Color(0xFF94A3B8), title = "Роль",  value = authState.role.displayName)
                     HorizontalDivider(color = StardustItemBg)
-                    SettingsRow(icon = Icons.Rounded.LocationOn, title = "Склад", value = "Бестужевская 10")
+                    SettingsRow(icon = Icons.Rounded.LocationOn, iconColor = Color(0xFF4ADE80), title = "Склад", value = "Бестужевская 10")
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
@@ -279,6 +295,7 @@
                     Column(modifier = Modifier.padding(vertical = 8.dp)) {
                         SettingsToggleRow(
                             icon = Icons.Default.VolumeUp,
+                            iconColor = Color(0xFFF59E0B),
                             title = "Звуковой сигнал",
                             isChecked = isSoundEnabled,
                             onCheckedChange = { scope.launch { settingsManager.setSoundEnabled(it) } }
@@ -286,6 +303,7 @@
                         HorizontalDivider(color = StardustItemBg)
                         SettingsToggleRow(
                             icon = Icons.Default.Vibration,
+                            iconColor = Color(0xFF94A3B8),
                             title = "Вибрация",
                             isChecked = isVibrationEnabled,
                             onCheckedChange = { scope.launch { settingsManager.setVibrationEnabled(it) } }
@@ -294,6 +312,37 @@
                 }
                 Spacer(modifier = Modifier.height(24.dp))
             }
+
+            // --- Разрешения ---
+            SettingsCategory(title = "Разрешения")
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
+            ) {
+                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                    SettingsToggleRow(
+                        icon = Icons.Rounded.LocationOn,
+                        iconColor = Color(0xFF4ADE80),
+                        title = "Геолокация",
+                        subtitle = if (hasLocationPermission) "Разрешено · используется для задач" else "Не разрешено",
+                        isChecked = hasLocationPermission,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                locationPermissionLauncher.launch(
+                                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                                )
+                            } else {
+                                context.startActivity(
+                                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
 
             // --- О приложении ---
             SettingsCategory(title = "О приложении")
@@ -304,6 +353,7 @@
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
                     SettingsRow(
                         icon = Icons.Default.Info,
+                        iconColor = Color(0xFF38BDF8),
                         title = "Версия приложения",
                         value = telemetryManager.getAppVersion()
                     )
@@ -329,10 +379,11 @@
                 colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
             ) {
                 Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                    SettingsRow(icon = Icons.Default.Code, title = "Разработчик", value = "Владислав С.")
+                    SettingsRow(icon = Icons.Default.Code, iconColor = Color(0xFFC084FC), title = "Разработчик", value = "Владислав С.")
                     HorizontalDivider(color = StardustItemBg)
                     SettingsRow(
                         icon = Icons.AutoMirrored.Filled.Send,
+                        iconColor = Color(0xFF38BDF8),
                         title = "Telegram",
                         value = "@Cyberdyne_Industries",
                         isClickable = true
@@ -344,6 +395,7 @@
                     HorizontalDivider(color = StardustItemBg)
                     SettingsRow(
                         icon = Icons.Default.Email,
+                        iconColor = Color(0xFFF59E0B),
                         title = "Email",
                         value = "pankratovvlad69@gmail.com",
                         isClickable = true
@@ -795,10 +847,12 @@
     @Composable
     private fun SettingsCategory(title: String) {
         Text(
-            text = title,
+            text = title.uppercase(),
             color = StardustTextSecondary,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp, start = 8.dp)
+            fontSize = 11.sp,
+            letterSpacing = 1.sp,
+            modifier = Modifier.padding(bottom = 8.dp, start = 4.dp)
         )
     }
 
@@ -807,23 +861,31 @@
         icon: ImageVector,
         title: String,
         value: String,
+        iconColor: Color = StardustTextSecondary,
         isClickable: Boolean = false,
         onClick: () -> Unit = {}
     ) {
         Row(
             modifier = (if (isClickable) Modifier.clickable(onClick = onClick) else Modifier)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 16.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(imageVector = icon, contentDescription = title, tint = StardustTextSecondary)
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(text = title, color = StardustTextPrimary, fontSize = 16.sp)
-            Spacer(modifier = Modifier.weight(1f))
-            Text(text = value, color = StardustTextSecondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(iconColor.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(imageVector = icon, contentDescription = title, tint = iconColor, modifier = Modifier.size(18.dp))
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(text = title, color = StardustTextPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(text = value, color = StardustTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             if (isClickable) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = StardustTextSecondary)
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = StardustTextSecondary, modifier = Modifier.size(16.dp))
             }
         }
     }
@@ -833,24 +895,44 @@
         icon: ImageVector,
         title: String,
         isChecked: Boolean,
-        onCheckedChange: (Boolean) -> Unit
+        onCheckedChange: (Boolean) -> Unit,
+        iconColor: Color = StardustTextSecondary,
+        subtitle: String? = null
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onCheckedChange(!isChecked) }
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(imageVector = icon, contentDescription = title, tint = StardustTextSecondary)
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(text = title, color = StardustTextPrimary, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(iconColor.copy(alpha = if (isChecked) 0.15f else 0.08f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = if (isChecked) iconColor else StardustTextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, color = StardustTextPrimary, fontSize = 15.sp)
+                if (subtitle != null) {
+                    Text(text = subtitle, color = StardustTextSecondary, fontSize = 12.sp)
+                }
+            }
             Switch(
                 checked = isChecked,
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = StardustPrimary,
-                    checkedTrackColor = StardustSecondary,
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = StardustPrimary,
                     uncheckedThumbColor = StardustTextSecondary,
                     uncheckedTrackColor = StardustItemBg
                 )
