@@ -34,6 +34,10 @@ jobs:
 
           APK_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-release.apk"
 
+          # НОВЫЕ ПОЛЯ: минимальная версия (обычно на 1-2 версии ниже текущей)
+          MIN_REQUIRED_VERSION_CODE=$((VERSION_CODE - 3))  # Например, если текущая 48, то минималка 45
+          MIN_REQUIRED_VERSION_NAME=$(echo $VERSION_NAME | awk -F. '{$NF = $NF - 1; print}' OFS=.)  # Уменьшает последнее число на 1
+
           IMAGE_URLS=""
           if ls release-assets/image*.png 1> /dev/null 2>&1; then
             for img in release-assets/image*.png; do
@@ -53,6 +57,8 @@ jobs:
           echo "{" > app/build/outputs/apk/release/update.json
           echo "  \"latestVersionCode\": $VERSION_CODE," >> app/build/outputs/apk/release/update.json
           echo "  \"latestVersionName\": \"$VERSION_NAME\"," >> app/build/outputs/apk/release/update.json
+          echo "  \"minRequiredVersionCode\": $MIN_REQUIRED_VERSION_CODE," >> app/build/outputs/apk/release/update.json
+          echo "  \"minRequiredVersionName\": \"$MIN_REQUIRED_VERSION_NAME\"," >> app/build/outputs/apk/release/update.json
           echo "  \"apkUrl\": \"$APK_URL\"," >> app/build/outputs/apk/release/update.json
           echo "  \"apkSize\": \"$APK_SIZE\"," >> app/build/outputs/apk/release/update.json
           echo "  \"imageUrls\": [$IMAGE_URLS]," >> app/build/outputs/apk/release/update.json

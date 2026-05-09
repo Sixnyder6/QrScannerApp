@@ -1,0 +1,89 @@
+uniform float2 iResolution;
+uniform float iTime;
+
+// MIST WHITE THEME — Утренний туман
+uniform float flowSpeed;       // Скорость движения слоёв
+uniform float complexity;      // Сложность турбулентности
+uniform float3 layerColorA;    // Глубокий фоновый слой
+uniform float3 layerColorB;    // Средний слой тумана
+uniform float3 layerColorC;    // Светлый жемчужный верх
+uniform float brightness;      // Общая яркость
+
+half hash(float2 p) {
+    p = fract(p * 0.3183099 + float2(0.1, 0.2));
+    p *= 17.0;
+    return fract(p.x * p.y * (p.x + p.y));
+}
+
+half noise(float2 x) {
+    float2 i = floor(x);
+    float2 f = fract(x);
+    float a = hash(i);
+    float b = hash(i + float2(1.0, 0.0));
+    float c = hash(i + float2(0.0, 1.0));
+    float d = hash(i + float2(1.0, 1.0));
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+half fbm(float2 p) {
+    half v = 0.0;
+    half a = 0.5;
+    float2 shift = float2(100.0, 50.0);
+    mat2 rot = mat2(cos(0.3), sin(0.3), -sin(0.3), cos(0.3));
+
+    v += a * noise(p);
+    p = rot * p * 2.0 + shift;
+    a *= 0.45;
+
+    v += a * noise(p);
+    p = rot * p * 2.0 - shift;
+    a *= 0.45;
+
+    v += a * noise(p);
+    p = rot * p * 2.0 + shift;
+    a *= 0.4;
+
+    v += a * noise(p);
+    return v;
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord.xy / iResolution.xy;
+    float2 p = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
+
+    float t = iTime * flowSpeed;
+
+    // Первый слой: медленные крупные волны
+    float2 q = float2(
+        fbm(p + float2(0.0, 0.2 * t)),
+        fbm(p + float2(0.3 * t, 0.0))
+    );
+
+    // Второй слой: более быстрая рябь
+    float2 r = float2(
+        fbm(p + complexity * q + float2(0.15 * t, 0.1 * t) + float2(1.7, 3.4)),
+        fbm(p + complexity * q + float2(0.25 * t, 0.05 * t) - float2(4.1, 2.7))
+    );
+
+    // Третий слой: детализация
+    float f = fbm(p + complexity * 1.5 * r + float2(0.05 * t, -0.03 * t));
+
+    // Строим глубину тумана: чем выше f, тем "ближе" туман
+    float depth = f * f * 1.8;
+
+    // Три слоя цвета смешиваются по глубине
+    float3 col = mix(layerColorA, layerColorB, smoothstep(0.0, 0.4, depth));
+    col = mix(col, layerColorC, smoothstep(0.3, 0.7, depth));
+
+    // Добавляем лёгкое жемчужное свечение в пиках
+    col += layerColorC * 0.15 * smoothstep(0.65, 0.8, depth);
+
+    // Лёгкий виньет
+    float vig = 1.0 - length(uv - 0.5) * 0.35;
+    col *= vig;
+
+    col *= brightness;
+
+    return half4(col, 1.0);
+}

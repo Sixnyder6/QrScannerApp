@@ -35,6 +35,10 @@ private const val HEARTBEAT_INTERVAL_MS = 3 * 60 * 1000L
 // Порог "онлайн" — если lastSeen был менее 5 минут назад
 const val ONLINE_THRESHOLD_MS = 5 * 60 * 1000L
 
+// ⭐ МИНИМАЛЬНАЯ ТРЕБУЕМАЯ ВЕРСИЯ ПРИЛОЖЕНИЯ
+// В продакшене можно хранить в Firestore в документе app_config
+private const val MIN_REQUIRED_APP_VERSION = "1.4.5"
+
 enum class UserRole(val key: String, val displayName: String) {
     ADMIN("admin", "Администратор"),
     MOVER("muver", "Мувер"),
@@ -77,13 +81,12 @@ data class AuthState(
     val isShiftActive: Boolean = false,
     val shiftStartTime: Long = 0L,
     val isAllowedToWork: Boolean = false,
-    val shiftRequestStatus: ShiftRequestStatus = ShiftRequestStatus.NONE
+    val shiftRequestStatus: ShiftRequestStatus = ShiftRequestStatus.NONE,
+    val versionError: Boolean = false  // ⭐ НОВОЕ ПОЛЕ: флаг ошибки версии
 )
 
 class AuthManager(
     private val context: Context,
-    // TelemetryManager инжектируем через lazy чтобы избежать циклической зависимости
-    // при старте — он создаётся только при первом heartbeat
     private val telemetryManagerProvider: () -> TelemetryManager
 ) {
 
@@ -95,16 +98,12 @@ class AuthManager(
     val authState = _authState.asStateFlow()
 
     private var userListener: ListenerRegistration? = null
-
-    // Job для heartbeat — чтобы можно было отменить при logout
     private var heartbeatJob: Job? = null
 
-    // Уникальный ID текущего устройства
     private val deviceId: String by lazy {
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
     }
 
-    // Флаг: нас выкинуло другое устройство (не трогаем activeDeviceId при logout)
     @Volatile
     private var isKickedByAnotherDevice = false
 
@@ -113,7 +112,6 @@ class AuthManager(
 
     init {
         scope.launch {
-            // Даём Firebase время инициализироваться
             delay(1500)
 
             val preferences = context.dataStore.data.first()
@@ -126,6 +124,70 @@ class AuthManager(
                 _authState.value = AuthState(isLoggedIn = false, isLoading = false)
             }
         }
+    }
+
+    // ⭐ НОВЫЙ МЕТОД: получение текущей версии приложения
+    private fun getCurrentAppVersion(): String {
+        return try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get app version", e)
+            "0"
+        }
+    }
+
+    // ⭐ НОВЫЙ МЕТОД: сравнение версий
+    private fun compareVersions(v1: String, v2: String): Int {
+        val parts1 = v1.split(".").map { it.toIntOrNull() ?: 0 }
+        val parts2 = v2.split(".").map { it.toIntOrNull() ?: 0 }
+        val maxLen = maxOf(parts1.size, parts2.size)
+
+        for (i in 0 until maxLen) {
+            val p1 = if (i < parts1.size) parts1[i] else 0
+            val p2 = if (i < parts2.size) parts2[i] else 0
+            if (p1 != p2) return p1 - p2
+        }
+        return 0
+    }
+
+    // ⭐ НОВЫЙ МЕТОД: проверка версии (можно загружать с сервера динамически)
+    private suspend fun checkVersionAndBlock(): Boolean {
+        val currentVersion = getCurrentAppVersion()
+
+        // Вариант 1: жёсткая минимальная версия (захардкожена)
+        if (compareVersions(currentVersion, MIN_REQUIRED_APP_VERSION) < 0) {
+            withContext(Dispatchers.Main) {
+                _authState.value = AuthState(
+                    isLoggedIn = false,
+                    error = "Ваша версия приложения ($currentVersion) устарела. " +
+                            "Пожалуйста, обновитесь до версии $MIN_REQUIRED_APP_VERSION или выше",
+                    isLoading = false,
+                    versionError = true
+                )
+            }
+            return false
+        }
+
+        // Вариант 2: загружать минимальную версию из Firestore (раскомментировать при наличии документа app_config)
+        // try {
+        //     val configDoc = firestore.collection("app_config").document("version_config").get().await()
+        //     val minVersion = configDoc.getString("minRequiredVersion") ?: MIN_REQUIRED_APP_VERSION
+        //     if (compareVersions(currentVersion, minVersion) < 0) {
+        //         withContext(Dispatchers.Main) {
+        //             _authState.value = AuthState(
+        //                 isLoggedIn = false,
+        //                 error = "Требуется обновление. Минимальная версия: $minVersion",
+        //                 isLoading = false,
+        //                 versionError = true
+        //             )
+        //         }
+        //         return false
+        //     }
+        // } catch (e: Exception) {
+        //     Log.e(TAG, "Failed to check min version from server", e)
+        // }
+
+        return true
     }
 
     private fun attachUserListener(uid: String) {
@@ -143,16 +205,23 @@ class AuthManager(
                 }
 
                 if (userDocument != null && userDocument.exists()) {
-                    // ═══════════════════════════════════════════════════════════
-                    // ПРОВЕРКА ПРИВЯЗКИ УСТРОЙСТВА
-                    // Если activeDeviceId изменился — нас выкинули
-                    // ═══════════════════════════════════════════════════════════
+                    // ⭐ ПРОВЕРКА ПРИВЯЗКИ УСТРОЙСТВА
                     val activeDevice = userDocument.getString("activeDeviceId")
                     if (activeDevice != null && activeDevice != deviceId) {
                         Log.w(TAG, "Session taken by another device ($activeDevice). Forcing logout.")
                         isKickedByAnotherDevice = true
                         scope.launch {
                             forceLogoutLocal("Аккаунт используется на другом устройстве")
+                        }
+                        return@addSnapshotListener
+                    }
+
+                    // ⭐ ПРОВЕРКА ВЕРСИИ ПРИЛОЖЕНИЯ
+                    val userAppVersion = userDocument.getString("appVersion") ?: "0"
+                    if (compareVersions(userAppVersion, MIN_REQUIRED_APP_VERSION) < 0) {
+                        Log.w(TAG, "User app version $userAppVersion is below required $MIN_REQUIRED_APP_VERSION")
+                        scope.launch {
+                            forceLogoutLocal("Требуется обновление приложения. Версия $MIN_REQUIRED_APP_VERSION или выше")
                         }
                         return@addSnapshotListener
                     }
@@ -177,7 +246,8 @@ class AuthManager(
                         shiftStartTime = shiftStartTime,
                         isLoading = false,
                         isAllowedToWork = isAllowedToWork,
-                        shiftRequestStatus = shiftRequestStatus
+                        shiftRequestStatus = shiftRequestStatus,
+                        versionError = false
                     )
                 } else {
                     Log.d(TAG, "User document for UID $uid not found. Logging out.")
@@ -185,39 +255,37 @@ class AuthManager(
                 }
             }
 
-        // Сразу пишем lastSeen + deviceId и запускаем heartbeat
         startHeartbeat(uid)
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // HEARTBEAT — каждые 3 минуты:
-    //   1. lastSeen + activeDeviceId (онлайн-статус)
-    //   2. Полная телеметрия устройства → пишем прямо в internal_users
-    //   3. GPS координаты для всех ролей (если разрешение выдано)
-    //      Если разрешения нет — старые поля удаляются
-    // ════════════════════════════════════════════════════════════════════════
     private fun startHeartbeat(uid: String) {
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (isActive) {
                 try {
                     val telemetryManager = telemetryManagerProvider()
-
-                    // Собираем телеметрию (без пинга — он медленный)
                     val telemetry = telemetryManager.getAllTelemetry(includePing = false)
+                    val currentVersion = getCurrentAppVersion()
 
-                    // internal_users: только онлайн-маркеры и идентификатор устройства
+                    // ⭐ ДОБАВЛЕНА ПРОВЕРКА ВЕРСИИ ПРИ HEARTBEAT
+                    if (compareVersions(currentVersion, MIN_REQUIRED_APP_VERSION) < 0) {
+                        Log.w(TAG, "Version check failed during heartbeat. Forcing logout.")
+                        withContext(Dispatchers.Main) {
+                            forceLogoutLocal("Требуется обновление приложения")
+                        }
+                        return@launch
+                    }
+
                     val internalData: Map<String, Any> = hashMapOf(
                         "lastSeen" to System.currentTimeMillis(),
                         "activeDeviceId" to deviceId,
-                        "appVersion" to (telemetry["appVersion"]?.toString() ?: "")
+                        "appVersion" to currentVersion
                     )
                     firestore.collection("internal_users").document(uid)
                         .update(internalData)
                         .await()
                     Log.d(TAG, "Heartbeat OK: lastSeen updated for $uid")
 
-                    // device_telemetry: все телеметрийные поля + GPS
                     try {
                         val location = telemetryManager.getCurrentLocation()
                         val telemetryFields = hashMapOf<String, Any?>(
@@ -233,7 +301,7 @@ class AuthManager(
                             "deviceInfo" to telemetry["deviceInfo"],
                             "totalRamInGb" to telemetry["totalRamInGb"],
                             "activeDeviceId" to deviceId,
-                            "appVersion" to (telemetry["appVersion"]?.toString() ?: ""),
+                            "appVersion" to currentVersion,
                             "locationLat" to (location?.latitude ?: FieldValue.delete()),
                             "locationLng" to (location?.longitude ?: FieldValue.delete()),
                             "locationTimestamp" to (location?.timestamp ?: FieldValue.delete()),
@@ -268,32 +336,38 @@ class AuthManager(
     }
 
     fun login(username: String, password: String) {
-        _authState.value = _authState.value.copy(isLoading = true, error = null)
+        _authState.value = _authState.value.copy(isLoading = true, error = null, versionError = false)
         isKickedByAnotherDevice = false
 
         scope.launch {
             try {
+                // ⭐ ПРОВЕРКА ВЕРСИИ ПРИЛОЖЕНИЯ ПЕРЕД ЛОГИНОМ
+                val versionCheckPassed = checkVersionAndBlock()
+                if (!versionCheckPassed) {
+                    return@launch
+                }
+
                 val querySnapshot = firestore.collection("internal_users")
                     .whereEqualTo("username", username)
                     .limit(1)
                     .get()
                     .await()
+
                 if (querySnapshot.isEmpty) throw Exception("Пользователь не найден")
+
                 val userDocument = querySnapshot.documents.first()
                 val correctPassword = userDocument.getString("password")
+
                 if (correctPassword == password) {
                     val userId = userDocument.id
+                    val currentVersion = getCurrentAppVersion()
 
-                    // ═══════════════════════════════════════════════════════════
-                    // ПРИВЯЗКА УСТРОЙСТВА — записываем наш deviceId
-                    // Предыдущее устройство увидит изменение через
-                    // snapshot listener и автоматически разлогинится
-                    // ═══════════════════════════════════════════════════════════
                     firestore.collection("internal_users").document(userId)
                         .update(
                             mapOf(
                                 "activeDeviceId" to deviceId,
-                                "lastSeen" to System.currentTimeMillis()
+                                "lastSeen" to System.currentTimeMillis(),
+                                "appVersion" to currentVersion
                             )
                         )
                         .await()
@@ -312,17 +386,14 @@ class AuthManager(
                     _authState.value = AuthState(
                         isLoggedIn = false,
                         error = e.message ?: "Ошибка входа",
-                        isLoading = false
+                        isLoading = false,
+                        versionError = false
                     )
                 }
             }
         }
     }
 
-    /**
-     * Принудительный локальный logout — БЕЗ сброса activeDeviceId в Firestore.
-     * Вызывается когда другое устройство перехватило сессию.
-     */
     private suspend fun forceLogoutLocal(errorMessage: String) {
         heartbeatJob?.cancel()
         heartbeatJob = null
@@ -338,19 +409,18 @@ class AuthManager(
             _authState.value = AuthState(
                 isLoggedIn = false,
                 isLoading = false,
-                error = errorMessage
+                error = errorMessage,
+                versionError = errorMessage.contains("версия", ignoreCase = true) ||
+                        errorMessage.contains("обновление", ignoreCase = true)
             )
         }
     }
 
     fun logout() {
-        // Останавливаем heartbeat и сбрасываем lastSeen
         heartbeatJob?.cancel()
         heartbeatJob = null
         goOffline()
 
-        // При ручном logout — очищаем activeDeviceId, чтобы можно было
-        // залогиниться с любого устройства
         val uid = _authState.value.userId
         if (uid != null && !isKickedByAnotherDevice) {
             scope.launch {
@@ -382,7 +452,7 @@ class AuthManager(
     }
 
     fun clearError() {
-        _authState.value = _authState.value.copy(error = null)
+        _authState.value = _authState.value.copy(error = null, versionError = false)
     }
 
     fun startShiftLocally() {

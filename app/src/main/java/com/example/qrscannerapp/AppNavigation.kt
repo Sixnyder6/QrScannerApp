@@ -760,7 +760,7 @@ fun MainApp(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 28.sp
                             )
-                            if (info.releaseNotes.isNotBlank()) {
+                            if (!info.releaseNotes.isNullOrBlank()) {
                                 Spacer(Modifier.height(12.dp))
                                 Text(
                                     info.releaseNotes,

@@ -60,34 +60,27 @@ fun ChatNotificationBanner(
         modifier = modifier
             .fillMaxWidth()
             .zIndex(100f)
-            .statusBarsPadding()         // правильный отступ под статусбар
+            .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
         notification?.let { notif ->
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .wrapContentHeight()   // ИСПРАВЛЕНО: высота по контенту, не на весь экран
-                    .clickable { onTap(); onDismiss() },
+                    .wrapContentHeight()
+                    .clickable { onTap() },  // ← ИСПРАВЛЕНО: убран onDismiss() из clickable
                 shape = RoundedCornerShape(16.dp),
                 color = StardustModalBg.copy(alpha = 0.97f),
                 shadowElevation = 8.dp,
                 tonalElevation = 0.dp
             ) {
-                // Внутренний Row — фиксированная высота, всё компактно
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .wrapContentHeight()
-                        .padding(start = 0.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Цветная полоска слева — ФИКСИРОВАННАЯ высота, не fillMaxHeight
+                // Используем Box для правильного позиционирования цветной полоски
+                Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
+                    // Цветная полоска слева — теперь растягивается на всю высоту Box
                     Box(
                         modifier = Modifier
+                            .matchParentSize()
                             .width(3.dp)
-                            .height(42.dp)   // ИСПРАВЛЕНО: фиксированная высота вместо fillMaxHeight
                             .clip(RoundedCornerShape(2.dp))
                             .background(
                                 if (notif.isMention)
@@ -97,77 +90,87 @@ fun ChatNotificationBanner(
                             )
                     )
 
-                    // Аватар — эмодзи комнаты
-                    Box(
+                    // Контент
+                    Row(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(notif.accentColor.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .wrapContentHeight()
+                            .padding(start = 12.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(notif.roomEmoji, fontSize = 17.sp)
-                    }
-
-                    // Текст
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        // Аватар — эмодзи комнаты
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(notif.accentColor.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                notif.senderName,
-                                color = StardustTextPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            if (notif.isMention) {
-                                Surface(
-                                    color = Color(0xFFFF6B6B).copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text(
-                                        "@упомянул",
-                                        color = Color(0xFFFF6B6B),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                    )
+                            Text(notif.roomEmoji, fontSize = 17.sp)
+                        }
+
+                        // Текст
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(
+                                    notif.senderName,
+                                    color = StardustTextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (notif.isMention) {
+                                    Surface(
+                                        color = Color(0xFFFF6B6B).copy(alpha = 0.2f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            "@упомянул",
+                                            color = Color(0xFFFF6B6B),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
                                 }
+                                Text(
+                                    "${notif.roomEmoji} ${notif.roomName}",
+                                    color = notif.accentColor.copy(alpha = 0.7f),
+                                    fontSize = 10.sp,
+                                    maxLines = 1
+                                )
                             }
                             Text(
-                                "${notif.roomEmoji} ${notif.roomName}",
-                                color = notif.accentColor.copy(alpha = 0.7f),
-                                fontSize = 10.sp,
-                                maxLines = 1
+                                notif.message,
+                                color = StardustTextSecondary,
+                                fontSize = 13.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                lineHeight = 17.sp
                             )
                         }
-                        Text(
-                            notif.message,
-                            color = StardustTextSecondary,
-                            fontSize = 13.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            lineHeight = 17.sp
-                        )
-                    }
 
-                    // Кнопка закрыть
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Закрыть",
-                            tint = StardustTextSecondary.copy(alpha = 0.5f),
-                            modifier = Modifier.size(14.dp)
-                        )
+                        // Кнопка закрыть
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                tint = StardustTextSecondary.copy(alpha = 0.5f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }

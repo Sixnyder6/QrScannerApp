@@ -1,6 +1,3 @@
-// --- Файл UpdateManager.kt ---
-// --- Версия с добавленным полем apkSize ---
-
 package com.example.qrscannerapp
 
 import android.content.Context
@@ -27,31 +24,23 @@ import java.io.IOException
 import java.net.URL
 import javax.inject.Inject
 
-// НОВЫЙ КЛАСС для одного пункта в списке изменений
 data class ReleaseItem(
-    @SerializedName("type") val type: String, // "new", "fix", "beta"
-    @SerializedName("text") val text: String  // "Описание изменения"
+    @SerializedName("type") val type: String,
+    @SerializedName("text") val text: String
 )
 
-// ОБНОВЛЕННЫЙ КЛАСС с информацией об обновлении
 data class UpdateInfo(
     @SerializedName("latestVersionCode") val latestVersionCode: Int,
     @SerializedName("latestVersionName") val latestVersionName: String,
     @SerializedName("apkUrl") val apkUrl: String,
-
-    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
-    // НОВОЕ ПОЛЕ: Размер файла для отображения на кнопке
     @SerializedName("apkSize") val apkSize: String? = null,
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
-
-    // Старое поле. Оставляем для совместимости и простых заметок.
     @SerializedName("releaseNotes") val releaseNotes: String,
-
-    // НОВОЕ ПОЛЕ: Список ссылок на картинки для слайдера
     @SerializedName("imageUrls") val imageUrls: List<String>? = null,
+    @SerializedName("releaseItems") val releaseItems: List<ReleaseItem>? = null,
 
-    // НОВОЕ ПОЛЕ: Структурированный список изменений с тегами
-    @SerializedName("releaseItems") val releaseItems: List<ReleaseItem>? = null
+    // НОВЫЕ ПОЛЯ ДЛЯ ЗАЩИТЫ ОТ СТАРЫХ ВЕРСИЙ
+    @SerializedName("minRequiredVersionCode") val minRequiredVersionCode: Int = 0,
+    @SerializedName("minRequiredVersionName") val minRequiredVersionName: String = "0"
 )
 
 sealed interface UpdateState {
@@ -64,6 +53,12 @@ sealed interface UpdateState {
     data class Error(val message: String) : UpdateState
 }
 
+sealed interface VersionCheckResult {
+    object Ok : VersionCheckResult
+    data class Outdated(val requiredVersionCode: Int, val requiredVersionName: String, val currentVersionCode: Int, val currentVersionName: String) : VersionCheckResult
+    data class Error(val message: String) : VersionCheckResult
+}
+
 @HiltViewModel
 class UpdateManager @Inject constructor(
     @ApplicationContext private val context: Context
@@ -72,6 +67,9 @@ class UpdateManager @Inject constructor(
     private val gson = Gson()
     private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val updateState = _updateState.asStateFlow()
+
+    private val _minRequiredVersion = MutableStateFlow<VersionCheckResult?>(null)
+    val minRequiredVersion = _minRequiredVersion.asStateFlow()
 
     private val workManager = WorkManager.getInstance(context)
 
@@ -109,7 +107,7 @@ class UpdateManager @Inject constructor(
                     WorkInfo.State.CANCELLED -> {
                         resetState()
                     }
-                    else -> { /* BLOCKED - ничего не делаем */ }
+                    else -> { }
                 }
             }
         }
@@ -165,6 +163,47 @@ class UpdateManager @Inject constructor(
         }
     }
 
+    // НОВЫЙ МЕТОД: Проверка минимальной версии с сервера
+    suspend fun checkMinRequiredVersion(): VersionCheckResult {
+        return withContext(Dispatchers.IO) {
+            try {
+                val jsonStr = URL(UPDATE_URL).readText()
+                val updateInfo = gson.fromJson(jsonStr, UpdateInfo::class.java)
+                val currentVersionCode = getCurrentVersionCode()
+                val currentVersionName = getCurrentVersionName()
+
+                if (currentVersionCode < updateInfo.minRequiredVersionCode) {
+                    VersionCheckResult.Outdated(
+                        requiredVersionCode = updateInfo.minRequiredVersionCode,
+                        requiredVersionName = updateInfo.minRequiredVersionName,
+                        currentVersionCode = currentVersionCode,
+                        currentVersionName = currentVersionName
+                    )
+                } else {
+                    VersionCheckResult.Ok
+                }
+            } catch (e: Exception) {
+                Log.e("UpdateManager", "Min version check failed", e)
+                VersionCheckResult.Error("Ошибка проверки версии: ${e.message}")
+            }
+        }
+    }
+
+    // НОВЫЙ МЕТОД: Быстрая проверка без интернета (использует последние известные данные)
+    fun isAppOutdatedCached(minRequiredVersionCode: Int): Boolean {
+        return getCurrentVersionCode() < minRequiredVersionCode
+    }
+
+    // НОВЫЙ МЕТОД: Получить текущую версию для отправки на сервер
+    fun getCurrentVersionForServer(): Map<String, Any> {
+        return mapOf(
+            "versionCode" to getCurrentVersionCode(),
+            "versionName" to getCurrentVersionName(),
+            "androidSdk" to Build.VERSION.SDK_INT,
+            "deviceInfo" to "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}"
+        )
+    }
+
     fun installApk(uri: Uri) {
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
@@ -203,5 +242,11 @@ class UpdateManager @Inject constructor(
                 context.packageManager.getPackageInfo(context.packageName, 0).versionCode
             }
         } catch (e: Exception) { -1 }
+    }
+
+    private fun getCurrentVersionName(): String {
+        return try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
+        } catch (e: Exception) { "0" }
     }
 }

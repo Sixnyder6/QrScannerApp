@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.qrscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 37
-        versionName = "1.4.7"
+        versionCode = 38
+        versionName = "1.4.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -82,6 +82,8 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+        //аутефикация для входа в базу гугл
+    implementation("com.google.firebase:firebase-auth-ktx:23.0.0")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")

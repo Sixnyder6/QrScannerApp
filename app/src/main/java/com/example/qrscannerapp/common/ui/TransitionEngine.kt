@@ -3,8 +3,11 @@ package com.example.qrscannerapp.common.ui
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -12,210 +15,688 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavBackStackEntry
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
 
 // =============================================================================
-// TRANSITION ENGINE — iOS-STYLE SMOOTH NAVIGATION
-// =============================================================================
-//
-// Что делает:
-// 1) slideInFromRight / slideOutToRight — переходы "как на айфоне"
-// 2) Parallax-эффект: текущий экран уходит влево на 25% и затемняется
-// 3) Spring-кривые вместо линейных tween — пружинистость как у iOS
-// 4) StaggeredContent — контент экрана появляется по очереди (stagger)
-// 5) 120fps-ready: используем spring() вместо tween — нет привязки к duration
+// TRANSITION ENGINE — ELEGANT & FLUID
 // =============================================================================
 
-// ─── iOS-LIKE SPRING SPEC ────────────────────────────────────────────────────
-// Эти параметры максимально близки к UIKit spring animation
+// --- REFINED SPRING SPECS ---
 
-/**
- * Пружина для базовых элементов
- */
-private val NavigationSpring = spring<Float>(
-    dampingRatio = 0.86f,
-    stiffness = 300f
-)
-
-/**
- * Пружина для навигационных переходов.
- * Чуть более плотная пружина: меньше "желе", более собранное движение
- */
 private val NavigationSpringInt = spring<IntOffset>(
+    dampingRatio = 0.92f,
+    stiffness = 250f
+)
+
+private val AlphaEasing = CubicBezierEasing(0.33f, 0.0f, 0.67f, 1f)
+
+val MicroSpring = spring<Float>(
+    dampingRatio = 0.72f,
+    stiffness = 600f
+)
+
+private val SlowElegantSpring = spring<Float>(
     dampingRatio = 0.9f,
-    stiffness = 280f
+    stiffness = 180f
 )
 
-/**
- * Специальная кривая для прозрачности, чтобы она совпадала с пружиной по времени
- */
-private val AlphaEasing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
+// =============================================================================
+// 1. SWIPE BACK — SMOOTH & FORGIVING
+// =============================================================================
 
-/**
- * Пружина для появления контента внутри экрана (stagger).
- * Более мягкая — красиво "приземляется"
- */
-private val ContentSpring = spring<Float>(
-    dampingRatio = 0.82f,
-    stiffness = 220f
+class SwipeBackState(
+    private val onBack: () -> Unit,
+    private val threshold: Float = 0.3f
+) {
+    var progress by mutableFloatStateOf(0f)
+        private set
+
+    var isGestureActive by mutableStateOf(false)
+        private set
+
+    private val animatableProgress = Animatable(0f)
+
+    fun startGesture() {
+        isGestureActive = true
+        progress = 0f
+    }
+
+    fun updateProgress(delta: Float, totalWidth: Float) {
+        progress = (delta / totalWidth).coerceIn(0f, 1.15f)
+    }
+
+    fun endGesture(scope: kotlinx.coroutines.CoroutineScope) {
+        isGestureActive = false
+        val shouldComplete = progress > threshold
+
+        scope.launch {
+            if (shouldComplete) {
+                animatableProgress.snapTo(progress)
+                animatableProgress.animateTo(
+                    targetValue = 1.15f,
+                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 280f)
+                )
+                onBack()
+                animatableProgress.snapTo(0f)
+                progress = 0f
+            } else {
+                animatableProgress.snapTo(progress)
+                animatableProgress.animateTo(
+                    targetValue = 0f,
+                    animationSpec = spring(dampingRatio = 0.78f, stiffness = 320f)
+                )
+                progress = 0f
+            }
+        }
+    }
+
+    fun cancelGesture() {
+        isGestureActive = false
+        progress = 0f
+    }
+
+    fun getAnimatedProgress(): Float {
+        return if (isGestureActive) progress else animatableProgress.value
+    }
+}
+
+@Composable
+fun rememberSwipeBackState(onBack: () -> Unit): SwipeBackState {
+    return remember { SwipeBackState(onBack) }
+}
+
+@Composable
+fun Modifier.interactiveSwipeBack(
+    swipeBackState: SwipeBackState,
+    enabled: Boolean = true
+): Modifier {
+    val scope = rememberCoroutineScope()
+
+    return this.then(
+        if (enabled) {
+            Modifier.pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        swipeBackState.startGesture()
+                    },
+                    onDragEnd = {
+                        swipeBackState.endGesture(scope)
+                    },
+                    onDragCancel = {
+                        swipeBackState.cancelGesture()
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        swipeBackState.updateProgress(
+                            swipeBackState.progress * size.width + dragAmount,
+                            size.width.toFloat()
+                        )
+                    }
+                )
+            }
+        } else {
+            Modifier
+        }
+    )
+}
+
+// =============================================================================
+// 2. TACTILE BUTTON — REFINED FEEL
+// =============================================================================
+
+@Composable
+fun TactileButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    scaleOnPress: Float = 0.96f,
+    brightnessOnPress: Float = 0.85f,
+    content: @Composable () -> Unit
+) {
+    var isPressed by remember { mutableStateOf(false) }
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && enabled) scaleOnPress else 1f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f),
+        label = "ts"
+    )
+
+    val buttonAlpha by animateFloatAsState(
+        targetValue = if (isPressed && enabled) brightnessOnPress else 1f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f),
+        label = "tb"
+    )
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                alpha = buttonAlpha
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        when {
+                            event.changes.any { it.pressed } -> isPressed = true
+                            event.changes.any { !it.pressed } -> {
+                                if (isPressed) {
+                                    onClick()
+                                    isPressed = false
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+    ) {
+        content()
+    }
+}
+
+// =============================================================================
+// 3. BOUNCY ICON — PLAYFUL BUT CONTROLLED
+// =============================================================================
+
+@Composable
+fun BouncyIcon(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    var isBouncing by remember { mutableStateOf(false) }
+
+    val scale by animateFloatAsState(
+        targetValue = if (isBouncing) 1.25f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 550f),
+        label = "bs",
+        finishedListener = { isBouncing = false }
+    )
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.any { it.pressed && !it.previousPressed }) {
+                            isBouncing = true
+                            onClick()
+                        }
+                    }
+                }
+            }
+    ) {
+        content()
+    }
+}
+
+// =============================================================================
+// 4. SWIPE BACK INDICATOR — ELEGANT FADE
+// =============================================================================
+
+@Composable
+fun SwipeBackIndicator(
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    if (progress <= 0f) return
+
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+        label = "si"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(3.dp)
+            .alpha((animatedProgress * 0.7f).coerceIn(0f, 1f))
+            .background(Color.White.copy(alpha = animatedProgress.coerceIn(0f, 1f)))
+    )
+}
+
+@Composable
+fun BackArrowIndicator(
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    val arrowAlpha by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+        label = "aa"
+    )
+
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .graphicsLayer {
+                alpha = arrowAlpha
+                translationX = -progress.coerceIn(0f, 1f) * 120f
+            }
+            .background(
+                color = Color.White.copy(alpha = 0.25f * arrowAlpha),
+                shape = RoundedCornerShape(20.dp)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "\u2039",
+            color = Color.White.copy(alpha = arrowAlpha),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+// =============================================================================
+// 5. PULL-TO-REFRESH
+// =============================================================================
+
+@Composable
+fun PullToRefreshIndicator(
+    isRefreshing: Boolean,
+    pullProgress: Float,
+    modifier: Modifier = Modifier
+) {
+    val rotation by animateFloatAsState(
+        targetValue = if (isRefreshing) 360f else 0f,
+        animationSpec = if (isRefreshing) {
+            infiniteRepeatable(animation = tween(1200, easing = LinearEasing))
+        } else {
+            spring(dampingRatio = 0.8f, stiffness = 250f)
+        },
+        label = "rr"
+    )
+
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .graphicsLayer {
+                rotationZ = rotation
+                alpha = (pullProgress * 2.2f).coerceIn(0f, 1f)
+            }
+            .background(
+                color = Color.White.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(22.dp)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = if (isRefreshing) "\u21BB" else "\u2193",
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Light
+        )
+    }
+}
+
+// =============================================================================
+// 6. CONFETTI — CANVAS-BASED, GRACEFUL
+// =============================================================================
+
+class ConfettiParticle(
+    val x: Float,
+    val y: Float,
+    val velocityX: Float,
+    val velocityY: Float,
+    val color: Color,
+    val size: Float,
+    val rotation: Float,
+    val rotationSpeed: Float
 )
 
-/**
- * Быстрая пружина для мелких элементов (иконки, бейджи)
- */
-val SnapSpring = spring<Float>(
-    dampingRatio = 0.75f,
-    stiffness = 500f
-)
+@Composable
+fun ConfettiEffect(
+    trigger: Boolean,
+    modifier: Modifier = Modifier,
+    particleCount: Int = 30
+) {
+    var show by remember { mutableStateOf(false) }
+    val animatedProgress = remember { Animatable(0f) }
 
-// ─── NAVIGATION TRANSITIONS ─────────────────────────────────────────────────
+    val particles = remember {
+        List(particleCount) {
+            ConfettiParticle(
+                x = Random.nextFloat() * 0.5f + 0.25f,
+                y = Random.nextFloat() * 0.3f + 0.25f,
+                velocityX = (Random.nextFloat() - 0.5f) * 0.7f,
+                velocityY = (Random.nextFloat() - 0.5f) * -0.7f - 0.25f,
+                color = Color.hsl(
+                    hue = Random.nextFloat() * 360f,
+                    saturation = 0.75f,
+                    lightness = 0.65f
+                ),
+                size = Random.nextFloat() * 7f + 3f,
+                rotation = Random.nextFloat() * 360f,
+                rotationSpeed = (Random.nextFloat() - 0.5f) * 540f
+            )
+        }
+    }
 
-/**
- * FORWARD: новый экран слайдит справа → налево
- * ФИКС: Плавное появление альфы синхронизировано с движением.
- */
+    LaunchedEffect(trigger) {
+        if (trigger) {
+            show = true
+            animatedProgress.snapTo(0f)
+            animatedProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(1800, easing = FastOutSlowInEasing)
+            )
+            delay(600)
+            show = false
+        }
+    }
+
+    if (!show) return
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .drawWithContent {
+                drawContent()
+                val progress = animatedProgress.value
+                val fadeOut = if (progress > 0.65f) 1f - ((progress - 0.65f) / 0.35f) else 1f
+
+                particles.forEach { particle ->
+                    val cx = (particle.x + particle.velocityX * progress) * size.width
+                    val cy = (particle.y + particle.velocityY * progress) * size.height
+                    val rot = particle.rotation + particle.rotationSpeed * progress
+                    val alpha = ((1f - progress * 0.8f) * fadeOut).coerceIn(0f, 1f)
+
+                    drawParticle(cx, cy, particle.size, rot, particle.color, alpha)
+                }
+            }
+    )
+}
+
+private fun DrawScope.drawParticle(
+    x: Float, y: Float, size: Float, rotation: Float, color: Color, alpha: Float
+) {
+    val half = size / 2f
+    val angle = Math.toRadians(rotation.toDouble())
+    val cosA = cos(angle).toFloat()
+    val sinA = sin(angle).toFloat()
+
+    val p1 = androidx.compose.ui.geometry.Offset(
+        x + (-half * cosA - (-half * 0.45f) * sinA),
+        y + (-half * sinA + (-half * 0.45f) * cosA)
+    )
+    val p2 = androidx.compose.ui.geometry.Offset(
+        x + (half * cosA - (-half * 0.45f) * sinA),
+        y + (half * sinA + (-half * 0.45f) * cosA)
+    )
+    val p3 = androidx.compose.ui.geometry.Offset(
+        x + (half * cosA - (half * 0.45f) * sinA),
+        y + (half * sinA + (half * 0.45f) * cosA)
+    )
+    val p4 = androidx.compose.ui.geometry.Offset(
+        x + (-half * cosA - (half * 0.45f) * sinA),
+        y + (-half * sinA + (half * 0.45f) * cosA)
+    )
+
+    val path = androidx.compose.ui.graphics.Path().apply {
+        moveTo(p1.x, p1.y)
+        lineTo(p2.x, p2.y)
+        lineTo(p3.x, p3.y)
+        lineTo(p4.x, p4.y)
+        close()
+    }
+    drawPath(path, color.copy(alpha = alpha))
+}
+
+// =============================================================================
+// 7. TILT CARD — BUTTERY SMOOTH
+// =============================================================================
+
+@Composable
+fun TiltCard(
+    modifier: Modifier = Modifier,
+    maxTilt: Float = 8f,
+    content: @Composable () -> Unit
+) {
+    val rotationX = remember { Animatable(0f) }
+    val rotationY = remember { Animatable(0f) }
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                this.rotationX = rotationX.value
+                this.rotationY = rotationY.value
+                cameraDistance = 14f * density.density
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+
+                        if (change.pressed) {
+                            val cx = size.width / 2f
+                            val cy = size.height / 2f
+                            val ty = ((change.position.x - cx) / cx) * maxTilt
+                            val tx = -((change.position.y - cy) / cy) * maxTilt
+
+                            scope.launch {
+                                rotationX.snapTo(tx)
+                                rotationY.snapTo(ty)
+                            }
+                        } else {
+                            scope.launch {
+                                rotationX.animateTo(
+                                    0f,
+                                    animationSpec = spring(dampingRatio = 0.65f, stiffness = 350f)
+                                )
+                                rotationY.animateTo(
+                                    0f,
+                                    animationSpec = spring(dampingRatio = 0.65f, stiffness = 350f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+    ) {
+        content()
+    }
+}
+
+// =============================================================================
+// 8. PARALLAX SCROLL
+// =============================================================================
+
+@Composable
+fun ParallaxImage(
+    scrollOffset: Float,
+    parallaxFactor: Float = 0.45f,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val animatedOffset by animateFloatAsState(
+        targetValue = scrollOffset * parallaxFactor,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 200f),
+        label = "po"
+    )
+
+    Box(
+        modifier = modifier.graphicsLayer {
+            translationY = animatedOffset
+        }
+    ) {
+        content()
+    }
+}
+
+// =============================================================================
+// 9. GLOW EFFECT — SOFT & ATMOSPHERIC
+// =============================================================================
+
+@Composable
+fun GlowEffect(
+    isActive: Boolean,
+    color: Color = Color.White,
+    modifier: Modifier = Modifier
+) {
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isActive) 0.25f else 0f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f),
+        label = "ga"
+    )
+
+    Box(
+        modifier = modifier.drawWithContent {
+            drawContent()
+            drawCircle(
+                color = color.copy(alpha = glowAlpha),
+                radius = size.minDimension * 0.55f,
+                center = center
+            )
+        }
+    )
+}
+
+// =============================================================================
+// 10. PULSATING RIPPLE — GENTLE PULSE
+// =============================================================================
+
+@Composable
+fun PulsatingRipple(
+    isActive: Boolean,
+    color: Color = Color.White,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "rip")
+
+    val rippleScale by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "rs"
+    )
+
+    val rippleAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ra"
+    )
+
+    if (isActive) {
+        Box(
+            modifier = modifier
+                .graphicsLayer {
+                    scaleX = rippleScale
+                    scaleY = rippleScale
+                    alpha = rippleAlpha
+                }
+                .background(color, CircleShape)
+        )
+    }
+}
+
+// =============================================================================
+// NAVIGATION TRANSITIONS — ELEVATED
+// =============================================================================
+
 fun iosSlideIn(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
     slideIntoContainer(
         towards = AnimatedContentTransitionScope.SlideDirection.Left,
         animationSpec = NavigationSpringInt,
-        initialOffset = { fullWidth -> fullWidth } // Начинаем ровно из-за правого края
-    ) + fadeIn(
-        animationSpec = tween(350, easing = AlphaEasing) // Растянули fade, чтобы не было "вспышки"
-    )
+        initialOffset = { it }
+    ) + fadeIn(animationSpec = tween(400, easing = AlphaEasing))
 }
 
-/**
- * FORWARD: текущий экран уходит влево (parallax).
- * ФИКС: Уменьшили параллакс до 25%, синхронизировали затемнение.
- */
 fun iosSlideOutParallax(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
     slideOutOfContainer(
         towards = AnimatedContentTransitionScope.SlideDirection.Left,
-        animationSpec = NavigationSpringInt,
-        targetOffset = { fullWidth -> -(fullWidth * 0.25f).toInt() } // 25% параллакс
-    ) + fadeOut(
-        animationSpec = tween(350, easing = AlphaEasing),
-        targetAlpha = 0.6f // Эмитируем черную полупрозрачную тень iOS
-    )
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 250f),
+        targetOffset = { -(it * 0.3f).toInt() }
+    ) + fadeOut(animationSpec = tween(400, easing = AlphaEasing), targetAlpha = 0.5f)
 }
 
-/**
- * BACK: экран возвращается слева (parallax).
- * ФИКС: Стартуем с 25%, синхронно высветляемся.
- */
 fun iosPopEnterParallax(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
     slideIntoContainer(
         towards = AnimatedContentTransitionScope.SlideDirection.Right,
-        animationSpec = NavigationSpringInt,
-        initialOffset = { fullWidth -> -(fullWidth * 0.25f).toInt() }
-    ) + fadeIn(
-        animationSpec = tween(350, easing = AlphaEasing),
-        initialAlpha = 0.6f
-    )
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 250f),
+        initialOffset = { -(it * 0.3f).toInt() }
+    ) + fadeIn(animationSpec = tween(400, easing = AlphaEasing), initialAlpha = 0.5f)
 }
 
-/**
- * BACK: текущий экран уходит вправо.
- * ФИКС КРИТИЧЕСКИЙ: Убрали fadeOut! На iOS закрывающийся экран НЕ становится прозрачным.
- * Он просто уезжает, открывая нижний слой.
- */
 fun iosPopSlideOut(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
     slideOutOfContainer(
         towards = AnimatedContentTransitionScope.SlideDirection.Right,
         animationSpec = NavigationSpringInt,
-        targetOffset = { fullWidth -> fullWidth }
+        targetOffset = { it }
     )
-    // НЕТ + fadeOut(...) — экран плотно уезжает без растворения
 }
 
-// ─── macOS / iOS ZOOM TRANSITIONS (scale in/out, no slide jank) ──────────────
-
-/**
- * FORWARD enter: экран "разжимается" из центра (как открытие окна на macOS)
- */
 fun macZoomIn(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing)) +
-    scaleIn(
-        animationSpec = spring(dampingRatio = 0.80f, stiffness = 420f),
-        initialScale = 0.88f
-    )
+    fadeIn(animationSpec = tween(300, easing = FastOutSlowInEasing)) +
+            scaleIn(animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f), initialScale = 0.9f)
 }
 
-/**
- * FORWARD exit: текущий экран чуть "уходит вглубь" (iOS card depth)
- */
 fun macZoomExitShrink(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    fadeOut(animationSpec = tween(200, easing = FastOutLinearInEasing), targetAlpha = 0.45f) +
-    scaleOut(
-        animationSpec = tween(200, easing = FastOutLinearInEasing),
-        targetScale = 0.95f
-    )
+    fadeOut(animationSpec = tween(250, easing = FastOutLinearInEasing), targetAlpha = 0.4f) +
+            scaleOut(animationSpec = tween(250, easing = FastOutLinearInEasing), targetScale = 0.94f)
 }
 
-/**
- * BACK enter: фоновый экран "возвращается" из глубины
- */
 fun macZoomPopEnter(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing), initialAlpha = 0.45f) +
-    scaleIn(
-        animationSpec = tween(260, easing = FastOutSlowInEasing),
-        initialScale = 0.95f
-    )
+    fadeIn(animationSpec = tween(300, easing = FastOutSlowInEasing), initialAlpha = 0.4f) +
+            scaleIn(animationSpec = tween(300, easing = FastOutSlowInEasing), initialScale = 0.94f)
 }
 
-/**
- * BACK exit: текущий экран "сжимается" и исчезает
- */
 fun macZoomPopExit(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    fadeOut(animationSpec = tween(220, easing = FastOutLinearInEasing)) +
-    scaleOut(
-        animationSpec = spring(dampingRatio = 0.80f, stiffness = 420f),
-        targetScale = 0.88f
-    )
+    fadeOut(animationSpec = tween(250, easing = FastOutLinearInEasing)) +
+            scaleOut(animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f), targetScale = 0.9f)
 }
 
-// ─── Упрощённые fade-переходы (для модальных/особых экранов) ─────────────────
-
-/**
- * ФИКС: Уменьшили scale. 0.97 смотрится солиднее и не укачивает.
- */
 fun smoothFadeIn(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    fadeIn(animationSpec = tween(250, easing = LinearOutSlowInEasing)) +
-            scaleIn(
-                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
-                initialScale = 0.97f
-            )
+    fadeIn(animationSpec = tween(300, easing = LinearOutSlowInEasing)) +
+            scaleIn(animationSpec = spring(dampingRatio = 0.9f, stiffness = 250f), initialScale = 0.97f)
 }
 
 fun smoothFadeOut(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    fadeOut(animationSpec = tween(200, easing = FastOutLinearInEasing)) +
-            scaleOut(
-                animationSpec = tween(200, easing = FastOutLinearInEasing),
-                targetScale = 0.98f
-            )
+    fadeOut(animationSpec = tween(250, easing = FastOutLinearInEasing)) +
+            scaleOut(animationSpec = tween(250, easing = FastOutLinearInEasing), targetScale = 0.98f)
 }
 
-// ─── STAGGERED CONTENT APPEARANCE ────────────────────────────────────────────
-//
-// Оборачиваешь элементы экрана в StaggeredItem — они появляются по очереди
-// с задержкой. Это создаёт эффект "каскадного" появления как в iOS Settings.
+// =============================================================================
+// STAGGERED CONTENT
+// =============================================================================
 
-/**
- * Контейнер для staggered-анимации.
- * @param itemCount сколько элементов будет внутри (для расчёта задержек)
- * @param baseDelayMs задержка между элементами
- * @param initialDelayMs задержка перед первым элементом (дать навигации закончить)
- */
 @Composable
 fun StaggeredColumn(
     modifier: Modifier = Modifier,
     itemCount: Int = 8,
-    baseDelayMs: Long = 35L,
-    initialDelayMs: Long = 80L,
+    baseDelayMs: Long = 40L,
+    initialDelayMs: Long = 60L,
     content: @Composable StaggeredScope.() -> Unit
 ) {
     val scope = remember(itemCount) { StaggeredScopeImpl(itemCount, baseDelayMs, initialDelayMs) }
@@ -225,16 +706,8 @@ fun StaggeredColumn(
 }
 
 interface StaggeredScope {
-    /**
-     * Оборачивает элемент в анимацию появления.
-     * @param index порядковый номер (0, 1, 2, ...)
-     */
     @Composable
-    fun StaggeredItem(
-        index: Int,
-        modifier: Modifier,
-        content: @Composable () -> Unit
-    )
+    fun StaggeredItem(index: Int, modifier: Modifier, content: @Composable () -> Unit)
 }
 
 private class StaggeredScopeImpl(
@@ -244,11 +717,7 @@ private class StaggeredScopeImpl(
 ) : StaggeredScope {
 
     @Composable
-    override fun StaggeredItem(
-        index: Int,
-        modifier: Modifier,
-        content: @Composable () -> Unit
-    ) {
+    override fun StaggeredItem(index: Int, modifier: Modifier, content: @Composable () -> Unit) {
         var visible by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
@@ -258,33 +727,30 @@ private class StaggeredScopeImpl(
 
         val alpha by animateFloatAsState(
             targetValue = if (visible) 1f else 0f,
-            animationSpec = ContentSpring,
-            label = "stagger_alpha_$index"
+            animationSpec = SlowElegantSpring,
+            label = "sa"
         )
         val translationY by animateFloatAsState(
-            targetValue = if (visible) 0f else 24f,
-            animationSpec = ContentSpring,
-            label = "stagger_y_$index"
+            targetValue = if (visible) 0f else 20f,
+            animationSpec = SlowElegantSpring,
+            label = "sy"
         )
 
         Box(
-            modifier = modifier
-                .graphicsLayer {
-                    this.alpha = alpha
-                    this.translationY = translationY
-                }
+            modifier = modifier.graphicsLayer {
+                this.alpha = alpha
+                this.translationY = translationY
+            }
         ) {
             content()
         }
     }
 }
 
-// ─── ANIMATED VISIBILITY HELPERS ─────────────────────────────────────────────
+// =============================================================================
+// HELPERS
+// =============================================================================
 
-/**
- * Плавное появление с пружиной (для любых composable)
- * Используй для: карточек, баннеров, FAB, модалок
- */
 @Composable
 fun SpringAnimatedVisibility(
     visible: Boolean,
@@ -294,35 +760,28 @@ fun SpringAnimatedVisibility(
     AnimatedVisibility(
         visible = visible,
         modifier = modifier,
-        enter = fadeIn(animationSpec = ContentSpring) +
+        enter = fadeIn(animationSpec = SlowElegantSpring) +
                 slideInVertically(
-                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 250f),
-                    initialOffsetY = { it / 6 }
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 220f),
+                    initialOffsetY = { it / 8 }
                 ),
-        exit = fadeOut(animationSpec = tween(180)) +
+        exit = fadeOut(animationSpec = tween(200)) +
                 slideOutVertically(
-                    animationSpec = tween(180),
-                    targetOffsetY = { it / 8 }
+                    animationSpec = tween(200),
+                    targetOffsetY = { it / 10 }
                 ),
         content = content
     )
 }
 
-/**
- * Shimmer-скелетон пока данные грузятся.
- * Положи вместо контента — будет мерцающий прямоугольник.
- */
 @Composable
-fun SkeletonBlock(
-    modifier: Modifier = Modifier,
-    cornerRadius: Int = 12
-) {
+fun SkeletonBlock(modifier: Modifier = Modifier, cornerRadius: Int = 12) {
     val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
     val shimmerAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.08f,
-        targetValue = 0.18f,
+        initialValue = 0.06f,
+        targetValue = 0.14f,
         animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = FastOutSlowInEasing),
+            animation = tween(1000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "shimmer_alpha"
@@ -335,87 +794,53 @@ fun SkeletonBlock(
     )
 }
 
-/**
- * Skeleton-версия списка (для экранов с карточками)
- */
 @Composable
-fun SkeletonList(
-    itemCount: Int = 5,
-    modifier: Modifier = Modifier
-) {
+fun SkeletonList(itemCount: Int = 5, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Header skeleton
         SkeletonBlock(
-            modifier = Modifier
-                .fillMaxWidth(0.4f)
-                .height(20.dp),
+            modifier = Modifier.fillMaxWidth(0.35f).height(18.dp),
             cornerRadius = 8
         )
-        Spacer(modifier = Modifier.height(4.dp))
-
+        Spacer(modifier = Modifier.height(6.dp))
         repeat(itemCount) {
-            SkeletonBlock(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(72.dp)
-            )
+            SkeletonBlock(modifier = Modifier.fillMaxWidth().height(68.dp))
         }
     }
 }
 
-// ─── SCREEN WRAPPER — delayed content load ───────────────────────────────────
-
-/**
- * Обёртка экрана: показывает skeleton пока анимация перехода идёт,
- * потом плавно показывает реальный контент.
- *
- * @param delayMs сколько ждать перед показом контента (подбирай под скорость перехода)
- * @param skeleton что показывать пока ждём
- * @param content реальный контент экрана
- */
 @Composable
 fun SmoothScreen(
     delayMs: Long = 100L,
     skeleton: @Composable () -> Unit = { SkeletonList() },
     content: @Composable () -> Unit
 ) {
-    var contentReady by remember { mutableStateOf(false) }
+    val ready = remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         delay(delayMs)
-        contentReady = true
+        ready.value = true
     }
 
     AnimatedContent(
-        targetState = contentReady,
+        targetState = ready.value,
         transitionSpec = {
-            fadeIn(animationSpec = tween(200, easing = FastOutSlowInEasing)) togetherWith
-                    fadeOut(animationSpec = tween(150))
+            fadeIn(animationSpec = SlowElegantSpring) togetherWith
+                    fadeOut(animationSpec = spring(dampingRatio = 0.9f, stiffness = 250f))
         },
         label = "smooth_screen"
-    ) { ready ->
-        if (ready) {
-            content()
-        } else {
-            skeleton()
-        }
+    ) { isReady ->
+        if (isReady) content() else skeleton()
     }
 }
 
-// ─── SCREEN TRANSITION OVERLAY ───────────────────────────────────────────────
-// Затемнение при переходе (как iOS push navigation shadow)
-
 @Composable
-fun TransitionScrim(
-    visible: Boolean,
-    modifier: Modifier = Modifier
-) {
+fun TransitionScrim(visible: Boolean, modifier: Modifier = Modifier) {
     val alpha by animateFloatAsState(
-        targetValue = if (visible) 0.15f else 0f,
-        animationSpec = tween(300),
+        targetValue = if (visible) 0.12f else 0f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 220f),
         label = "scrim"
     )
     if (alpha > 0f) {

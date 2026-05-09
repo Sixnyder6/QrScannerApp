@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -33,8 +34,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.qrscannerapp.features.street_doctor.domain.model.FieldRepairStats
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -74,11 +78,18 @@ fun getEmployeePhotoUrl(userName: String): String? {
 fun AccountScreen(authManager: AuthManager) {
     val authState by authManager.authState.collectAsState()
     val context = LocalContext.current
+    var showForceUpdateDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(authState.error) {
         authState.error?.let {
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
             authManager.clearError()
+        }
+    }
+
+    LaunchedEffect(authState.versionError) {
+        if (authState.versionError) {
+            showForceUpdateDialog = true
         }
     }
 
@@ -90,7 +101,7 @@ fun AccountScreen(authManager: AuthManager) {
                     modifier = Modifier.align(Alignment.Center)
                 )
             }
-            authState.isLoggedIn -> {
+            authState.isLoggedIn && !authState.versionError -> {
                 val viewModel: AccountViewModel =
                     androidx.hilt.navigation.compose.hiltViewModel()
                 val uiState by viewModel.uiState.collectAsState()
@@ -119,7 +130,7 @@ fun AccountScreen(authManager: AuthManager) {
                     }
                 }
             }
-            else -> {
+            !authState.isLoggedIn && !authState.versionError -> {
                 Column(
                     modifier = Modifier.fillMaxSize().padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -130,10 +141,107 @@ fun AccountScreen(authManager: AuthManager) {
             }
         }
     }
+
+    if (showForceUpdateDialog) {
+        ForceUpdateDialog(
+            message = authState.error ?: "Ваша версия приложения устарела. Пожалуйста, обновитесь.",
+            onExit = {
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        )
+    }
 }
 
 // =================================================================================
-// ПРОФИЛЬ — разный контент для техника и остальных
+// ДИАЛОГ ПРИНУДИТЕЛЬНОГО ОБНОВЛЕНИЯ
+// =================================================================================
+@Composable
+fun ForceUpdateDialog(
+    message: String,
+    onExit: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Dialog(
+        onDismissRequest = { },
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        )
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(24.dp))
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Filled.SystemUpdate,
+                    contentDescription = null,
+                    tint = CorporateColors.AccentAmber,
+                    modifier = Modifier.size(64.dp)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Требуется обновление",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CorporateColors.TextPrimary
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = message,
+                    fontSize = 14.sp,
+                    color = CorporateColors.TextSecondary,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://github.com/Sixnyder6/QrScannerApp/releases/latest")
+                        )
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentPurple)
+                ) {
+                    Icon(Icons.Filled.Download, null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Скачать обновление", color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TextButton(
+                    onClick = onExit,
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("Выйти из приложения", color = CorporateColors.AccentRed)
+                }
+            }
+        }
+    }
+}
+
+// =================================================================================
+// ПРОФИЛЬ
 // =================================================================================
 
 @Composable
@@ -155,7 +263,6 @@ fun PersonalProfileScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
 
-        // ── Шапка профиля (одинакова для всех) ──
         item {
             ProfileHeader(
                 userName      = state.userName,
@@ -166,7 +273,6 @@ fun PersonalProfileScreen(
             )
         }
 
-        // ── Таймер смены (одинаков для всех) ──
         item {
             AnimatedVisibility(
                 visible = state.isShiftActive,
@@ -180,9 +286,6 @@ fun PersonalProfileScreen(
             }
         }
 
-        // ── Статистика за сегодня ──
-        // Для техника — блок полевого ремонта
-        // Для остальных — сканы/партии
         item {
             Spacer(Modifier.height(16.dp))
             if (isTechnic) {
@@ -204,7 +307,6 @@ fun PersonalProfileScreen(
             }
         }
 
-        // ── Стрик + рекорд — только НЕ для техника ──
         if (!isTechnic) {
             item {
                 Spacer(Modifier.height(16.dp))
@@ -217,14 +319,12 @@ fun PersonalProfileScreen(
                 }
             }
 
-            // ── График активности — только НЕ для техника ──
             item {
                 Spacer(Modifier.height(16.dp))
                 WeeklyChartCard(weeklyScans = state.weeklyScans)
             }
         }
 
-        // ── Журнал смен (одинаков для всех) ──
         item {
             Spacer(Modifier.height(24.dp))
             Button(
@@ -249,9 +349,6 @@ fun PersonalProfileScreen(
             }
         }
 
-        // ── Общая статистика ──
-        // Для техника — количество самокатов всего
-        // Для остальных — сканы/партии
         item {
             Spacer(Modifier.height(32.dp))
             Text(
@@ -273,7 +370,6 @@ fun PersonalProfileScreen(
                     .padding(vertical = 8.dp)
             ) {
                 if (isTechnic) {
-                    // Для техника — самокаты
                     StatListItem(
                         Icons.Default.TwoWheeler,
                         "Самокатов завершено",
@@ -304,7 +400,6 @@ fun PersonalProfileScreen(
                         CorporateColors.TextSecondary
                     )
                 } else {
-                    // Для остальных — сканы
                     StatListItem(
                         Icons.Outlined.QrCodeScanner,
                         "Всего сканирований",
@@ -329,7 +424,6 @@ fun PersonalProfileScreen(
             }
         }
 
-        // ── Кнопка выхода (одинакова для всех) ──
         item {
             Spacer(Modifier.height(32.dp))
             OutlinedButton(
@@ -417,8 +511,8 @@ fun ShiftHistoryBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxHeight(0.8f)
                 ) {
-                    items(shifts.size) { index ->
-                        ShiftHistoryCard(shift = shifts[index])
+                    items(shifts) { shift ->
+                        ShiftHistoryCard(shift = shift)
                     }
                 }
             }
@@ -813,6 +907,76 @@ private fun LoginFormComponent(authManager: AuthManager) {
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentPurple, disabledContainerColor = CorporateColors.CardBorder)
             ) { Text("Войти", fontWeight = FontWeight.SemiBold, fontSize = 16.sp) }
+        }
+    }
+}
+
+// =================================================================================
+// КОМПОНЕНТ ДЛЯ ТЕХНИКА
+// =================================================================================
+@Composable
+fun TechnicFieldStatsCard(
+    stats: FieldRepairStats,
+    isLoading: Boolean
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp))
+                .padding(20.dp)
+        ) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = CorporateColors.AccentPurple, modifier = Modifier.size(32.dp))
+                }
+            } else {
+                Column {
+                    Text(
+                        "Полевой ремонт сегодня",
+                        color = CorporateColors.TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                stats.doneToday.toString(),
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CorporateColors.AccentGreen
+                            )
+                            Text("Завершено", fontSize = 12.sp, color = CorporateColors.TextSecondary)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                (stats.totalToday - stats.doneToday).toString(),
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CorporateColors.AccentAmber
+                            )
+                            Text("Осталось", fontSize = 12.sp, color = CorporateColors.TextSecondary)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                stats.totalToday.toString(),
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CorporateColors.AccentPurple
+                            )
+                            Text("Всего", fontSize = 12.sp, color = CorporateColors.TextSecondary)
+                        }
+                    }
+                }
+            }
         }
     }
 }
