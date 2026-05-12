@@ -175,7 +175,7 @@ private fun MyTasksContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(uiState.tasks, key = { it.id }) { task ->
-                    Box(modifier = Modifier.animateItemPlacement()) {
+                    Box(modifier = Modifier.animateItem()) {
                         TaskListItem(
                             task = task,
                             onClick = { onTaskClick(task.id) },

@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.qrscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 38
-        versionName = "1.4.8"
+        versionCode = 39
+        versionName = "1.4.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -82,7 +82,12 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
-        //аутефикация для входа в базу гугл
+
+    // Haze — backdrop blur (единственная версия, 1.7.1)
+    implementation("dev.chrisbanes.haze:haze:1.7.1")
+    implementation("dev.chrisbanes.haze:haze-materials:1.7.1")
+
+    // Firebase Auth
     implementation("com.google.firebase:firebase-auth-ktx:23.0.0")
 
     implementation("androidx.core:core-ktx:1.13.1")
@@ -122,7 +127,7 @@ dependencies {
 
     // Hilt
     implementation(libs.hilt.android)
-    ksp("com.google.dagger:hilt-android-compiler:2.51.1")
+    ksp(libs.hilt.compiler)
 
     // WorkManager + Hilt
     implementation("androidx.work:work-runtime-ktx:2.9.0")
@@ -135,7 +140,7 @@ dependencies {
     // Диалоги с календарём
     implementation("io.github.vanpra.compose-material-dialogs:datetime:0.9.0")
 
-    // Excel — Apache POI (запись xlsx)
+    // Excel — Apache POI
     implementation("org.apache.poi:poi-ooxml:5.2.5")
 
     // Тесты
@@ -148,6 +153,10 @@ dependencies {
 
     // Guava
     implementation("com.google.guava:guava:32.1.3-android")
+
+    // Rive — векторные анимации фона
+    implementation("app.rive:rive-android:9.6.2")
+    implementation("androidx.startup:startup-runtime:1.1.1")
 
     // CameraX
     val camerax_version = "1.3.1"
@@ -203,10 +212,7 @@ dependencies {
 
     // Kotlin Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
-        // exel
-    implementation("org.dhatim:fastexcel:0.16.4")
 
-    // Haze — backdrop blur
-    implementation("dev.chrisbanes.haze:haze:0.6.2")
-    implementation("dev.chrisbanes.haze:haze-materials:0.6.2")
+    // FastExcel write
+    implementation("org.dhatim:fastexcel:0.16.4")
 }

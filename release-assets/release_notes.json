@@ -1,11 +1,11 @@
 {
-  "apkSize": "34.1 MB",
+  "apkSize": "75.4 MB",
   "minRequiredVersionCode": 45,
   "minRequiredVersionName": "1.4.5",
   "releaseItems": [
     {
       "type": "new",
-      "text": "Добавлены 2 новые темы"
+      "text": "Добавлены 3 новые темы"
     },
     {
       "type": "fix",
@@ -13,7 +13,7 @@
     },
     {
       "type": "new",
-      "text": "Добавлена проверка версии приложения"
+      "text": "Переработано меню"
     },
     {
       "type": "beta",

@@ -1,0 +1,87 @@
+uniform float2 iResolution;
+uniform float iTime;
+uniform float flowSpeed;
+uniform float complexity;
+uniform float3 layerColorA;   // тёмная база (глубокий индиго)
+uniform float3 layerColorB;   // средний (маджента/розовый)
+uniform float3 layerColorC;   // яркий (электрик/циан)
+uniform float brightness;
+
+// Плавная 3-точечная палитра с зацикливанием
+half3 palette(float t) {
+    t = fract(t);
+    half3 col = mix(layerColorA, layerColorB, smoothstep(0.0, 0.48, t));
+    col = mix(col, layerColorC, smoothstep(0.38, 0.80, t));
+    col = mix(col, layerColorA, smoothstep(0.75, 1.00, t));
+    return col;
+}
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord / iResolution;
+    float aspect = iResolution.x / iResolution.y;
+    float t = iTime * flowSpeed;
+
+    // Центрированные координаты с учётом соотношения сторон
+    float2 p = (uv - 0.5) * float2(aspect, 1.0) * complexity * 3.2;
+
+    // === ПЕРВЫЙ СЛОЙ ДОМЕННОГО ИСКАЖЕНИЯ ===
+    float wx = sin(p.y * 1.35 + t * 0.38) * 0.48
+             + sin(p.x * 1.92 - t * 0.27 + 1.1) * 0.24;
+    float wy = cos(p.x * 1.28 - t * 0.33 + 2.3) * 0.48
+             + cos(p.y * 1.85 + t * 0.21) * 0.24;
+    float2 wp = p + float2(wx, wy);
+
+    // === ОСНОВНЫЕ ПЛАЗМЕННЫЕ ВОЛНЫ (слой 1) ===
+    float v = 0.0;
+    v += sin(wp.x                       + t * 1.00);
+    v += sin(wp.y * 0.88                + t * 1.12);
+    v += sin((wp.x * 0.76 + wp.y * 0.64) + t * 0.83);
+    v += sin(length(wp) * 1.14          - t * 0.76);
+    v += 0.55 * sin(wp.x * 2.08 - wp.y * 1.25 + t * 1.28);
+    v /= 4.55;
+
+    // === ВТОРОЙ СЛОЙ — другая частота и смещение по времени ===
+    float2 p2 = p * 1.68 + float2(t * 0.13, -t * 0.09);
+    // Второй домен-варп
+    float wx2 = sin(p2.y * 2.1 - t * 0.29) * 0.30;
+    float wy2 = cos(p2.x * 1.9 + t * 0.34) * 0.30;
+    float2 wp2 = p2 + float2(wx2, wy2);
+
+    float v2 = 0.0;
+    v2 += sin(wp2.x * 0.73 + t * 0.57);
+    v2 += sin(wp2.y * 0.82 - t * 0.48);
+    v2 += sin((wp2.x - wp2.y) * 0.95 + t * 0.42);
+    v2 += 0.45 * sin(length(wp2) * 0.88 + t * 0.62);
+    v2 /= 3.45;
+
+    // === ТРЕТИЙ СЛОЙ — мелкая детализация ===
+    float2 p3 = p * 3.1 - float2(t * 0.08, t * 0.11);
+    float v3 = 0.0;
+    v3 += sin(p3.x * 0.6 + t * 0.9) * 0.4;
+    v3 += sin(p3.y * 0.7 - t * 0.8) * 0.4;
+    v3 += sin(length(p3) * 0.5 + t * 0.5) * 0.2;
+    v3 /= 1.0;
+
+    // Объединяем слои
+    float plasma = v * 0.55 + v2 * 0.32 + v3 * 0.13;
+
+    // === ЦВЕТ ===
+    // Медленный сдвиг всей палитры со временем — живое ощущение
+    float colorPhase = plasma * 0.8 + iTime * flowSpeed * 0.04;
+    half3 col = palette(colorPhase);
+
+    // Тоновая кривая — усиливаем яркие пики, затемняем провалы
+    float lum = col.r * 0.299 + col.g * 0.587 + col.b * 0.114;
+    col = mix(col, col * col * 2.2, smoothstep(0.2, 0.8, lum) * 0.45);
+
+    // Добавляем светящиеся точки в ярких пиках
+    float spark = smoothstep(0.35, 0.5, plasma);
+    col += layerColorC * spark * 0.12;
+
+    // Виньет
+    float vig = 1.0 - length(uv - 0.5) * 0.52;
+    col *= vig;
+
+    col *= brightness;
+    return half4(clamp(col, 0.0, 1.0), 1.0);
+}

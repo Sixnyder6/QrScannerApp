@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.AuthManager
+import com.example.qrscannerapp.PresenceManager
 import com.example.qrscannerapp.TelemetryManager
 import com.example.qrscannerapp.StardustItemBg
 import com.example.qrscannerapp.StardustTextSecondary
@@ -32,7 +33,7 @@ fun WarehouseScreen(
     val context = LocalContext.current
 
     val telemetryManager = remember { TelemetryManager(context) }
-    val authManager = remember { AuthManager(context, telemetryManagerProvider = { telemetryManager }) }
+    val authManager = remember { AuthManager(context, PresenceManager(com.google.firebase.firestore.FirebaseFirestore.getInstance())) { telemetryManager } }
     val authState by authManager.authState.collectAsState()
     val canManage = authState.isAdmin
     val currentUserName = authState.userName ?: "Неизвестный"

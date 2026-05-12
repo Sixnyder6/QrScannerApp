@@ -88,7 +88,7 @@ class FCMService : FirebaseMessagingService() {
 
     private fun saveFcmTokenToFirestore(token: String) {
         val telemetryManager = TelemetryManager(applicationContext)
-        val authManager = AuthManager(applicationContext, telemetryManagerProvider = { telemetryManager })
+        val authManager = AuthManager(applicationContext, PresenceManager(com.google.firebase.ktx.Firebase.firestore)) { telemetryManager }
         val userId = authManager.authState.value.userId ?: return
 
         Firebase.firestore

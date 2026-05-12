@@ -3,6 +3,7 @@ package com.example.qrscannerapp
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import app.rive.runtime.kotlin.core.Rive
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -14,12 +15,11 @@ class MyApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-        // Инициализация NotificationHelper (если класс существует)
+        Rive.init(this)
         try {
             NotificationHelper.init(this)
         } catch (e: Exception) {
-            // NotificationHelper не найден или ошибка инициализации
-            // Можно закомментировать или удалить эту строку если класс не нужен
+            // ignore
         }
     }
 

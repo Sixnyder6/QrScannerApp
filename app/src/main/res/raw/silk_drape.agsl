@@ -1,13 +1,11 @@
 uniform float2 iResolution;
 uniform float iTime;
-
-// SILK DRAPE THEME — Шёлковая ткань, стекающая по поверхности
-uniform float flowSpeed;       // Скорость скольжения ткани
-uniform float complexity;      // Интенсивность складок
-uniform float3 deepFoldColor;  // Цвет глубоких складок (тень)
-uniform float3 silkBaseColor;  // Базовый цвет шёлка
-uniform float3 highlightColor; // Блики (яркий атласный блеск)
-uniform float brightness;      // Общая яркость
+uniform float flowSpeed;
+uniform float complexity;
+uniform float3 deepFoldColor;
+uniform float3 silkBaseColor;
+uniform float3 highlightColor;
+uniform float brightness;
 
 half hash(float2 p) {
     p = fract(p * 0.3183099 + float2(0.71, 0.13));
@@ -26,102 +24,42 @@ half noise(float2 x) {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+// 3 октавы вместо 5 — экономия 40% на каждом вызове
 half fbm(float2 p) {
     half v = 0.0;
     half a = 0.5;
     float2 shift = float2(100.0, 60.0);
     mat2 rot = mat2(cos(0.4), sin(0.4), -sin(0.4), cos(0.4));
-
-    v += a * noise(p);
-    p = rot * p * 2.0 + shift;
-    a *= 0.5;
-
-    v += a * noise(p);
-    p = rot * p * 2.0 - shift;
-    a *= 0.5;
-
-    v += a * noise(p);
-    p = rot * p * 2.0 + shift;
-    a *= 0.45;
-
-    v += a * noise(p);
-    p = rot * p * 2.1 - shift;
-    a *= 0.4;
-
+    v += a * noise(p); p = rot * p * 2.0 + shift; a *= 0.5;
+    v += a * noise(p); p = rot * p * 2.0 - shift; a *= 0.5;
     v += a * noise(p);
     return v;
-}
-
-// Specular-подобный расчёт для атласного блеска
-// Имитирует отражение света от складок ткани
-half specularHighlight(float2 p, float2 grad) {
-    // Направление "света" — как будто источник сверху-слева
-    float2 lightDir = normalize(float2(0.6, -0.8));
-
-    // Нормализуем градиент как "нормаль" поверхности
-    float2 normal = normalize(grad + 0.001);
-    float diff = dot(normal, lightDir);
-
-    // Атласный блеск: резкий specular + мягкий diffuse
-    half spec = pow(max(diff, 0.0), 32.0); // Острый блик
-    half soft = max(diff, 0.0) * 0.4;       // Мягкое освещение
-
-    return spec * 0.7 + soft;
 }
 
 half4 main(float2 fragCoord) {
     float2 uv = fragCoord.xy / iResolution.xy;
     float2 p = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
-
     float t = iTime * flowSpeed;
 
-    // --- СКЛАДКИ ТКАНИ ---
-    // Вертикальная волна: ткань стекает вниз, собираясь в складки
-    // Основное направление — вертикальное, с поперечными изгибами
-
-    // Горизонтальные складки (рябь поперёк направления стекания)
+    // 4 fbm вместо 9 (убран gradient normal map — 4 вызова)
     float horizontalFolds = fbm(float2(p.x * 3.5 + 0.2 * t, p.y * 1.8 + 0.05 * t));
+    float verticalDrape   = fbm(float2(p.x * 1.2 + 0.1 * t, p.y * 2.5 - 0.35 * t));
 
-    // Вертикальные линии стекания (основные складки вдоль ткани)
-    float verticalDrape = fbm(float2(p.x * 1.2 + 0.1 * t, p.y * 2.5 - 0.35 * t));
-
-    // Турбулентность складок (мелкие детали)
-    float2 warp = float2(
-        fbm(p * 1.5 + float2(0.08 * t, -0.12 * t) + horizontalFolds * 0.3),
-        fbm(p * 1.5 + float2(-0.1 * t, 0.15 * t) + verticalDrape * 0.3)
-    );
-
+    // Один warp float вместо float2 из двух отдельных fbm
+    float warp = fbm(p * 1.5 + float2(0.08 * t, -0.12 * t) + horizontalFolds * 0.3);
     float microDetail = fbm(p * 2.8 + warp * complexity);
 
-    // --- КАРТА ВЫСОТ (глубина складок) ---
     float foldDepth = horizontalFolds * 0.4 + verticalDrape * 0.45 + microDetail * 0.15;
 
-    // --- ГРАДИЕНТ ДЛЯ БЛИКОВ ---
-    // Вычисляем "нормаль" поверхности через разность высот
-    float eps = 0.004;
-    float gradX = fbm(float2(p.x + eps, p.y) * 2.0 + warp) -
-                  fbm(float2(p.x - eps, p.y) * 2.0 + warp);
-    float gradY = fbm(float2(p.x, p.y + eps) * 2.0 + warp) -
-                  fbm(float2(p.x, p.y - eps) * 2.0 + warp);
-    float2 gradient = float2(gradX, gradY) * 3.0;
+    // Блики по высоте складки — без gradient/normal map
+    half hilight = pow(smoothstep(0.3, 0.9, foldDepth), 3.0) * 0.75;
 
-    // --- ЦВЕТ ---
-    // База: от глубоких складок к поверхности
     float3 col = mix(deepFoldColor, silkBaseColor, smoothstep(0.0, 0.55, foldDepth));
-
-    // Атласные блики на гребнях складок
-    half spec = specularHighlight(p, gradient);
-    float specMask = smoothstep(0.35, 0.75, foldDepth); // Блики только на выступах
-    col = mix(col, highlightColor, spec * specMask * 0.85);
-
-    // Лёгкий подповерхностный рассеянный свет в складках
+    col = mix(col, highlightColor, hilight);
     col += silkBaseColor * 0.08 * (1.0 - foldDepth);
 
-    // --- ВИНЬЕТ ---
     float vig = 1.0 - length(uv - 0.5) * 0.4;
-    col *= vig;
-
-    col *= brightness;
+    col *= vig * brightness;
 
     return half4(col, 1.0);
 }

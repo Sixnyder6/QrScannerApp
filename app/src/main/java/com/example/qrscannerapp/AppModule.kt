@@ -28,14 +28,18 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun providePresenceManager(firestore: FirebaseFirestore): PresenceManager {
+        return PresenceManager(firestore)
+    }
+
+    @Provides
+    @Singleton
     fun provideAuthManager(
         @ApplicationContext context: Context,
-        telemetryManager: TelemetryManager
+        telemetryManager: TelemetryManager,
+        presenceManager: PresenceManager
     ): AuthManager {
-        // Передаём telemetryManager через лямбду — это позволяет избежать
-        // циклических зависимостей если они появятся в будущем,
-        // и TelemetryManager создаётся только при первом heartbeat
-        return AuthManager(context) { telemetryManager }
+        return AuthManager(context, presenceManager) { telemetryManager }
     }
 
     @Provides

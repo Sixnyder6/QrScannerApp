@@ -1,13 +1,11 @@
 uniform float2 iResolution;
 uniform float iTime;
-
-// AMBER FLOW THEME — Янтарная смола / мёд
-uniform float flowSpeed;       // Скорость течения
-uniform float complexity;      // Интенсивность завихрений
-uniform float3 baseColor;      // Глубокий тёмный фон (коричневый)
-uniform float3 midColor;       // Средний слой (бронза/янтарь)
-uniform float3 glowColor;      // Свечение (золото)
-uniform float brightness;      // Общая яркость
+uniform float flowSpeed;
+uniform float complexity;
+uniform float3 baseColor;
+uniform float3 midColor;
+uniform float3 glowColor;
+uniform float brightness;
 
 half hash(float2 p) {
     p = fract(p * 0.3183099 + float2(0.1, 0.7));
@@ -26,78 +24,52 @@ half noise(float2 x) {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+// 3 октавы вместо 4 — экономия 25% на каждом вызове
 half fbm(float2 p) {
     half v = 0.0;
     half a = 0.55;
     float2 shift = float2(70.0, 30.0);
     mat2 rot = mat2(cos(0.6), sin(0.6), -sin(0.6), cos(0.6));
-
-    v += a * noise(p);
-    p = rot * p * 2.2 + shift;
-    a *= 0.5;
-
-    v += a * noise(p);
-    p = rot * p * 2.2 - shift;
-    a *= 0.5;
-
-    v += a * noise(p);
-    p = rot * p * 2.2 + shift;
-    a *= 0.45;
-
+    v += a * noise(p); p = rot * p * 2.2 + shift; a *= 0.5;
+    v += a * noise(p); p = rot * p * 2.2 - shift; a *= 0.5;
     v += a * noise(p);
     return v;
 }
 
-// Дополнительная функция для "прожилок" — линии течения
 half ridgeNoise(float2 p) {
     half n = fbm(p);
-    n = abs(n - 0.5) * 2.0; // Создаём гребни
-    n = 1.0 - n;            // Инвертируем: гребни = светлые
+    n = abs(n - 0.5) * 2.0;
+    n = 1.0 - n;
     return n * n;
 }
 
 half4 main(float2 fragCoord) {
     float2 uv = fragCoord.xy / iResolution.xy;
     float2 p = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
-
     float t = iTime * flowSpeed;
 
-    // Основное течение (domain warping)
     float2 q = float2(
         fbm(p + float2(0.2 * t, 0.1 * t)),
         fbm(p + float2(-0.1 * t, 0.25 * t))
     );
-
     float2 r = float2(
         fbm(p + complexity * q + float2(0.35 * t, 0.15 * t) + float2(5.1, 2.7)),
         fbm(p + complexity * q + float2(0.15 * t, 0.3 * t) - float2(2.3, 6.8))
     );
 
-    // Карта высот
     float f = fbm(p + complexity * 1.6 * r);
-
-    // Прожилки (золотые линии в смоле)
     float ridges = ridgeNoise(p * 2.5 + r * 0.7 + 0.1 * t);
 
-    // Строим цвет: от тёмной базы к янтарю
     float3 col = mix(baseColor, midColor, smoothstep(0.0, 0.5, f));
-
-    // Золотые прожилки проявляются на средних тонах
     float ridgeMask = smoothstep(0.3, 0.7, f);
     col = mix(col, glowColor, ridges * ridgeMask * 0.7);
 
-    // Яркие "вспышки" — свет сквозь смолу
     float hotspots = smoothstep(0.7, 0.85, f);
     col = mix(col, glowColor * 1.5, hotspots * 0.6);
-
-    // Лёгкое внутреннее свечение в светлых зонах
     col += glowColor * 0.12 * smoothstep(0.5, 0.75, f) * (1.0 - f);
 
-    // Виньет
     float vig = 1.0 - length(uv - 0.5) * 0.55;
-    col *= vig;
-
-    col *= brightness;
+    col *= vig * brightness;
 
     return half4(col, 1.0);
 }

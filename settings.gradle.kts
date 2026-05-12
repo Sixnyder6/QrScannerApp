@@ -13,6 +13,9 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "0.10.0"
+}
 dependencyResolutionManagement {
     // V-- НАЧАЛО ИЗМЕНЕНИЙ: Ослабляем строгость правила --V
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS) // Было: FAIL_ON_PROJECT_REPOS

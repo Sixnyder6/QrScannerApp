@@ -238,13 +238,14 @@ private fun ManualInputDialog(
                     autoCorrect = false,
                     keyboardType = KeyboardType.Ascii
                 ),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
+                colors = TextFieldDefaults.colors(
                     focusedTextColor = StardustTextPrimary,
                     unfocusedTextColor = StardustTextPrimary,
-                    containerColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
                     cursorColor = StardustPrimary,
-                    focusedBorderColor = StardustPrimary,
-                    unfocusedBorderColor = StardustTextSecondary,
+                    focusedIndicatorColor = StardustPrimary,
+                    unfocusedIndicatorColor = StardustTextSecondary,
                     focusedLabelColor = StardustPrimary,
                     unfocusedLabelColor = StardustTextSecondary
                 ),
@@ -563,13 +564,14 @@ private fun RepairSelectionUI(
                             .padding(top = 8.dp),
                         label = { Text("Опишите неисправность") },
                         singleLine = true,
-                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                        colors = TextFieldDefaults.colors(
                             focusedTextColor = StardustTextPrimary,
                             unfocusedTextColor = StardustTextPrimary,
-                            containerColor = Color.Transparent,
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
                             cursorColor = StardustPrimary,
-                            focusedBorderColor = StardustPrimary,
-                            unfocusedBorderColor = StardustTextSecondary,
+                            focusedIndicatorColor = StardustPrimary,
+                            unfocusedIndicatorColor = StardustTextSecondary,
                             focusedLabelColor = StardustPrimary,
                             unfocusedLabelColor = StardustTextSecondary
                         )

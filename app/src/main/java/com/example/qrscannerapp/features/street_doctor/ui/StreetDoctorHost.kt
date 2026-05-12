@@ -70,7 +70,7 @@ fun StreetDoctorHost(
     if (currentScreen == StreetDoctorScreen.SETTINGS) {
         com.example.qrscannerapp.common.ui.AppBackground {
             Box(modifier = Modifier.fillMaxSize()) {
-                com.example.qrscannerapp.features.electrician.ui.UnifiedSettingsScreen(
+                com.example.qrscannerapp.features.settings.ui.UnifiedSettingsScreen(
                     authManager = hiltViewModel<com.example.qrscannerapp.AuthViewModel>().authManager
                 )
                 Box(

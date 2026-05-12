@@ -40,7 +40,7 @@ import java.util.*
 fun AdminRepairLogScreen() {
     val context = LocalContext.current
     val telemetryManager = remember { TelemetryManager(context) }
-    val authManager = remember { AuthManager(context, telemetryManagerProvider = { telemetryManager }) }
+    val authManager = remember { AuthManager(context, PresenceManager(com.google.firebase.firestore.FirebaseFirestore.getInstance())) { telemetryManager } }
     val viewModel: AdminRepairLogViewModel = viewModel(
         factory = AdminRepairLogViewModelFactory(authManager)
     )

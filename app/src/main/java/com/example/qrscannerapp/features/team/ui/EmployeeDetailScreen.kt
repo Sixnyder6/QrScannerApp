@@ -501,7 +501,7 @@ private fun setupMap(map: GoogleMap, lat: Double, lng: Double, roleColor: Color,
 @Composable
 private fun LiveDeviceCard(telemetry: DeviceTelemetry) {
     val now = System.currentTimeMillis()
-    val isOnline = telemetry.lastSeen > 0L && (now - telemetry.lastSeen) < ONLINE_THRESHOLD_MS
+    val isOnline = telemetry.lastSeen > 0L && (now - telemetry.lastSeen) < 3 * 60 * 1000L
 
     // [НОВОЕ] Логика очистки имени устройства
     val displayDevice = remember(telemetry.activeDeviceId, telemetry.deviceInfo) {

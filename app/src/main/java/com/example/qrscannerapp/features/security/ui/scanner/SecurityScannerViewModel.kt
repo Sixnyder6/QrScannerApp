@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.qrscannerapp.AuthManager
 import com.example.qrscannerapp.DeviceLocation
+import com.example.qrscannerapp.PresenceManager
 import com.example.qrscannerapp.TelemetryManager
 import com.example.qrscannerapp.features.security.ui.ScooterCoords
 import com.example.qrscannerapp.features.security.ui.ScooterHistoryEntry
@@ -120,7 +121,8 @@ sealed class SecurityScannerEvent {
 @HiltViewModel
 class SecurityScannerViewModel @Inject constructor(
     private val telemetryManager: TelemetryManager,
-    private val authManager: AuthManager
+    private val authManager: AuthManager,
+    private val presenceManager: PresenceManager
 ) : ViewModel() {
 
     private val firestore = Firebase.firestore
@@ -191,6 +193,7 @@ class SecurityScannerViewModel @Inject constructor(
         if (code == lastScannedCode && (now - lastScanTime) < 2000L) return
         lastScannedCode = code
         lastScanTime = now
+        presenceManager.pingNow()
         dispatch(code)
     }
 

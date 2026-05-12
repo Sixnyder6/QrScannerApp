@@ -47,7 +47,7 @@ object NotificationHelper {
 
     private fun saveTokenToFirestore(context: Context, token: String) {
         val telemetryManager = TelemetryManager(context)
-        val authManager = AuthManager(context, telemetryManagerProvider = { telemetryManager })
+        val authManager = AuthManager(context, PresenceManager(Firebase.firestore)) { telemetryManager }
         val userId = authManager.authState.value.userId ?: return
 
         Firebase.firestore
@@ -91,7 +91,7 @@ object NotificationHelper {
     ) {
         try {
             val telemetryManager = TelemetryManager(context)
-            val authManager = AuthManager(context, telemetryManagerProvider = { telemetryManager })
+            val authManager = AuthManager(context, PresenceManager(Firebase.firestore)) { telemetryManager }
             val senderId = authManager.authState.value.userId ?: return
             if (senderId == recipientUserId) return // не отправляем себе
 

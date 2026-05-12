@@ -96,6 +96,7 @@ sealed interface BatchEvent {
 class QrScannerViewModel @Inject constructor(
     private val application: Application,
     private val authManager: AuthManager,
+    private val presenceManager: PresenceManager,
     private val sessionRepository: ScanSessionRepository,
     private val storageRepository: StorageRepository
 ) : AndroidViewModel(application) {
@@ -599,6 +600,7 @@ class QrScannerViewModel @Inject constructor(
 
         lastScannedValue = rawCode
         lastProcessedTime = currentTime
+        presenceManager.pingNow()
 
         viewModelScope.launch {
             // РЕЖИМ ПОИСКА

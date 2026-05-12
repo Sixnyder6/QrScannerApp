@@ -217,6 +217,10 @@ class UpdateManager @Inject constructor(
         workManager.cancelUniqueWork(UPDATE_WORK_NAME)
     }
 
+    fun startCheckForUpdates() {
+        viewModelScope.launch { checkForUpdates() }
+    }
+
     private fun hasInstallPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.packageManager.canRequestPackageInstalls()

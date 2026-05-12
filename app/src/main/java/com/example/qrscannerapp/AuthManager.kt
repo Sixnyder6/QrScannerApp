@@ -29,11 +29,7 @@ import kotlinx.coroutines.withContext
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "internal_auth_store")
 private const val TAG = "InternalAuth"
 
-// Интервал обновления lastSeen — 3 минуты
 private const val HEARTBEAT_INTERVAL_MS = 3 * 60 * 1000L
-
-// Порог "онлайн" — если lastSeen был менее 5 минут назад
-const val ONLINE_THRESHOLD_MS = 5 * 60 * 1000L
 
 // ⭐ МИНИМАЛЬНАЯ ТРЕБУЕМАЯ ВЕРСИЯ ПРИЛОЖЕНИЯ
 // В продакшене можно хранить в Firestore в документе app_config
@@ -87,6 +83,7 @@ data class AuthState(
 
 class AuthManager(
     private val context: Context,
+    private val presenceManager: PresenceManager,
     private val telemetryManagerProvider: () -> TelemetryManager
 ) {
 
@@ -255,6 +252,7 @@ class AuthManager(
                 }
             }
 
+        presenceManager.startTracking(uid)
         startHeartbeat(uid)
     }
 
@@ -276,15 +274,11 @@ class AuthManager(
                         return@launch
                     }
 
-                    val internalData: Map<String, Any> = hashMapOf(
-                        "lastSeen" to System.currentTimeMillis(),
-                        "activeDeviceId" to deviceId,
-                        "appVersion" to currentVersion
-                    )
+                    presenceManager.pingNow()
                     firestore.collection("internal_users").document(uid)
-                        .update(internalData)
+                        .update(mapOf("activeDeviceId" to deviceId, "appVersion" to currentVersion))
                         .await()
-                    Log.d(TAG, "Heartbeat OK: lastSeen updated for $uid")
+                    Log.d(TAG, "Heartbeat OK for $uid")
 
                     try {
                         val location = telemetryManager.getCurrentLocation()
@@ -323,12 +317,9 @@ class AuthManager(
     }
 
     fun goOffline() {
-        val uid = _authState.value.userId ?: return
         scope.launch {
             try {
-                firestore.collection("internal_users").document(uid)
-                    .update("lastSeen", 0L)
-                    .await()
+                presenceManager.stopTracking()
             } catch (e: Exception) {
                 Log.e(TAG, "Error setting offline status", e)
             }
@@ -362,14 +353,9 @@ class AuthManager(
                     val userId = userDocument.id
                     val currentVersion = getCurrentAppVersion()
 
+                    presenceManager.startTracking(userId)
                     firestore.collection("internal_users").document(userId)
-                        .update(
-                            mapOf(
-                                "activeDeviceId" to deviceId,
-                                "lastSeen" to System.currentTimeMillis(),
-                                "appVersion" to currentVersion
-                            )
-                        )
+                        .update(mapOf("activeDeviceId" to deviceId, "appVersion" to currentVersion))
                         .await()
 
                     context.dataStore.edit { preferences ->

@@ -45,6 +45,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.qrscannerapp.AuthManager
+import com.example.qrscannerapp.PresenceManager
 import com.example.qrscannerapp.TelemetryManager
 import com.example.qrscannerapp.features.scanner.ui.components.CameraView
 import com.example.qrscannerapp.features.street_doctor.domain.model.ScooterFieldStatus
@@ -105,7 +106,8 @@ enum class ScanEffect { None, Success, NotFound, Error }
 @HiltViewModel
 class TechnicScannerViewModel @Inject constructor(
     private val authManager: AuthManager,
-    private val telemetryManager: TelemetryManager
+    private val telemetryManager: TelemetryManager,
+    private val presenceManager: PresenceManager
 ) : ViewModel() {
 
     private val db = Firebase.firestore
@@ -206,6 +208,7 @@ class TechnicScannerViewModel @Inject constructor(
         if (code == lastCode && (now - lastCodeTime) < DEBOUNCE_MS) return
         lastCode = code
         lastCodeTime = now
+        presenceManager.pingNow()
 
         _uiState.update { it.copy(lastScannedCode = code, scanResult = ScanResult.Scanning) }
 

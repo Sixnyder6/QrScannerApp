@@ -80,6 +80,9 @@ fun AccountScreen(authManager: AuthManager) {
     val context = LocalContext.current
     var showForceUpdateDialog by remember { mutableStateOf(false) }
 
+    val updateManager: UpdateManager = androidx.hilt.navigation.compose.hiltViewModel()
+    val updateState by updateManager.updateState.collectAsState()
+
     LaunchedEffect(authState.error) {
         authState.error?.let {
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
@@ -90,6 +93,14 @@ fun AccountScreen(authManager: AuthManager) {
     LaunchedEffect(authState.versionError) {
         if (authState.versionError) {
             showForceUpdateDialog = true
+            updateManager.checkForUpdates()
+        }
+    }
+
+    LaunchedEffect(updateState) {
+        if (updateState is UpdateState.ReadyToInstall) {
+            updateManager.installApk((updateState as UpdateState.ReadyToInstall).uri)
+            updateManager.resetState()
         }
     }
 
@@ -144,7 +155,13 @@ fun AccountScreen(authManager: AuthManager) {
 
     if (showForceUpdateDialog) {
         ForceUpdateDialog(
-            message = authState.error ?: "Ваша версия приложения устарела. Пожалуйста, обновитесь.",
+            message     = authState.error ?: "Ваша версия приложения устарела. Пожалуйста, обновитесь.",
+            updateState = updateState,
+            onUpdate    = {
+                val info = (updateState as? UpdateState.UpdateAvailable)?.info
+                if (info != null) updateManager.startUpdate(info)
+                else updateManager.startCheckForUpdates()
+            },
             onExit = {
                 android.os.Process.killProcess(android.os.Process.myPid())
             }
@@ -158,10 +175,10 @@ fun AccountScreen(authManager: AuthManager) {
 @Composable
 fun ForceUpdateDialog(
     message: String,
+    updateState: UpdateState,
+    onUpdate: () -> Unit,
     onExit: () -> Unit
 ) {
-    val context = LocalContext.current
-
     Dialog(
         onDismissRequest = { },
         properties = DialogProperties(
@@ -210,21 +227,61 @@ fun ForceUpdateDialog(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
-                    onClick = {
-                        val intent = android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://github.com/Sixnyder6/QrScannerApp/releases/latest")
-                        )
-                        context.startActivity(intent)
-                    },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentPurple)
-                ) {
-                    Icon(Icons.Filled.Download, null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Скачать обновление", color = Color.White, fontWeight = FontWeight.SemiBold)
+                when (updateState) {
+                    is UpdateState.Downloading -> {
+                        val progress = updateState.progress
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            LinearProgressIndicator(
+                                progress = { progress / 100f },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = CorporateColors.AccentPurple,
+                                trackColor = CorporateColors.CardBorder
+                            )
+                            Text(
+                                "Загрузка... $progress%",
+                                color = CorporateColors.TextSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                    is UpdateState.Error -> {
+                        Button(
+                            onClick = onUpdate,
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentRed)
+                        ) {
+                            Icon(Icons.Filled.Refresh, null, tint = Color.White)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Повторить", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    else -> {
+                        val isChecking = updateState is UpdateState.Checking
+                        Button(
+                            onClick = onUpdate,
+                            enabled = !isChecking,
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentPurple)
+                        ) {
+                            if (isChecking) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Filled.Download, null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Обновить приложение", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -660,6 +717,21 @@ fun ProfileHeader(
                             Text(
                                 if (isShiftActive) "На смене • $userRole" else "Не в сети • $userRole",
                                 fontSize = 13.sp, fontWeight = FontWeight.Medium, color = CorporateColors.TextSecondary
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.LocationOn,
+                                contentDescription = null,
+                                tint = CorporateColors.AccentGreen,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "Бестужевская 10",
+                                fontSize = 12.sp,
+                                color = CorporateColors.TextSecondary
                             )
                         }
                     }

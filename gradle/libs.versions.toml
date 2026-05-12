@@ -3,9 +3,9 @@
 
 [versions]
 # --- Build Tools & Core (Stable & Compatible Set) ---
-agp = "8.4.1"
-kotlin = "2.0.0"
-ksp = "2.0.0-1.0.21"
+agp = "8.9.1"
+kotlin = "2.2.21"  # Обновлено до версии, совместимой с haze
+ksp = "2.2.21-2.0.5"  # KSP для Kotlin 2.2.21
 googleGmsGoogleServices = "4.4.1"
 
 # --- AndroidX & Jetpack ---
@@ -15,7 +15,7 @@ lifecycle = "2.8.0"
 composeBom = "2024.05.00"
 navigationCompose = "2.7.7"
 hiltNavigationCompose = "1.2.0"
-room = "2.6.1"
+room = "2.8.4"
 datastore = "1.1.1"
 splashscreen = "1.0.1"
 camerax = "1.3.1"
@@ -31,7 +31,7 @@ desugar = "2.0.4"
 zxing = "3.5.1"
 
 # --- Dagger Hilt ---
-hilt = "2.51.1"
+hilt = "2.56.1"
 
 # --- Third Party ---
 ycharts = "2.1.0"

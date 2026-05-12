@@ -34,7 +34,13 @@ enum class AppTheme(
 
     // Новые цветовые темы
     WHITE("white", "Белая", "⚪", ColorThemeEngine.WhiteTheme),
-    YELLOW("yellow", "Желтая", "💛", ColorThemeEngine.YellowTheme);
+    YELLOW("yellow", "Желтая", "💛", ColorThemeEngine.YellowTheme),
+    EMBER("ember", "Закат", "🔥", ColorThemeEngine.RedTheme),
+    AURORA("aurora", "Аврора", "🌌", ColorThemeEngine.GreenTheme),
+    PLASMA("plasma", "Плазма", "⚡", ColorThemeEngine.PurpleTheme),
+
+    // Rive-анимация
+    RIVE("rive", "Rive", "✨", ColorThemeEngine.PurpleTheme);
 
     companion object {
         fun fromKey(key: String?): AppTheme =
