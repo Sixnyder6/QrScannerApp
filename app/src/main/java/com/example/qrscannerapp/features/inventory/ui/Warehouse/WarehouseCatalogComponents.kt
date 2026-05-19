@@ -65,8 +65,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.qrscannerapp.*
@@ -91,9 +91,11 @@ data class NewItemData(
     val fullName: String,
     val shortName: String,
     val sku: String,
+    val description: String?,
     val category: String,
     val unit: String,
-    val totalStock: Int
+    val totalStock: Int,
+    val lowStockThreshold: Int
 )
 
 fun generateColorForCategory(categoryName: String): Color {
@@ -177,16 +179,18 @@ fun DeleteItemDialog(
 fun EditItemDialog(
     item: WarehouseItem,
     onDismiss: () -> Unit,
-    onConfirm: (fullName: String, shortName: String, sku: String, category: String, unit: String, totalStock: Int) -> Unit
+    onConfirm: (fullName: String, shortName: String, sku: String, description: String?, category: String, unit: String, totalStock: Int, lowStockThreshold: Int) -> Unit
 ) {
     var fullName by remember { mutableStateOf(item.fullName) }
     var shortName by remember { mutableStateOf(item.shortName) }
     var sku by remember { mutableStateOf(item.sku ?: "") }
+    var description by remember { mutableStateOf(item.description ?: "") }
     var category by remember { mutableStateOf(item.category) }
     var unit by remember { mutableStateOf(item.unit) }
     var totalStockStr by remember { mutableStateOf(item.totalStock.toString()) }
+    var lowStockThresholdStr by remember { mutableStateOf(item.lowStockThreshold.toString()) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -248,6 +252,20 @@ fun EditItemDialog(
                 )
 
                 OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Описание") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = StardustTextPrimary,
+                        unfocusedTextColor = StardustTextPrimary,
+                        focusedBorderColor = StardustPrimary,
+                        unfocusedBorderColor = StardustTextSecondary
+                    )
+                )
+
+                OutlinedTextField(
                     value = category,
                     onValueChange = { category = it },
                     label = { Text("Категория") },
@@ -289,6 +307,20 @@ fun EditItemDialog(
                     )
                 }
 
+                OutlinedTextField(
+                    value = lowStockThresholdStr,
+                    onValueChange = { lowStockThresholdStr = it.filter { c -> c.isDigit() } },
+                    label = { Text("Порог «мало» (шт.)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = StardustTextPrimary,
+                        unfocusedTextColor = StardustTextPrimary,
+                        focusedBorderColor = StardustPrimary,
+                        unfocusedBorderColor = StardustTextSecondary
+                    )
+                )
+
                 Text(
                     text = "Внимание: при сохранении текущий остаток будет сброшен до общего количества!",
                     style = MaterialTheme.typography.bodySmall,
@@ -307,8 +339,9 @@ fun EditItemDialog(
                     Button(
                         onClick = {
                             val totalStock = totalStockStr.toIntOrNull() ?: 0
+                            val threshold = lowStockThresholdStr.toIntOrNull()?.coerceAtLeast(1) ?: 1
                             if (fullName.isNotBlank() && shortName.isNotBlank() && totalStock > 0) {
-                                onConfirm(fullName, shortName, sku, category, unit, totalStock)
+                                onConfirm(fullName, shortName, sku, description.ifBlank { null }, category, unit, totalStock, threshold)
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
@@ -668,8 +701,8 @@ fun WarehouseCatalogScreen(
         EditItemDialog(
             item = itemToEdit!!,
             onDismiss = { itemToEdit = null },
-            onConfirm = { full, short, sku, cat, unit, total ->
-                viewModel.onEditItem(itemToEdit!!, full, short, sku, cat, unit, total)
+            onConfirm = { full, short, sku, desc, cat, unit, total, threshold ->
+                viewModel.onEditItem(itemToEdit!!, full, short, sku, desc, cat, unit, total, threshold)
                 itemToEdit = null
             }
         )
@@ -1099,7 +1132,7 @@ fun QuantityPickerDialog(
     var stepperQuantity by remember { mutableIntStateOf(1) }
     var textQuantity by remember { mutableStateOf("") }
 
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(
             modifier = Modifier.fillMaxWidth(0.95f),
             shape = RoundedCornerShape(28.dp),

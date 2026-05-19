@@ -45,9 +45,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.offset
-import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.features.delivery.domain.model.DeliveryLog
 import com.example.qrscannerapp.features.delivery.domain.model.DeliveryType
@@ -368,7 +368,7 @@ fun DeliveryFormScreen(type: String, viewModel: DeliveryViewModel, currentUserNa
         // Диалог подтверждения
         if (formState.showConfirmation && formState.pendingDelivery != null) {
             val pending = formState.pendingDelivery!!
-            Dialog(onDismissRequest = { viewModel.dismissConfirmation() }) {
+            AnimatedDialogWrapper(onDismiss = { viewModel.dismissConfirmation() }) {
                 Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF252530)) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text("Подтвердите отправку", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -394,7 +394,7 @@ fun DeliveryFormScreen(type: String, viewModel: DeliveryViewModel, currentUserNa
 
         // Диалог локации (заглушка)
         if (showLocationPicker) {
-            Dialog(onDismissRequest = { showLocationPicker = false }) {
+            AnimatedDialogWrapper(onDismiss = { showLocationPicker = false }) {
                 Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF252530)) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text("📍 Определить местоположение", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)

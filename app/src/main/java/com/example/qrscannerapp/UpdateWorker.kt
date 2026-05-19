@@ -43,6 +43,7 @@ class UpdateWorker @AssistedInject constructor(
     companion object {
         const val KEY_URL = "apk_url"
         const val KEY_VERSION_NAME = "version_name"
+        const val KEY_VERSION_CODE = "version_code"
         const val KEY_PROGRESS = "progress"
         const val NOTIFICATION_CHANNEL_ID = "update_channel"
         const val NOTIFICATION_ID = 1001
@@ -111,8 +112,11 @@ class UpdateWorker @AssistedInject constructor(
 
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", destinationFile)
                 showDownloadCompleteNotification(uri, versionName)
-                
-                val outputData = workDataOf("apk_uri" to uri.toString())
+
+                val outputData = workDataOf(
+                    "apk_uri" to uri.toString(),
+                    KEY_VERSION_CODE to inputData.getInt(KEY_VERSION_CODE, 0)
+                )
                 Result.success(outputData)
 
             } catch (e: Exception) {

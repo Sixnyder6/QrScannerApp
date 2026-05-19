@@ -46,7 +46,7 @@ private val TeamAccent = Color(0xFF2DD4BF)
 fun TeamOnlineWidget(
     hazeState: HazeState,
     modifier: Modifier = Modifier,
-    sheenFraction: Float = 0f,
+    sheenPhaseOffset: Float = 0f,
     onTap: () -> Unit
 ) {
     var onlineCount by remember { mutableStateOf<Int?>(null) }
@@ -84,12 +84,12 @@ fun TeamOnlineWidget(
     )
 
     WidgetCard(
-        accentColor  = TeamAccent,
-        hazeState    = hazeState,
-        modifier     = modifier,
-        glowStrength = 0.5f,
-        sheenFraction   = sheenFraction,
-        onClick      = onTap
+        accentColor      = TeamAccent,
+        hazeState        = hazeState,
+        modifier         = modifier,
+        glowStrength     = 0.5f,
+        sheenPhaseOffset = sheenPhaseOffset,
+        onClick          = onTap
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),

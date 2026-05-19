@@ -49,8 +49,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import kotlinx.coroutines.delay
 
 /**
@@ -96,14 +95,7 @@ fun HomescreenDialog(
         label         = "dialog_alpha"
     )
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            dismissOnBackPress        = true,
-            dismissOnClickOutside     = true,
-            usePlatformDefaultWidth   = false  // сами управляем шириной
-        )
-    ) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         // Затемнённый фон — клик закрывает
         Box(
             modifier = Modifier

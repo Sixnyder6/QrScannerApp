@@ -93,9 +93,17 @@ class UpdateManager @Inject constructor(
                         _updateState.value = UpdateState.Downloading(progress)
                     }
                     WorkInfo.State.SUCCEEDED -> {
+                        val targetVersionCode = workInfo.outputData.getInt(UpdateWorker.KEY_VERSION_CODE, 0)
+                        val currentVersionCode = getCurrentVersionCode()
                         val uriString = workInfo.outputData.getString("apk_uri")
-                        if (uriString != null) {
+
+                        if (targetVersionCode > 0 && currentVersionCode >= targetVersionCode) {
+                            // Обновление уже установлено (перезапуск после установки)
+                            workManager.pruneWork()
+                            _updateState.value = UpdateState.Idle
+                        } else if (uriString != null) {
                             _updateState.value = UpdateState.ReadyToInstall(Uri.parse(uriString))
+                            workManager.pruneWork() // чистим DB — при следующем старте не покажет снова
                         } else {
                             resetState()
                         }
@@ -122,7 +130,8 @@ class UpdateManager @Inject constructor(
 
         val workData = workDataOf(
             UpdateWorker.KEY_URL to info.apkUrl,
-            UpdateWorker.KEY_VERSION_NAME to info.latestVersionName
+            UpdateWorker.KEY_VERSION_NAME to info.latestVersionName,
+            UpdateWorker.KEY_VERSION_CODE to info.latestVersionCode
         )
 
         val updateWorkRequest = OneTimeWorkRequestBuilder<UpdateWorker>()

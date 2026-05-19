@@ -20,9 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.layout.ContentScale
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -104,10 +103,7 @@ fun ScooterInfoSheet(
     var fullscreenUrl by remember { mutableStateOf<String?>(null) }
 
     if (fullscreenUrl != null) {
-        Dialog(
-            onDismissRequest = { fullscreenUrl = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
+        AnimatedDialogWrapper(onDismiss = { fullscreenUrl = null }) {
             Box(
                 modifier = Modifier.fillMaxSize().background(Color.Black).clickable { fullscreenUrl = null },
                 contentAlignment = Alignment.Center

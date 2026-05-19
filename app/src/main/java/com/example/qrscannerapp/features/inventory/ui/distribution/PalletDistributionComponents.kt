@@ -39,8 +39,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.example.qrscannerapp.DistributionReport
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import com.example.qrscannerapp.StardustError
 import com.example.qrscannerapp.StardustGlassBg
 import com.example.qrscannerapp.StardustItemBg
@@ -325,7 +325,7 @@ private fun CountChip(label: String, count: Int, color: Color) {
 
 @Composable
 fun TodayStatsDialog(todayCount: Int, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg)) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Outlined.Today, null, tint = StardustPrimary, modifier = Modifier.size(48.dp))
@@ -451,7 +451,7 @@ private fun getActionDescriptionShort(entry: PalletActivityLogEntry): String {
 
 @Composable
 fun BufferDetailsDialog(items: List<String>, onDismiss: () -> Unit, onDeleteItem: (String) -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg), modifier = Modifier.heightIn(max = 500.dp)) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -634,7 +634,7 @@ fun CellTypeSelectionDialog(
 ) {
     val currentType = pallet.resolvedCellType
 
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = StardustModalBg)
@@ -761,7 +761,7 @@ fun ExportOptionsDialog(
     onSharePdf: () -> Unit,
     onSavePdf: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg)) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text("Экспорт склада", color = StardustTextPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
@@ -817,7 +817,7 @@ fun DistributionReportDialog(
     val hasErrors = report.errorCount > 0
     val dialogColor = if (hasErrors) StardustWarning else StardustSuccess
 
-    Dialog(onDismissRequest = {}) {
+    AnimatedDialogWrapper(onDismiss = {}) {
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = StardustModalBg),

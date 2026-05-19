@@ -5,6 +5,11 @@
         name="update_apk"
         path="Download/" />
 
+    <!-- Фото для АКБ выдачи/приёмки -->
+    <external-files-path
+        name="akb_photos"
+        path="Pictures/" />
+
     <!-- Существующий путь для временного хранения QR-кодов -->
     <cache-path
         name="shared_images"

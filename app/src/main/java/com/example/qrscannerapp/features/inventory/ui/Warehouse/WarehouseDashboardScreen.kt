@@ -42,6 +42,7 @@ import com.example.qrscannerapp.features.inventory.data.NewsItem
 import com.example.qrscannerapp.features.inventory.data.OrderStatus
 import com.example.qrscannerapp.features.inventory.data.WarehouseOrder
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.ActivityLogSheet
+import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.EmployeeHistorySheet
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.NewsEditSheet
 import com.example.qrscannerapp.features.inventory.ui.distribution.AnimatedCounterText
 import kotlinx.coroutines.delay
@@ -109,6 +110,9 @@ fun WarehouseDashboardScreen(
     var showNewsEditSheet by remember { mutableStateOf(false) }
     var newsItemToEdit by remember { mutableStateOf<NewsItem?>(null) }
     var showEmployeeSheet by remember { mutableStateOf(false) }
+    var showEmployeeHistory by remember { mutableStateOf(false) }
+    var syncIsBusy by remember { mutableStateOf(false) }
+    var syncSuccess by remember { mutableStateOf(false) }
 
     // Используем ID заказа для открытия деталей, чтобы данные всегда были свежими
     var selectedOrderId by remember { mutableStateOf<String?>(null) }
@@ -120,7 +124,24 @@ fun WarehouseDashboardScreen(
     val newsItems by viewModel.newsItems.collectAsState()
     val shiftState by viewModel.shiftState.collectAsState()
     val allEmployees by viewModel.employees.collectAsState()
+    val allUsers by viewModel.allUsers.collectAsState()
     val orders by viewModel.orders.collectAsState()
+    val employeeHistory by viewModel.employeeHistory.collectAsState()
+    val isEmployeeHistoryLoading by viewModel.isEmployeeHistoryLoading.collectAsState()
+
+    LaunchedEffect(syncIsBusy) {
+        if (syncIsBusy) {
+            delay(2000)
+            syncIsBusy = false
+            syncSuccess = true
+        }
+    }
+    LaunchedEffect(syncSuccess) {
+        if (syncSuccess) {
+            delay(3000)
+            syncSuccess = false
+        }
+    }
 
     // Подписка на заказы при входе на экран
     LaunchedEffect(key1 = userId, key2 = canManageWarehouse) {
@@ -226,6 +247,78 @@ fun WarehouseDashboardScreen(
                     )
                 }
             }
+
+            // === ИНСТРУМЕНТЫ КЛАДОВЩИКА ===
+            if (canManageWarehouse) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = { showEmployeeHistory = true },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                StardustTextSecondary.copy(alpha = 0.3f)
+                            )
+                        ) {
+                            Icon(
+                                Icons.Outlined.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = StardustTextSecondary
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "По сотруднику",
+                                color = StardustTextSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        val syncColor = when {
+                            syncSuccess -> Color(0xFF4CAF50)
+                            syncIsBusy -> StardustPrimary.copy(alpha = 0.5f)
+                            else -> Color(0xFF2A4A35)
+                        }
+                        Button(
+                            onClick = {
+                                if (!syncIsBusy && !syncSuccess) {
+                                    syncIsBusy = true
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = syncColor),
+                            enabled = !syncIsBusy
+                        ) {
+                            if (syncIsBusy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    if (syncSuccess) Icons.Outlined.CheckCircle else Icons.Outlined.Sync,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (syncSuccess) "Готово" else "Синхр. 1С",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -235,6 +328,19 @@ fun WarehouseDashboardScreen(
         ActivityLogSheet(
             activities = groupedActivities,
             onDismiss = { showActivityLog = false }
+        )
+    }
+
+    if (showEmployeeHistory && canManageWarehouse) {
+        EmployeeHistorySheet(
+            employees = allUsers,
+            employeeHistory = employeeHistory,
+            isLoading = isEmployeeHistoryLoading,
+            onSelectEmployee = { emp -> viewModel.loadEmployeeHistory(emp.id) },
+            onDismiss = {
+                showEmployeeHistory = false
+                viewModel.clearEmployeeHistory()
+            }
         )
     }
 

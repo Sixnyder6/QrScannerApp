@@ -44,7 +44,7 @@ fun ChatWidget(
     dmInboxViewModel: DirectInboxViewModel,
     hazeState: HazeState,
     modifier: Modifier = Modifier,
-    sheenFraction: Float = 0f,
+    sheenPhaseOffset: Float = 0f,
     onTap: () -> Unit
 ) {
     val totalUnreadChat by chatViewModel.totalUnread.collectAsState()
@@ -70,12 +70,12 @@ fun ChatWidget(
     }
 
     WidgetCard(
-        accentColor  = ChatAccent,
-        hazeState    = hazeState,
-        modifier     = modifier,
-        glowStrength = if (totalUnread > 0) 0.85f else 0.3f,
-        sheenFraction   = sheenFraction,
-        onClick      = onTap
+        accentColor      = ChatAccent,
+        hazeState        = hazeState,
+        modifier         = modifier,
+        glowStrength     = if (totalUnread > 0) 0.85f else 0.3f,
+        sheenPhaseOffset = sheenPhaseOffset,
+        onClick          = onTap
     ) {
         Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

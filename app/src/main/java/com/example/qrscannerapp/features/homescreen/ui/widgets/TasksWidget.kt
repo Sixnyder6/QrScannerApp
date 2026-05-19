@@ -40,7 +40,7 @@ fun TasksWidget(
     viewModel: MyTasksViewModel,
     hazeState: HazeState,
     modifier: Modifier = Modifier,
-    sheenFraction: Float = 0f,
+    sheenPhaseOffset: Float = 0f,
     onTap: () -> Unit,
     onLongPress: (() -> Unit)? = null
 ) {
@@ -67,12 +67,12 @@ fun TasksWidget(
     }
 
     WidgetCard(
-        accentColor  = TasksAccent,
-        hazeState    = hazeState,
-        modifier     = modifier.then(gestureModifier),
-        glowStrength = if (active.isNotEmpty()) 0.7f else 0.3f,
-        sheenFraction   = sheenFraction,
-        onClick      = null   // жесты уже обработаны выше
+        accentColor      = TasksAccent,
+        hazeState        = hazeState,
+        modifier         = modifier.then(gestureModifier),
+        glowStrength     = if (active.isNotEmpty()) 0.7f else 0.3f,
+        sheenPhaseOffset = sheenPhaseOffset,
+        onClick          = null     // жесты уже обработаны выше
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),

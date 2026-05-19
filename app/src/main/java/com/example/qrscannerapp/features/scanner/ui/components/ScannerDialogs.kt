@@ -35,8 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.example.qrscannerapp.BatterySearchResult
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import com.example.qrscannerapp.StardustItemBg
 import com.example.qrscannerapp.StardustModalBg
 import com.example.qrscannerapp.StardustPrimary
@@ -51,7 +51,7 @@ fun SearchResultDialog(
     onDismiss: () -> Unit,
     onNavigateToPallet: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = StardustModalBg),
@@ -130,7 +130,7 @@ fun SaveSessionDialog(
     onSave: (name: String?) -> Unit
 ) {
     var text by remember { mutableStateOf("") }
-    Dialog(onDismissRequest = onDismissRequest) {
+    AnimatedDialogWrapper(onDismiss = onDismissRequest) {
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = StardustModalBg)

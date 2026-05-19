@@ -37,7 +37,7 @@ fun TodayStatsWidget(
     viewModel: AccountViewModel,
     hazeState: HazeState,
     modifier: Modifier = Modifier,
-    sheenFraction: Float = 0f,
+    sheenPhaseOffset: Float = 0f,
     onTap: () -> Unit
 ) {
     val state          by viewModel.uiState.collectAsState()
@@ -52,12 +52,12 @@ fun TodayStatsWidget(
     }
 
     WidgetCard(
-        accentColor  = TodayAccent,
-        hazeState    = hazeState,
-        modifier     = modifier,
-        glowStrength = if (scansToday > 0) 0.6f else 0.3f,
-        sheenFraction   = sheenFraction,
-        onClick      = onTap
+        accentColor      = TodayAccent,
+        hazeState        = hazeState,
+        modifier         = modifier,
+        glowStrength     = if (scansToday > 0) 0.6f else 0.3f,
+        sheenPhaseOffset = sheenPhaseOffset,
+        onClick          = onTap
     ) {
         Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(

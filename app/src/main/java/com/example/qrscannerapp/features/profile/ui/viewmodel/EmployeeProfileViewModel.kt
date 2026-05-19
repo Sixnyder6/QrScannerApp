@@ -182,14 +182,19 @@ class EmployeeProfileViewModel @Inject constructor(
                     "shiftStartTime" to FieldValue.delete(),
                     "activeShiftId" to FieldValue.delete()
                 )
+                val now = System.currentTimeMillis()
                 if (activeShiftId != null) {
                     val shiftRef = firestore.collection("shifts").document(activeShiftId)
+                    val startTime = shiftRef.get().await().getLong("startTime") ?: now
+                    val durationMinutes = ((now - startTime) / 60000).toInt()
                     firestore.runTransaction { transaction ->
                         transaction.update(userRef, userUpdates)
                         transaction.update(
                             shiftRef, mapOf(
-                                "endTime" to System.currentTimeMillis(),
-                                "status" to "COMPLETED"
+                                "endTime" to now,
+                                "durationMinutes" to durationMinutes,
+                                "status" to "FORCE_ENDED",
+                                "endReason" to "admin_force"
                             )
                         )
                     }.await()

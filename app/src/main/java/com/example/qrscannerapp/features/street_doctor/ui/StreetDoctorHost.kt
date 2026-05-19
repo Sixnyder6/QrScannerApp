@@ -145,7 +145,7 @@ fun StreetDoctorHost(
                             onRemoveFromCart    = { id -> warehouseVm.onRemoveFromCart(id) },
                             onSubmitOrder       = { warehouseVm.onSubmitOrder(currentUserId, currentUserName, currentUserRole) },
                             onNavigateToAddItem = { },
-                            onTakeItem          = { item, qty -> warehouseVm.onTakeItem(item, qty, currentUserName) },
+                            onTakeItem          = { item, qty -> warehouseVm.onTakeItem(item, qty, currentUserName, currentUserId) },
                             isAdmin             = false,
                             userRole            = com.example.qrscannerapp.UserRole.TECHNIC,
                             onNavigateBack      = { warehouseNav.popBackStack() }

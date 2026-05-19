@@ -31,7 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Delete
@@ -131,7 +130,8 @@ fun StardustScreen(
     onNavigateToPalletDistribution: () -> Unit,
     onNavigateToStorage: () -> Unit,
     onNavigateToHistory: () -> Unit,
-    onNavigateToVisualRepair: (String) -> Unit = {}
+    onNavigateToVisualRepair: (String) -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
 ) {
     var hasCameraPermission by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(
@@ -172,16 +172,6 @@ fun StardustScreen(
                 },
                 onStatusUpdate = { msg: String, isErr: Boolean -> viewModel.updateStatus(msg, isErr) }
             )
-
-            IconButton(
-                onClick = onMenuClick,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp)
-                    .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-            ) {
-                Icon(Icons.Default.Menu, "Меню", tint = Color.White)
-            }
 
             IconButton(
                 onClick = { viewModel.toggleSearchMode() },
@@ -246,6 +236,17 @@ fun StardustScreen(
                 onNavigateToHistory = onNavigateToHistory
             )
         }
+        BottomNavBar(
+            currentTab = BottomTab.SCANNER,
+            onTabSelected = { tab ->
+                when (tab) {
+                    BottomTab.SCANNER  -> { /* уже здесь */ }
+                    BottomTab.STORAGE  -> onNavigateToStorage()
+                    BottomTab.SETTINGS -> onNavigateToSettings()
+                    BottomTab.MENU     -> onMenuClick()
+                }
+            }
+        )
     }
 
     if (searchResult != null) {

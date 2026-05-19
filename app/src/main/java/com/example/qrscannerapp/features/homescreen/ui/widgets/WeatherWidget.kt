@@ -33,7 +33,7 @@ private val WeatherAccent = Color(0xFF6A5AE0)
 fun WeatherWidget(
     hazeState: HazeState,
     modifier: Modifier = Modifier,
-    sheenFraction: Float = 0f
+    sheenPhaseOffset: Float = 0f
 ) {
     var weather  by remember { mutableStateOf<WeatherData?>(null) }
     var dateText by remember { mutableStateOf("") }
@@ -46,7 +46,13 @@ fun WeatherWidget(
         while (true) { weather = WeatherRepo.load() ?: weather; delay(30 * 60 * 1000L) }
     }
 
-    WidgetCard(accentColor = WeatherAccent, hazeState = hazeState, modifier = modifier, glowStrength = 0.6f, sheenFraction = sheenFraction) {
+    WidgetCard(
+        accentColor      = WeatherAccent,
+        hazeState        = hazeState,
+        modifier         = modifier,
+        glowStrength     = 0.6f,
+        sheenPhaseOffset = sheenPhaseOffset,
+    ) {
         Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("САНКТ-ПЕТЕРБУРГ", color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)

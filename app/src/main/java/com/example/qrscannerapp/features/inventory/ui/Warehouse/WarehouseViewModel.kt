@@ -65,6 +65,17 @@ class WarehouseViewModel : ViewModel() {
 
     private var ordersJob: Job? = null
 
+    private val _employeeHistory = MutableStateFlow<List<WarehouseLog>>(emptyList())
+    val employeeHistory: StateFlow<List<WarehouseLog>> = _employeeHistory.asStateFlow()
+
+    private val _isEmployeeHistoryLoading = MutableStateFlow(false)
+    val isEmployeeHistoryLoading: StateFlow<Boolean> = _isEmployeeHistoryLoading.asStateFlow()
+
+    private var employeeHistoryJob: Job? = null
+
+    private val _allUsers = MutableStateFlow<List<Employee>>(emptyList())
+    val allUsers: StateFlow<List<Employee>> = _allUsers.asStateFlow()
+
 
     // --- СОБЫТИЯ UI (Channel) ---
     sealed class UiEvent {
@@ -82,6 +93,7 @@ class WarehouseViewModel : ViewModel() {
         subscribeToNewsStream()
         subscribeToEmployees()
         subscribeToShiftState()
+        subscribeToAllUsers()
         // Подписка на заказы происходит позже, когда мы знаем User ID и роль (в Composable)
     }
 
@@ -284,6 +296,14 @@ class WarehouseViewModel : ViewModel() {
         }
     }
 
+    private fun subscribeToAllUsers() {
+        viewModelScope.launch {
+            repository.getAllInternalUsers()
+                .catch { /* тихо — список не критичен */ }
+                .collect { users -> _allUsers.value = users }
+        }
+    }
+
     private fun subscribeToShiftState() {
         viewModelScope.launch {
             repository.getShiftState()
@@ -398,16 +418,18 @@ class WarehouseViewModel : ViewModel() {
 
     fun onAddNewItem(
         fullName: String, shortName: String, sku: String,
-        category: String, unit: String, totalStock: Int
+        description: String?, category: String, unit: String,
+        totalStock: Int, lowStockThreshold: Int
     ) {
         viewModelScope.launch {
             _isLoading.value = true
             val newItem = WarehouseItem(
                 fullName = fullName, shortName = shortName, sku = sku.ifBlank { null },
+                description = description,
                 category = category, unit = unit,
                 stockCount = totalStock,
                 totalStock = totalStock,
-                lowStockThreshold = (totalStock * 0.1).toInt().coerceAtLeast(1)
+                lowStockThreshold = lowStockThreshold
             )
             val result = repository.addNewItem(newItem)
             _isLoading.value = false
@@ -423,7 +445,8 @@ class WarehouseViewModel : ViewModel() {
     fun onEditItem(
         originalItem: WarehouseItem,
         fullName: String, shortName: String, sku: String,
-        category: String, unit: String, totalStock: Int
+        description: String?, category: String, unit: String,
+        totalStock: Int, lowStockThreshold: Int
     ) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -431,11 +454,12 @@ class WarehouseViewModel : ViewModel() {
                 fullName = fullName,
                 shortName = shortName,
                 sku = sku.ifBlank { null },
+                description = description,
                 category = category,
                 unit = unit,
                 totalStock = totalStock,
                 stockCount = totalStock,
-                lowStockThreshold = (totalStock * 0.1).toInt().coerceAtLeast(1)
+                lowStockThreshold = lowStockThreshold
             )
 
             val result = repository.updateItem(updatedItem)
@@ -459,9 +483,9 @@ class WarehouseViewModel : ViewModel() {
         }
     }
 
-    fun onTakeItem(item: WarehouseItem, quantity: Int, userName: String) {
+    fun onTakeItem(item: WarehouseItem, quantity: Int, userName: String, userId: String = "") {
         viewModelScope.launch {
-            val result = repository.takeItem(item.id, quantity, userName)
+            val result = repository.takeItem(item.id, quantity, userName, userId)
             result.onSuccess {
                 _uiEvents.send(UiEvent.ShowSnackbar("Взято ${item.shortName}: $quantity ${item.unit}"))
                 _scannedItem.value = null
@@ -469,6 +493,25 @@ class WarehouseViewModel : ViewModel() {
                 _uiEvents.send(UiEvent.ShowSnackbar("Ошибка: ${e.message}"))
             }
         }
+    }
+
+    fun loadEmployeeHistory(userId: String) {
+        employeeHistoryJob?.cancel()
+        _isEmployeeHistoryLoading.value = true
+        employeeHistoryJob = viewModelScope.launch {
+            repository.getLogsForEmployee(userId)
+                .catch { _isEmployeeHistoryLoading.value = false }
+                .collect { logs ->
+                    _employeeHistory.value = logs
+                    _isEmployeeHistoryLoading.value = false
+                }
+        }
+    }
+
+    fun clearEmployeeHistory() {
+        employeeHistoryJob?.cancel()
+        _employeeHistory.value = emptyList()
+        _isEmployeeHistoryLoading.value = false
     }
 
     fun onUpdateItemImageUrl(item: WarehouseItem, newUrl: String?) {

@@ -2,9 +2,7 @@
 
 package com.example.qrscannerapp.features.inventory.ui.Warehouse // ИСПРАВЛЕНО: Пакет теперь соответствует структуре папок
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,16 +10,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -42,7 +36,9 @@ fun WarehouseAddItemScreen(
     var fullName by remember { mutableStateOf("") }
     var shortName by remember { mutableStateOf("") }
     var sku by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
     var totalStockText by remember { mutableStateOf("") }
+    var lowStockThresholdText by remember { mutableStateOf("5") }
     var selectedUnit by remember { mutableStateOf("шт.") }
     var isCategoryExpanded by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf("") }
@@ -82,8 +78,10 @@ fun WarehouseAddItemScreen(
                             val newItem = NewItemData(
                                 fullName = fullName, shortName = shortName,
                                 sku = sku.ifBlank { "N/A-${UUID.randomUUID().toString().take(6)}" },
+                                description = description.ifBlank { null },
                                 category = finalCategory, unit = selectedUnit,
-                                totalStock = totalStockText.toIntOrNull() ?: 0
+                                totalStock = totalStockText.toIntOrNull() ?: 0,
+                                lowStockThreshold = lowStockThresholdText.toIntOrNull()?.coerceAtLeast(1) ?: 5
                             )
                             onItemCreated(newItem)
                         },
@@ -103,8 +101,6 @@ fun WarehouseAddItemScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             Spacer(modifier = Modifier.height(16.dp))
-            ImagePickerPlaceholder()
-            Spacer(modifier = Modifier.height(24.dp))
 
             OutlinedTextField(
                 value = fullName,
@@ -129,6 +125,16 @@ fun WarehouseAddItemScreen(
                 onValueChange = { sku = it },
                 label = { Text("Артикул (SKU)") },
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = textFieldColors
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = { Text("Описание (необязательно)") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
                 shape = RoundedCornerShape(14.dp),
                 colors = textFieldColors
             )
@@ -188,7 +194,7 @@ fun WarehouseAddItemScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = totalStockText,
                     onValueChange = { totalStockText = it.filter { char -> char.isDigit() } },
@@ -198,9 +204,18 @@ fun WarehouseAddItemScreen(
                     shape = RoundedCornerShape(14.dp),
                     colors = textFieldColors
                 )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text("Ед. изм.", color = StardustTextSecondary)
+                OutlinedTextField(
+                    value = lowStockThresholdText,
+                    onValueChange = { lowStockThresholdText = it.filter { char -> char.isDigit() } },
+                    label = { Text("Порог «мало»") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = textFieldColors
+                )
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Ед. изм.", color = StardustTextSecondary)
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("шт.", "грамм", "пар").forEach { unit ->
@@ -229,30 +244,6 @@ fun WarehouseAddItemScreen(
                 }
             }
             Spacer(modifier = Modifier.height(32.dp))
-        }
-    }
-}
-
-@Composable
-private fun ImagePickerPlaceholder() {
-    val stroke = Stroke(width = 2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f))
-    val color = StardustTextSecondary
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(150.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(StardustItemBg)
-            .clickable { /* TODO: Логика выбора фото */ },
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawRoundRect(color = color, style = stroke, cornerRadius = CornerRadius(18.dp.toPx()))
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Default.AddAPhoto, "Добавить фото", tint = StardustTextSecondary, modifier = Modifier.size(40.dp))
-            Text("Нажмите, чтобы добавить фото", color = StardustTextSecondary, fontWeight = FontWeight.SemiBold)
         }
     }
 }

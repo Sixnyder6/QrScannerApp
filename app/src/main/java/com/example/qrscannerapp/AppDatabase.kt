@@ -32,6 +32,11 @@ import com.example.qrscannerapp.data.local.dao.TelemetryDao
 import com.example.qrscannerapp.data.local.entity.TelemetryBuffer
 // --------------------------------------
 
+// --- ИМПОРТЫ ДЛЯ SPYDER3000 ---
+import com.example.qrscannerapp.features.settings.ui.SpyderAnimationDao
+import com.example.qrscannerapp.features.settings.ui.SpyderAnimationLog
+// ------------------------------
+
 @Database(
     entities = [
         BatteryRepairLogEntity::class,
@@ -41,9 +46,10 @@ import com.example.qrscannerapp.data.local.entity.TelemetryBuffer
         StorageCellEntity::class,
         StoragePalletEntity::class,
         InteractionSessionEntity::class,
-        TelemetryBuffer::class  // <<< НОВОЕ
+        TelemetryBuffer::class,
+        SpyderAnimationLog::class
     ],
-    version = 15, // <<< Увеличили с 14 до 15 (добавлена TelemetryBuffer)
+    version = 16,
     exportSchema = false
 )
 @TypeConverters(
@@ -66,6 +72,8 @@ abstract class AppDatabase : RoomDatabase() {
 
     // <<< НОВОЕ: DAO для телеметрии
     abstract fun telemetryDao(): TelemetryDao
+
+    abstract fun spyderAnimationDao(): SpyderAnimationDao
 
     companion object {
         @Volatile

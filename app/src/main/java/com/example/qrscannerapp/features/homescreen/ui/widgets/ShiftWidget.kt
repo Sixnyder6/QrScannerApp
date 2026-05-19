@@ -55,7 +55,7 @@ fun ShiftWidget(
     authManager: AuthManager,
     hazeState: HazeState,
     modifier: Modifier = Modifier,
-    sheenFraction: Float = 0f,
+    sheenPhaseOffset: Float = 0f,
     onTap: () -> Unit
 ) {
     val authState by authManager.authState.collectAsState()
@@ -86,12 +86,12 @@ fun ShiftWidget(
     val progressFraction = (totalMinutes / (12f * 60f)).coerceIn(0f, 1f)
 
     WidgetCard(
-        accentColor = accent,
-        hazeState = hazeState,
-        modifier = modifier,
-        glowStrength = if (isActive) 1f else 0.4f,
-        sheenFraction = sheenFraction,
-        onClick = onTap
+        accentColor      = accent,
+        hazeState        = hazeState,
+        modifier         = modifier,
+        glowStrength     = if (isActive) 1f else 0.4f,
+        sheenPhaseOffset = sheenPhaseOffset,
+        onClick          = onTap
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),

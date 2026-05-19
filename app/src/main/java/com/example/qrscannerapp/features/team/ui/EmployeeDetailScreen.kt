@@ -74,6 +74,7 @@ private data class DeviceTelemetry(
     val activeDeviceId: String = "", // [НОВОЕ] Добавлено поле
     val appVersion: String = "",
     val lastSeen: Long = 0L,
+    val telemetryUpdatedAt: Long = 0L,
     // GPS
     val locationLat: Double? = null,
     val locationLng: Double? = null,
@@ -101,6 +102,7 @@ fun EmployeeDetailScreen(
 
     var activitySummary by remember { mutableStateOf(ActivitySummary()) }
     var telemetry by remember { mutableStateOf(DeviceTelemetry()) }
+    var employeeShiftStartTime by remember { mutableStateOf(0L) }
 
     // ── Realtime listeners: internal_users (lastSeen) + device_telemetry (телеметрия) ──
     DisposableEffect(userId) {
@@ -133,6 +135,7 @@ fun EmployeeDetailScreen(
                         activeDeviceId = snapshot.getString("activeDeviceId") ?: "",
                         appVersion = snapshot.getString("appVersion") ?: "",
                         lastSeen = currentLastSeen,
+                        telemetryUpdatedAt = snapshot.getLong("updatedAt") ?: 0L,
                         locationLat = snapshot.getDouble("locationLat"),
                         locationLng = snapshot.getDouble("locationLng"),
                         locationTimestamp = snapshot.getLong("locationTimestamp") ?: 0L,
@@ -153,6 +156,7 @@ fun EmployeeDetailScreen(
                 }
                 if (snapshot != null && snapshot.exists()) {
                     currentLastSeen = snapshot.getLong("lastSeen") ?: 0L
+                    employeeShiftStartTime = snapshot.getLong("shiftStartTime") ?: 0L
                     telemetry = telemetry.copy(lastSeen = currentLastSeen)
                 }
             }
@@ -256,7 +260,7 @@ fun EmployeeDetailScreen(
                         val profile = profileState.userProfile
                         ProfileHeader(
                             name = profile.name.takeIf { it != "Загрузка..." } ?: userName,
-                            role = profile.role.takeIf { it.isNotBlank() } ?: userRole,
+                            role = profile.role.takeIf { it.isNotBlank() } ?: UserRole.fromKey(userRole).displayName,
                             roleColor = roleColor,
                             isShiftActive = profile.isShiftActive
                         )
@@ -265,11 +269,15 @@ fun EmployeeDetailScreen(
                     // МЕТРИКИ ЗА СЕГОДНЯ
                     item {
                         SectionLabel("Сегодня")
+                        val shiftDuration = if (profileState.userProfile.isShiftActive && employeeShiftStartTime > 0L)
+                            TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - employeeShiftStartTime)
+                        else
+                            activitySummary.shiftDurationMinutes
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             MetricCard("Сканов", activitySummary.scansToday.toString(), Icons.Default.QrCodeScanner, Modifier.weight(1f))
                             MetricCard("Партий", activitySummary.batchesToday.toString(), Icons.Default.Inventory, Modifier.weight(1f))
                             MetricCard("Скан/час", activitySummary.scanRatePerHour.toString(), Icons.Default.Speed, Modifier.weight(1f))
-                            MetricCard("На смене", formatShiftDuration(activitySummary.shiftDurationMinutes), Icons.Default.Timer, Modifier.weight(1f))
+                            MetricCard("На смене", formatShiftDuration(shiftDuration), Icons.Default.Timer, Modifier.weight(1f))
                         }
                     }
 
@@ -621,6 +629,23 @@ private fun LiveDeviceCard(telemetry: DeviceTelemetry) {
                 HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
                 DeviceRow("Uptime", telemetry.deviceUptime, Icons.Default.Update)
             }
+
+            if (telemetry.telemetryUpdatedAt > 0L) {
+                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
+                val minsSinceUpdate = TimeUnit.MILLISECONDS.toMinutes(now - telemetry.telemetryUpdatedAt)
+                val updatedText = when {
+                    minsSinceUpdate < 1 -> "только что"
+                    minsSinceUpdate < 60 -> "$minsSinceUpdate мин. назад"
+                    minsSinceUpdate < 1440 -> "${minsSinceUpdate / 60} ч. назад"
+                    else -> "${minsSinceUpdate / 1440} дн. назад"
+                }
+                val freshColor = when {
+                    minsSinceUpdate < 5 -> StardustSuccess
+                    minsSinceUpdate < 15 -> StardustWarning
+                    else -> StardustError
+                }
+                DeviceRow("Данные обновлены", updatedText, Icons.Default.Sync, freshColor)
+            }
         }
     }
 }
@@ -662,7 +687,7 @@ private fun ProfileHeader(name: String, role: String, roleColor: Color, isShiftA
         Spacer(modifier = Modifier.height(6.dp))
         Surface(color = roleColor.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
             Text(
-                UserRole.fromKey(role).displayName, color = roleColor,
+                role, color = roleColor,
                 fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
             )
@@ -698,7 +723,19 @@ private fun MetricCard(label: String, value: String, icon: ImageVector, modifier
 private fun WeeklyChart(scans: List<Int>) {
     if (scans.size < 7) return
     val maxScans = scans.maxOrNull()?.takeIf { it > 0 } ?: 1
-    val dayNames = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+    // dayIndex=0 — 6 дней назад, dayIndex=6 — сегодня
+    val dayNames = remember {
+        val dayMap = mapOf(
+            Calendar.MONDAY to "Пн", Calendar.TUESDAY to "Вт", Calendar.WEDNESDAY to "Ср",
+            Calendar.THURSDAY to "Чт", Calendar.FRIDAY to "Пт",
+            Calendar.SATURDAY to "Сб", Calendar.SUNDAY to "Вс"
+        )
+        val cal = Calendar.getInstance()
+        (0..6).map { i ->
+            cal.timeInMillis = System.currentTimeMillis() - (6 - i) * 24 * 60 * 60 * 1000L
+            dayMap[cal.get(Calendar.DAY_OF_WEEK)] ?: "?"
+        }
+    }
     val animProgress = remember(scans) { Animatable(0f) }
     LaunchedEffect(scans) { animProgress.snapTo(0f); animProgress.animateTo(1f, tween(700, easing = FastOutSlowInEasing)) }
     val progress by animProgress.asState()

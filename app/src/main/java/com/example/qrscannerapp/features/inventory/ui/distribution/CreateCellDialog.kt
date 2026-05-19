@@ -28,8 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.example.qrscannerapp.StardustError
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import com.example.qrscannerapp.StardustGlassBg
 import com.example.qrscannerapp.StardustItemBg
 import com.example.qrscannerapp.StardustModalBg
@@ -68,7 +68,7 @@ fun CreateCellDialog(
     val capacity = capacityText.toIntOrNull()
     val isCapacityValid = capacity != null && capacity in 1..9999
 
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = StardustModalBg),

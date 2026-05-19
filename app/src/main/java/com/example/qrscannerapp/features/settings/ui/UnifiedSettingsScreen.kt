@@ -45,9 +45,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.example.qrscannerapp.*
@@ -66,6 +65,10 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
     val isSoundEnabled     by settingsManager.isSoundEnabledFlow.collectAsState(initial = true)
     val isVibrationEnabled by settingsManager.isVibrationEnabledFlow.collectAsState(initial = true)
     val currentTheme by settingsManager.appThemeFlow.collectAsState(initial = AppTheme.ENGINE)
+    val dialogAnimation by settingsManager.dialogAnimationFlow
+        .collectAsState(initial = DialogAnimation.SCALE_BOUNCY)
+    val isSpyderAutoUpdate by settingsManager.spyderAutoUpdateFlow
+        .collectAsState(initial = true)
 
     var hasNotificationPermission by remember {
         mutableStateOf(
@@ -319,6 +322,18 @@ fun UnifiedSettingsScreen(authManager: AuthManager) {
         }
         Spacer(modifier = Modifier.height(24.dp))
 
+        // --- Spyder3000 ---
+        SettingsCategory(title = "Графический движок")
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF000000))
+        ) {
+            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                Spyder3000SettingsItem()
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+
         // --- Об авторе ---
         SettingsCategory(title = "Об авторе")
         Card(
@@ -477,10 +492,7 @@ private fun ThemePickerDialog(
     onThemeSelected: (AppTheme) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
@@ -804,10 +816,7 @@ private fun DownloadProgressIndicator(progress: Int) {
 
 @Composable
 fun FullScreenImageViewerDialog(imageUrl: String, onDismiss: () -> Unit) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1120,10 +1129,7 @@ private fun VersionHistoryDemoDialog(onDismiss: () -> Unit) {
         )
     )
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()

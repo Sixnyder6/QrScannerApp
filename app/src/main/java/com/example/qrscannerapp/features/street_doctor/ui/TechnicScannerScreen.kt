@@ -40,8 +40,8 @@ import androidx.compose.ui.text.input.*
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.qrscannerapp.AuthManager
@@ -720,7 +720,7 @@ private fun UnplannedScooterDialog(
     onAdd: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = { if (!isAdding) onDismiss() }) {
+    AnimatedDialogWrapper(onDismiss = { if (!isAdding) onDismiss() }) {
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E28))
@@ -889,7 +889,7 @@ private fun ManualInputDialog(
         else -> KeyboardType.Ascii
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E28))

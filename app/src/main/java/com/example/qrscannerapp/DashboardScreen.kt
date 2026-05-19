@@ -29,9 +29,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import com.example.qrscannerapp.common.ui.AppBackground
+import com.example.qrscannerapp.common.ui.FloatingEntrance
 import com.example.qrscannerapp.common.ui.SkeletonBlock
 import com.example.qrscannerapp.features.tasks.domain.model.Task
 import com.example.qrscannerapp.features.tasks.domain.model.TaskPriority
@@ -128,7 +129,7 @@ fun DashboardScreen(
 
                         // ── 4 виджета 2×2 + раскрытая панель ──
                         item(key = "widgets") {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FloatingEntrance(delayMs = 60) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     DashWidget(
                                         title = "Сканы", value = uiState.scansToday.toString(), icon = Icons.Default.QrCodeScanner,
@@ -193,22 +194,24 @@ fun DashboardScreen(
                                         ExpandedWidget.NONE -> Box(Modifier.fillMaxWidth().height(0.dp))
                                     }
                                 }
-                            }
+                            } }
                         }
 
                         // ── График активности ──
                         item(key = "activity_chart") {
+                            FloatingEntrance(delayMs = 160) {
                             val chartPoints = when (uiState.chartMode) {
                                 ActivityChartMode.TODAY -> uiState.hourlyActivity
                                 ActivityChartMode.YESTERDAY -> uiState.yesterdayActivity
                                 ActivityChartMode.WEEK -> uiState.weekActivity
                             }
                             HourlyActivityCard(points = chartPoints, chartMode = uiState.chartMode, onModeChange = { viewModel.setChartMode(it) })
+                            }
                         }
 
                         // ── Инструменты ──
                         item(key = "tools") {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FloatingEntrance(delayMs = 260) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Инструменты", style = MaterialTheme.typography.titleMedium, color = StardustTextSecondary)
                                 ToolCard(
                                     icon = Icons.Default.TwoWheeler, iconColor = Color(0xFF6C5CE7),
@@ -228,7 +231,7 @@ fun DashboardScreen(
                                     title = "Сводка по самокатам", subtitle = "Загрузить и проанализировать Excel",
                                     onClick = onNavigateToVehicleReport
                                 )
-                            }
+                            } }
                         }
 
                         item(key = "bottom_spacer") { Spacer(Modifier.height(80.dp)) }
@@ -566,7 +569,7 @@ private fun DashboardSkeleton() {
 
 @Composable
 private fun AlertDetailsDialog(pendingRequests: List<EmployeeInfo>, outdatedEmployees: List<EmployeeInfo>, currentAppVersion: String, onApprove: (String) -> Unit, onDeny: (String) -> Unit, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg), modifier = Modifier.fillMaxWidth().wrapContentHeight().clip(RoundedCornerShape(20.dp))) {
             Column(modifier = Modifier.padding(20.dp).defaultMinSize(minHeight = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Warning, null, tint = StardustError, modifier = Modifier.size(24.dp)); Spacer(modifier = Modifier.width(10.dp)); Text("Требует внимания", color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f)) }

@@ -23,9 +23,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -136,10 +135,7 @@ private fun WorkerBox(scooter: StreetScooter) {
 
 @Composable
 private fun FullscreenPhotoDialog(url: String, onDismiss: () -> Unit) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Box(
             modifier = Modifier.fillMaxSize().background(Color.Black).clickable { onDismiss() },
             contentAlignment = Alignment.Center

@@ -26,7 +26,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.qrscannerapp.BottomNavBar
+import com.example.qrscannerapp.BottomTab
 import com.example.qrscannerapp.common.ui.AppBackground
+import com.example.qrscannerapp.common.ui.LocalDialogAnimation
 import com.example.qrscannerapp.common.ui.ChatNotification
 import com.example.qrscannerapp.common.ui.ChatNotificationBanner
 import com.example.qrscannerapp.common.ui.ShiftRequestBanner
@@ -79,7 +82,6 @@ import com.example.qrscannerapp.features.vehicle_report.ui.VehicleReportAnalytic
 import com.example.qrscannerapp.features.vehicle_report.ui.VehicleReportHistoryScreen
 import com.example.qrscannerapp.features.vehicle_report.ui.VehicleReportScreen
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -276,11 +278,37 @@ fun MainApp(
     val hapticManager = remember { HapticFeedbackManager(settingsManager) }
     val authState by authManager.authState.collectAsState()
 
+    val appSettingsViewModel: AppSettingsViewModel = hiltViewModel()
+    val globalDialogAnimation by appSettingsViewModel.dialogAnimation.collectAsState()
+
+    val spyderViewModel: com.example.qrscannerapp.features.settings.ui.SpyderSettingsViewModel = hiltViewModel()
+    val spyderRenderConfig by spyderViewModel.spyderEngine.renderConfig.collectAsState()
+    val spyderConfig = com.example.qrscannerapp.common.ui.SpyderConfig(
+        dampingMul    = spyderRenderConfig.dampingMultiplier,
+        stiffnessMul  = spyderRenderConfig.stiffnessMultiplier,
+        throttleLevel = spyderRenderConfig.throttleLevel
+    )
+
     var topBarActions: @Composable RowScope.() -> Unit by remember { mutableStateOf({}) }
     LaunchedEffect(currentRoute) { topBarActions = {} }
 
     val isTechnic = authState.role == UserRole.TECHNIC
 
+    var currentTab by remember { mutableStateOf(BottomTab.SCANNER) }
+
+    LaunchedEffect(currentRoute) {
+        currentTab = when (currentRoute) {
+            Screen.Storage.route    -> BottomTab.STORAGE
+            Screen.Settings.route   -> BottomTab.SETTINGS
+            Screen.Homescreen.route -> BottomTab.MENU
+            else                    -> BottomTab.SCANNER
+        }
+    }
+
+    CompositionLocalProvider(
+        LocalDialogAnimation provides globalDialogAnimation,
+        com.example.qrscannerapp.common.ui.LocalSpyderConfig provides spyderConfig
+    ) {
     AppBackground {
         Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
@@ -371,6 +399,39 @@ fun MainApp(
                             )
                         )
                     }
+                },
+                bottomBar = {
+                    val screensWithoutBottomBar = listOf(
+                        Screen.Scanner.route,
+                        Screen.Chat.route,
+                        Screen.DirectChat.route,
+                        Screen.VisualRepair.route,
+                        Screen.SecurityScanner.route,
+                        Screen.DeliveryForm.route
+                    )
+                    if (currentRoute !in screensWithoutBottomBar) {
+                        BottomNavBar(
+                            currentTab    = currentTab,
+                            onTabSelected = { tab ->
+                                currentTab = tab
+                                when (tab) {
+                                    BottomTab.SCANNER  -> navController.navigate(Screen.Scanner.route) {
+                                        popUpTo(Screen.Scanner.route) { inclusive = false }
+                                        launchSingleTop = true
+                                    }
+                                    BottomTab.STORAGE  -> navController.navigate(Screen.Storage.route) {
+                                        launchSingleTop = true
+                                    }
+                                    BottomTab.SETTINGS -> navController.navigate(Screen.Settings.route) {
+                                        launchSingleTop = true
+                                    }
+                                    BottomTab.MENU     -> navController.navigate(Screen.Homescreen.route) {
+                                        launchSingleTop = true
+                                    }
+                                }
+                            }
+                        )
+                    }
                 }
             ) { innerPadding ->
                 AppNavHost(
@@ -430,6 +491,7 @@ fun MainApp(
             }
         }
     }
+    } // CompositionLocalProvider
 }
 
 // =============================================================================
@@ -469,7 +531,7 @@ fun AppNavHost(
 
     NavHost(
         navController = navController,
-        startDestination = if (isTechnic) Screen.StreetDoctorTasks.route else Screen.Homescreen.route,
+        startDestination = if (isTechnic) Screen.StreetDoctorTasks.route else Screen.Scanner.route,
         modifier = modifier
     ) {
 
@@ -554,6 +616,7 @@ fun AppNavHost(
                 onNavigateToPalletDistribution = { viewModel.onNavigateToPalletDistribution(); navController.navigate(Screen.PalletDistribution.route) },
                 onNavigateToStorage = { navController.navigate(Screen.Storage.route) },
                 onNavigateToHistory = { navController.navigate(Screen.History.route) { launchSingleTop = true } },
+                onNavigateToSettings = { navController.navigate(Screen.Settings.route) { launchSingleTop = true } },
                 onNavigateToVisualRepair = { scooterId -> navController.navigate(Screen.VisualRepair.route.replace("{scooterId}", scooterId)) }
             )
         }
@@ -688,7 +751,7 @@ fun AppNavHost(
                 onRemoveFromCart = { id -> warehouseViewModel.onRemoveFromCart(id) },
                 onSubmitOrder = { warehouseViewModel.onSubmitOrder(currentUserId, currentUserName, currentUserRole) },
                 onNavigateToAddItem = { navController.navigate(Screen.WarehouseAddItem.route) },
-                onTakeItem = { item, quantity -> warehouseViewModel.onTakeItem(item, quantity, currentUserName) },
+                onTakeItem = { item, quantity -> warehouseViewModel.onTakeItem(item, quantity, currentUserName, currentUserId) },
                 isAdmin = isUserManager,
                 userRole = authState.role,
                 onNavigateBack = { navController.popBackStack() }
@@ -714,8 +777,9 @@ fun AppNavHost(
                 onItemCreated = { newItem ->
                     warehouseViewModel.onAddNewItem(
                         fullName = newItem.fullName, shortName = newItem.shortName,
-                        sku = newItem.sku, category = newItem.category, unit = newItem.unit,
-                        totalStock = newItem.totalStock
+                        sku = newItem.sku, description = newItem.description,
+                        category = newItem.category, unit = newItem.unit,
+                        totalStock = newItem.totalStock, lowStockThreshold = newItem.lowStockThreshold
                     )
                 }
             )

@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -47,6 +48,8 @@ import com.example.qrscannerapp.StardustSuccess
 import com.example.qrscannerapp.StardustTextPrimary
 import com.example.qrscannerapp.StardustTextSecondary
 import com.example.qrscannerapp.StardustWarning
+import com.example.qrscannerapp.common.ui.ScannerBeam
+import com.example.qrscannerapp.common.ui.SuccessBurst
 import com.example.qrscannerapp.core.model.ScanEvent
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -79,6 +82,7 @@ fun CameraView(
     var focusRingPosition by remember { mutableStateOf<Offset?>(null) }
     var focusRingAlpha by remember { mutableStateOf(0f) }
     var cameraError by remember { mutableStateOf<String?>(null) }
+    var successBurstTrigger by remember { mutableStateOf(false) }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     DisposableEffect(Unit) { onDispose { cameraExecutor.shutdown() } }
@@ -94,7 +98,7 @@ fun CameraView(
         scanEventFlow.collect { event ->
             launch {
                 val (color, newScale) = when (event) {
-                    ScanEvent.Success -> StardustSuccess to 1.05f
+                    ScanEvent.Success -> { successBurstTrigger = !successBurstTrigger; StardustSuccess to 1.05f }
                     ScanEvent.Duplicate -> StardustError to 1.05f
                 }
                 borderColorTarget = color; scaleTarget = newScale
@@ -193,8 +197,18 @@ fun CameraView(
 
             Box(
                 modifier = Modifier.size(240.dp).align(Alignment.Center).scale(scale)
-                    .border(3.dp, borderColor, RoundedCornerShape(24.dp)).background(Color.Transparent)
-            )
+                    .border(3.dp, borderColor, RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(24.dp))
+            ) {
+                ScannerBeam(modifier = Modifier.fillMaxSize(), color = StardustPrimary, isActive = !isSearchMode)
+            }
+
+            Box(
+                modifier = Modifier.size(240.dp).align(Alignment.Center),
+                contentAlignment = Alignment.Center
+            ) {
+                SuccessBurst(trigger = successBurstTrigger, modifier = Modifier.size(240.dp), color = StardustSuccess)
+            }
 
             focusRingPosition?.let { offset ->
                 Box(

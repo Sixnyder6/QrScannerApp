@@ -267,6 +267,12 @@ class TelemetryManager @Inject constructor(
                 status == BatteryManager.BATTERY_STATUS_FULL
     }
 
+    fun getBatteryTemperatureCelsius(): Float {
+        val intent = getBatteryIntent()
+        val raw = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+return if (raw >= 0) raw / 10f else 0f
+    }
+
     fun getBatteryHealth(): String {
         val intent = getBatteryIntent()
         val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)

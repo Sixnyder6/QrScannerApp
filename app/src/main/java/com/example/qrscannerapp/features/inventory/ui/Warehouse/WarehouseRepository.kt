@@ -27,6 +27,7 @@ class WarehouseRepository {
     private val newsCollection = db.collection("warehouse_news")
     private val stateCollection = db.collection("warehouse_state")
     private val employeesCollection = db.collection("warehouse_employees")
+    private val internalUsersCollection = db.collection("internal_users")
     // --- НОВОЕ: Коллекция заказов ---
     private val ordersCollection = db.collection("warehouse_orders")
 
@@ -127,6 +128,7 @@ class WarehouseRepository {
                         val logEntry = WarehouseLog(
                             itemId = orderItem.itemId,
                             itemName = orderItem.itemName,
+                            userId = order.userId,
                             userName = "${order.userName} (выдал $warehouseManName)",
                             quantityChange = -orderItem.quantity,
                             timestamp = Timestamp.now()
@@ -162,6 +164,22 @@ class WarehouseRepository {
                         doc.toObject(Employee::class.java)?.apply { id = doc.id }
                     }
                     trySend(employees)
+                }
+            }
+        awaitClose { listener.remove() }
+    }
+
+    fun getAllInternalUsers(): Flow<List<Employee>> = callbackFlow {
+        val listener = internalUsersCollection
+            .orderBy("displayName", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) { close(error); return@addSnapshotListener }
+                if (snapshot != null) {
+                    val users = snapshot.documents.mapNotNull { doc ->
+                        val name = doc.getString("displayName") ?: return@mapNotNull null
+                        Employee(id = doc.id, name = name, imageUrl = null)
+                    }
+                    trySend(users)
                 }
             }
         awaitClose { listener.remove() }
@@ -328,7 +346,7 @@ class WarehouseRepository {
         }
     }
 
-    suspend fun takeItem(itemId: String, quantityToTake: Int, userName: String): Result<Unit> {
+    suspend fun takeItem(itemId: String, quantityToTake: Int, userName: String, userId: String = ""): Result<Unit> {
         return try {
             db.runTransaction { transaction ->
                 val docRef = itemsCollection.document(itemId)
@@ -348,6 +366,7 @@ class WarehouseRepository {
                 val logEntry = WarehouseLog(
                     itemId = itemId,
                     itemName = itemName,
+                    userId = userId,
                     userName = userName,
                     quantityChange = -quantityToTake
                 )
@@ -358,6 +377,21 @@ class WarehouseRepository {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    fun getLogsForEmployee(userId: String): Flow<List<WarehouseLog>> = callbackFlow {
+        val listener = logsCollection
+            .whereEqualTo("userId", userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) { close(error); return@addSnapshotListener }
+                if (snapshot != null) {
+                    val logs = snapshot.documents
+                        .mapNotNull { doc -> doc.toObject(WarehouseLog::class.java)?.apply { id = doc.id } }
+                        .sortedByDescending { it.timestamp.toDate().time }
+                    trySend(logs)
+                }
+            }
+        awaitClose { listener.remove() }
     }
 
     suspend fun updateItemImageUrl(itemId: String, newUrl: String?): Result<Unit> {

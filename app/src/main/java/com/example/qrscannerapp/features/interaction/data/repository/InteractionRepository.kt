@@ -3,10 +3,14 @@ package com.example.qrscannerapp.features.interaction.data.repository
 import android.util.Log
 import com.example.qrscannerapp.features.interaction.data.local.dao.InteractionDao
 import com.example.qrscannerapp.features.interaction.data.mapper.toDomainModel
-import com.example.qrscannerapp.features.interaction.data.mapper.toEntity
+import com.example.qrscannerapp.features.interaction.domain.model.BatteryIssuance
+import com.example.qrscannerapp.features.interaction.domain.model.BatteryReception
 import com.example.qrscannerapp.features.interaction.domain.model.InteractionSession
+import com.example.qrscannerapp.features.interaction.domain.model.SbEmployee
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
@@ -17,38 +21,148 @@ class InteractionRepository @Inject constructor(
     private val interactionDao: InteractionDao,
     private val firestore: FirebaseFirestore
 ) {
-    // 1. Сохранение (Сначала локально, потом попытка в облако)
-    suspend fun saveSession(session: InteractionSession): Result<Unit> {
-        return try {
-            // Сначала всегда сохраняем в Room (оффлайн режим по умолчанию)
-            val entity = session.toEntity().copy(isSynced = false)
-            interactionDao.insertSession(entity)
+    // Room history — kept for backward compat (old data)
+    fun getSessionsHistory(): Flow<List<InteractionSession>> =
+        interactionDao.getAllSessionsFlow().map { list -> list.map { it.toDomainModel() } }
 
-            // Пытаемся отправить в Firebase
-            try {
-                firestore.collection("interaction_sessions")
-                    .document(session.id)
-                    .set(session)
-                    .await()
-
-                // Если успешно ушло в облако, ставим галочку в Room
-                interactionDao.markAsSynced(session.id)
-                Log.d("InteractionRepo", "Сессия ${session.id} успешно улетела в облако.")
-            } catch (networkError: Exception) {
-                Log.w("InteractionRepo", "Нет интернета. Сессия ${session.id} сохранена локально.", networkError)
-                // Ошибку сети игнорируем, данные уже в Room, SyncManager потом их заберет
+    // Active issuances (Firestore realtime)
+    fun getActiveIssuances(): Flow<List<BatteryIssuance>> = callbackFlow {
+        val listener = firestore.collection("battery_issuances")
+            .whereEqualTo("isActive", true)
+            .addSnapshotListener { snap, err ->
+                if (err != null) { Log.e("InteractionRepo", "getActiveIssuances", err); return@addSnapshotListener }
+                val list = snap?.documents?.mapNotNull { doc ->
+                    try {
+                        @Suppress("UNCHECKED_CAST")
+                        BatteryIssuance(
+                            id = doc.id,
+                            batteryCodes = doc.get("batteryCodes") as? List<String> ?: emptyList(),
+                            reanimatorCount = (doc.getLong("reanimatorCount") ?: 0L).toInt(),
+                            photoUrl = doc.getString("photoUrl"),
+                            comment = doc.getString("comment") ?: "",
+                            issuedById = doc.getString("issuedById") ?: "",
+                            issuedByName = doc.getString("issuedByName") ?: "",
+                            issuedByRole = doc.getString("issuedByRole") ?: "",
+                            issuedToId = doc.getString("issuedToId") ?: "",
+                            issuedToName = doc.getString("issuedToName") ?: "",
+                            timestamp = doc.getLong("timestamp") ?: 0L,
+                            isActive = doc.getBoolean("isActive") ?: true
+                        )
+                    } catch (e: Exception) { Log.e("InteractionRepo", "parse error doc=${doc.id}", e); null }
+                } ?: emptyList()
+                trySend(list)
             }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun getSbEmployees(): List<SbEmployee> {
+        return try {
+            firestore.collection("internal_users")
+                .whereEqualTo("role", "security")
+                .get().await()
+                .documents.mapNotNull { doc ->
+                    val name = doc.getString("displayName")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    SbEmployee(id = doc.id, displayName = name)
+                }
+        } catch (e: Exception) {
+            Log.e("InteractionRepo", "getSbEmployees", e)
+            emptyList()
+        }
+    }
+
+    fun getRecentReceptions(): Flow<List<BatteryReception>> = callbackFlow {
+        val listener = firestore.collection("battery_receptions")
+            .addSnapshotListener { snap, err ->
+                if (err != null) { Log.e("InteractionRepo", "getRecentReceptions", err); return@addSnapshotListener }
+                val list = snap?.documents?.mapNotNull { doc ->
+                    try {
+                        @Suppress("UNCHECKED_CAST")
+                        BatteryReception(
+                            id = doc.id,
+                            batteryCodes = doc.get("batteryCodes") as? List<String> ?: emptyList(),
+                            scooterCodes = doc.get("scooterCodes") as? List<String> ?: emptyList(),
+                            reanimatorCount = (doc.getLong("reanimatorCount") ?: 0L).toInt(),
+                            photoUrl = doc.getString("photoUrl"),
+                            comment = doc.getString("comment") ?: "",
+                            receivedById = doc.getString("receivedById") ?: "",
+                            receivedByName = doc.getString("receivedByName") ?: "",
+                            receivedFromId = doc.getString("receivedFromId") ?: "",
+                            receivedFromName = doc.getString("receivedFromName") ?: "",
+                            timestamp = doc.getLong("timestamp") ?: 0L
+                        )
+                    } catch (e: Exception) { Log.e("InteractionRepo", "parse error doc=${doc.id}", e); null }
+                } ?: emptyList()
+                trySend(list)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun saveReception(reception: BatteryReception): Result<Unit> {
+        return try {
+            val data = hashMapOf<String, Any?>(
+                "batteryCodes" to reception.batteryCodes,
+                "scooterCodes" to reception.scooterCodes,
+                "reanimatorCount" to reception.reanimatorCount,
+                "photoUrl" to reception.photoUrl,
+                "comment" to reception.comment,
+                "receivedById" to reception.receivedById,
+                "receivedByName" to reception.receivedByName,
+                "receivedFromId" to reception.receivedFromId,
+                "receivedFromName" to reception.receivedFromName,
+                "timestamp" to reception.timestamp
+            )
+            firestore.collection("battery_receptions")
+                .document(reception.id)
+                .set(data).await()
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e("InteractionRepo", "Ошибка сохранения сессии", e)
+            Log.e("InteractionRepo", "saveReception", e)
             Result.failure(e)
         }
     }
 
-    // 2. Получение истории (Room - единственный источник правды для UI)
-    fun getSessionsHistory(): Flow<List<InteractionSession>> {
-        return interactionDao.getAllSessionsFlow().map { list ->
-            list.map { it.toDomainModel() }
+    suspend fun deleteIssuance(id: String): Result<Unit> {
+        return try {
+            firestore.collection("battery_issuances").document(id).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("InteractionRepo", "deleteIssuance", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteReception(id: String): Result<Unit> {
+        return try {
+            firestore.collection("battery_receptions").document(id).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("InteractionRepo", "deleteReception", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveIssuance(issuance: BatteryIssuance): Result<Unit> {
+        return try {
+            val data = hashMapOf<String, Any?>(
+                "batteryCodes" to issuance.batteryCodes,
+                "reanimatorCount" to issuance.reanimatorCount,
+                "photoUrl" to issuance.photoUrl,
+                "comment" to issuance.comment,
+                "issuedById" to issuance.issuedById,
+                "issuedByName" to issuance.issuedByName,
+                "issuedByRole" to issuance.issuedByRole,
+                "issuedToId" to issuance.issuedToId,
+                "issuedToName" to issuance.issuedToName,
+                "timestamp" to issuance.timestamp,
+                "isActive" to issuance.isActive
+            )
+            firestore.collection("battery_issuances")
+                .document(issuance.id)
+                .set(data).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("InteractionRepo", "saveIssuance", e)
+            Result.failure(e)
         }
     }
 }

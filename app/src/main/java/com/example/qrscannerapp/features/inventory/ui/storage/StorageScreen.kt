@@ -68,8 +68,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.qrscannerapp.AuthManager
@@ -1438,7 +1438,7 @@ fun BulkDeleteConfirmDialog(count: Int, onDismiss: () -> Unit, onConfirm: () -> 
 
 @Composable
 fun ScooterSearchResultDialog(scooterNumber: String, locationName: String, lastUser: String, onDismiss: () -> Unit, onNavigate: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Box(contentAlignment = Alignment.BottomCenter, modifier = Modifier.fillMaxWidth().height(460.dp)) {
             Image(painter = painterResource(id = R.drawable.scooter), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(280.dp).align(Alignment.TopCenter).offset(y = 20.dp).zIndex(1f))
             Card(shape = RoundedCornerShape(32.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg), modifier = Modifier.fillMaxWidth().height(300.dp).align(Alignment.BottomCenter)) {
@@ -1463,7 +1463,7 @@ fun ScooterSearchResultDialog(scooterNumber: String, locationName: String, lastU
 fun BulkAddScootersDialog(cell: StorageCell, onDismiss: () -> Unit, onAdd: (StorageCell, String) -> Unit) {
     var text by remember { mutableStateOf("") }
     val recognizedCount = remember(text) { text.lines().count { it.trim().isNotBlank() } }
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg)) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text("Добавить в ${cell.name}", style = MaterialTheme.typography.titleLarge, color = StardustTextPrimary, fontWeight = FontWeight.Bold)
@@ -1510,7 +1510,7 @@ fun HighlightedText(text: String, highlight: String, modifier: Modifier = Modifi
 fun CreateCellDialog(onDismiss: () -> Unit, onCreate: (description: String, capacity: Int) -> Unit) {
     var description by remember { mutableStateOf("") }
     var capacity by remember { mutableStateOf("600") }
-    Dialog(onDismissRequest = onDismiss) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = StardustModalBg)) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Новая ячейка", style = MaterialTheme.typography.titleLarge, color = StardustTextPrimary, fontWeight = FontWeight.Bold)

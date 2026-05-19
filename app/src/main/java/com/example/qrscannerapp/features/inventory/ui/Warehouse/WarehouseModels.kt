@@ -19,6 +19,7 @@ data class WarehouseItem(
     val fullName: String = "",
     val shortName: String = "",
     val sku: String? = null,
+    val description: String? = null,
     val category: String = "Общее",
     val unit: String = "шт.",
     val stockCount: Int = 0,
@@ -37,6 +38,7 @@ data class WarehouseLog(
     @get:Exclude var id: String = "",
     val itemId: String = "",
     val itemName: String = "",
+    val userId: String = "",
     val userName: String = "Неизвестный",
     val quantityChange: Int = 0, // Отрицательное - взяли, Положительное - добавили
     val timestamp: Timestamp = Timestamp.now()

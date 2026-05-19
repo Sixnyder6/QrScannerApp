@@ -38,6 +38,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.qrscannerapp.common.ui.AnimatedProgressBar
+import com.example.qrscannerapp.common.ui.DotsLoader
+import com.example.qrscannerapp.common.ui.MorphButton
+import com.example.qrscannerapp.common.ui.shake
 import com.example.qrscannerapp.features.street_doctor.domain.model.FieldRepairStats
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -79,12 +83,14 @@ fun AccountScreen(authManager: AuthManager) {
     val authState by authManager.authState.collectAsState()
     val context = LocalContext.current
     var showForceUpdateDialog by remember { mutableStateOf(false) }
+    var loginErrorKey by remember { mutableIntStateOf(0) }
 
     val updateManager: UpdateManager = androidx.hilt.navigation.compose.hiltViewModel()
     val updateState by updateManager.updateState.collectAsState()
 
     LaunchedEffect(authState.error) {
         authState.error?.let {
+            loginErrorKey++
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
             authManager.clearError()
         }
@@ -147,7 +153,7 @@ fun AccountScreen(authManager: AuthManager) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    LoginFormComponent(authManager = authManager)
+                    LoginFormComponent(authManager = authManager, loginErrorKey = loginErrorKey)
                 }
             }
         }
@@ -668,6 +674,8 @@ fun ProfileHeader(
     modifier: Modifier = Modifier
 ) {
     val photoUrl = remember(userName) { getEmployeePhotoUrl(userName) }
+    var isShiftLoading by remember { mutableStateOf(false) }
+    LaunchedEffect(isShiftActive) { isShiftLoading = false }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -738,15 +746,17 @@ fun ProfileHeader(
                 }
                 Spacer(Modifier.height(24.dp))
                 if (!isShiftActive) {
-                    Button(
-                        onClick = onStartShift,
+                    MorphButton(
+                        onClick = { isShiftLoading = true; onStartShift() },
+                        isLoading = isShiftLoading,
                         modifier = Modifier.fillMaxWidth().height(50.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentGreen)
+                        containerColor = CorporateColors.AccentGreen
                     ) {
-                        Icon(Icons.Default.PlayArrow, null, tint = Color.White)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Начать смену", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.PlayArrow, null, tint = Color.White)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Начать смену", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        }
                     }
                 } else {
                     Button(
@@ -782,16 +792,18 @@ fun ShiftProgressBar(modifier: Modifier = Modifier, shiftStartTime: Long) {
         }
     }
 
-    val animatedProgress by animateFloatAsState(targetValue = progress, animationSpec = tween(1000, easing = LinearEasing), label = "progress")
-
     Column(modifier = modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Время на смене", color = CorporateColors.TextSecondary, fontSize = 13.sp)
             Text(elapsedTimeText, color = CorporateColors.TextPrimary, fontWeight = FontWeight.Medium, fontSize = 13.sp)
         }
-        Box(modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(CorporateColors.CardSurface)) {
-            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(animatedProgress).clip(CircleShape).background(CorporateColors.AccentGreen))
-        }
+        AnimatedProgressBar(
+            progress = progress,
+            modifier = Modifier.fillMaxWidth(),
+            fillColor = CorporateColors.AccentGreen,
+            trackColor = CorporateColors.CardSurface,
+            cornerRadius = 3.dp
+        )
     }
 }
 
@@ -939,14 +951,20 @@ private fun LogoutDialog(showDialog: Boolean, isShiftActive: Boolean, onDismiss:
 }
 
 @Composable
-private fun LoginFormComponent(authManager: AuthManager) {
+private fun LoginFormComponent(authManager: AuthManager, loginErrorKey: Int = 0) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val passwordFocusRequester = remember { FocusRequester() }
 
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
+    var shakeTrigger by remember { mutableStateOf(false) }
+    LaunchedEffect(loginErrorKey) {
+        if (loginErrorKey > 0) shakeTrigger = !shakeTrigger
+    }
+    val shakeModifier = Modifier.shake(trigger = shakeTrigger)
+
+    Card(modifier = Modifier.fillMaxWidth().then(shakeModifier), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
         Column(modifier = Modifier.border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(24.dp)).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.Lock, null, tint = CorporateColors.AccentPurple, modifier = Modifier.size(48.dp))
             Spacer(Modifier.height(16.dp))
@@ -1004,7 +1022,7 @@ fun TechnicFieldStatsCard(
         ) {
             if (isLoading) {
                 Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = CorporateColors.AccentPurple, modifier = Modifier.size(32.dp))
+                    DotsLoader(color = CorporateColors.AccentPurple)
                 }
             } else {
                 Column {

@@ -33,12 +33,6 @@ import androidx.compose.material.icons.outlined.Summarize
 import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Warehouse
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -66,6 +60,7 @@ import com.example.qrscannerapp.features.homescreen.ui.widgets.TasksWidget
 import com.example.qrscannerapp.features.homescreen.ui.widgets.TeamOnlineWidget
 import com.example.qrscannerapp.features.homescreen.ui.widgets.TodayStatsWidget
 import com.example.qrscannerapp.features.homescreen.ui.widgets.WeatherWidget
+import com.example.qrscannerapp.features.homescreen.ui.widgets.ProvideShimmerPhase
 import com.example.qrscannerapp.features.tasks.ui.viewmodel.MyTasksViewModel
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -126,27 +121,6 @@ fun HomescreenScreen(
 
     val hazeState = rememberHazeState()
 
-    val breathTransition = rememberInfiniteTransition(label = "glow_breath")
-    val sharedBreathPhase by breathTransition.animateFloat(
-        initialValue = 0f,
-        targetValue  = 1f,
-        animationSpec = infiniteRepeatable(
-            animation  = tween(durationMillis = 3600, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "breath_phase"
-    )
-
-    val sheenTransition = rememberInfiniteTransition(label = "card_sheen")
-    val sharedSheenRaw by sheenTransition.animateFloat(
-        initialValue = 0f,
-        targetValue  = 1f,
-        animationSpec = infiniteRepeatable(
-            animation  = tween(durationMillis = 9000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "sheen_raw"
-    )
 
     val tasksViewModel: MyTasksViewModel = hiltViewModel()
     val dmInboxViewModel: DirectInboxViewModel = hiltViewModel()
@@ -186,6 +160,7 @@ fun HomescreenScreen(
         }
     }
 
+    ProvideShimmerPhase {
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -242,28 +217,28 @@ fun HomescreenScreen(
             ) {
                 item(span = { GridItemSpan(2) }) {
                     ShiftWidget(
-                        authManager   = authManager,
-                        hazeState     = hazeState,
-                        modifier      = Modifier.height(160.dp),
-                        sheenFraction = (sharedSheenRaw + 0f) % 1f,
-                        onTap         = { showShiftDialog = true }
+                        authManager      = authManager,
+                        hazeState        = hazeState,
+                        modifier         = Modifier.height(160.dp),
+                        sheenPhaseOffset = 0f,
+                        onTap            = { showShiftDialog = true }
                     )
                 }
                 item(span = { GridItemSpan(2) }) {
                     WeatherWidget(
-                        hazeState     = hazeState,
-                        modifier      = Modifier.height(160.dp),
-                        sheenFraction = (sharedSheenRaw + PHI * 1) % 1f
+                        hazeState        = hazeState,
+                        modifier         = Modifier.height(160.dp),
+                        sheenPhaseOffset = PHI * 1
                     )
                 }
                 item(span = { GridItemSpan(2) }) {
                     TasksWidget(
-                        viewModel     = tasksViewModel,
-                        hazeState     = hazeState,
-                        modifier      = Modifier.height(110.dp),
-                        sheenFraction = (sharedSheenRaw + PHI * 2) % 1f,
-                        onTap         = { showTaskDialog = true },
-                        onLongPress   = actions.openTasks
+                        viewModel        = tasksViewModel,
+                        hazeState        = hazeState,
+                        modifier         = Modifier.height(110.dp),
+                        sheenPhaseOffset = (PHI * 2) % 1f,
+                        onTap            = { showTaskDialog = true },
+                        onLongPress      = actions.openTasks
                     )
                 }
                 item(span = { GridItemSpan(2) }) {
@@ -272,25 +247,25 @@ fun HomescreenScreen(
                         dmInboxViewModel = dmInboxViewModel,
                         hazeState        = hazeState,
                         modifier         = Modifier.height(110.dp),
-                        sheenFraction    = (sharedSheenRaw + PHI * 3) % 1f,
+                        sheenPhaseOffset = (PHI * 3) % 1f,
                         onTap            = actions.openChat
                     )
                 }
                 item(span = { GridItemSpan(3) }) {
                     TodayStatsWidget(
-                        viewModel     = accountViewModel,
-                        hazeState     = hazeState,
-                        modifier      = Modifier.height(110.dp),
-                        sheenFraction = (sharedSheenRaw + PHI * 4) % 1f,
-                        onTap         = actions.openHistory
+                        viewModel        = accountViewModel,
+                        hazeState        = hazeState,
+                        modifier         = Modifier.height(110.dp),
+                        sheenPhaseOffset = (PHI * 4) % 1f,
+                        onTap            = actions.openHistory
                     )
                 }
                 item(span = { GridItemSpan(1) }) {
                     TeamOnlineWidget(
-                        hazeState     = hazeState,
-                        modifier      = Modifier.height(110.dp),
-                        sheenFraction = (sharedSheenRaw + PHI * 5) % 1f,
-                        onTap         = actions.openTeam
+                        hazeState        = hazeState,
+                        modifier         = Modifier.height(110.dp),
+                        sheenPhaseOffset = (PHI * 5) % 1f,
+                        onTap            = actions.openTeam
                     )
                 }
                 items(
@@ -303,7 +278,6 @@ fun HomescreenScreen(
                         icon        = entry.icon,
                         accentColor = entry.accent,
                         phaseOffset = (idx * PHI) % 1f,
-                        breathPhase = sharedBreathPhase,
                         onClick     = entry.onClick
                     )
                 }
@@ -348,5 +322,6 @@ fun HomescreenScreen(
             ShiftDialogContent(authManager = authManager)
         }
     }
+    } // ProvideShimmerPhase
 
 }

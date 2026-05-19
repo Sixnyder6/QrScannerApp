@@ -33,10 +33,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import com.example.qrscannerapp.R
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 // Ваши импорты цветов
 import com.example.qrscannerapp.StardustModalBg
 import com.example.qrscannerapp.StardustPrimary
@@ -87,10 +86,7 @@ fun ScooterSearchResultDialog(
         lightAlpha.animateTo(0.8f, tween(500))
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Box(
             contentAlignment = Alignment.BottomCenter,
             modifier = Modifier

@@ -1,3 +1,5 @@
+// TransitionEngine — движок приложения
+// Настроен под 120fps ProMotion физику
 package com.example.qrscannerapp.common.ui
 
 import androidx.compose.animation.*
@@ -7,8 +9,12 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -26,98 +32,144 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavBackStackEntry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
 // =============================================================================
-// TRANSITION ENGINE — ELEGANT & FLUID
+// SPRING СИСТЕМА — настроена под 120fps
+//
+// Принципы iOS ProMotion физики:
+// 1. Нажатие реагирует за 1 кадр (8ms на 120fps) — нужен высокий stiffness
+// 2. Все элементы одного действия заканчиваются ОДНОВРЕМЕННО
+//    → alpha и scale всегда один и тот же spring
+// 3. Исчезновение быстрее появления (iOS ratio ~0.75x)
+// 4. Навигация без tween — только spring, время определяет физика
+// 5. Интерактивные spring критически быстрее контентных
 // =============================================================================
 
-// --- REFINED SPRING SPECS ---
-
-private val NavigationSpringInt = spring<IntOffset>(
-    dampingRatio = 0.92f,
-    stiffness = 250f
+// Нажатие — мгновенный отклик, 1-2 кадра на 120fps
+// iOS эквивалент: response=0.2, damping=0.82
+internal val PressSpring = spring<Float>(
+    dampingRatio = 0.70f,
+    stiffness    = 750f   // было 550 — +36%, разница ощутима
 )
 
-private val AlphaEasing = CubicBezierEasing(0.33f, 0.0f, 0.67f, 1f)
+// Навигация — чёткая, без overshooting
+// iOS эквивалент: response=0.35, damping=0.90
+internal val NavSpring = spring<Float>(
+    dampingRatio = 0.90f,
+    stiffness    = 420f
+)
 
+internal val NavSpringInt = spring<IntOffset>(
+    dampingRatio = 0.90f,
+    stiffness    = 420f
+)
+
+// Контент — плавное появление, никакого bounce
+// iOS эквивалент: response=0.55, damping=0.95
+internal val ContentSpring = spring<Float>(
+    dampingRatio = 0.95f,
+    stiffness    = 180f
+)
+
+// Bounce — иконки, success, упругие элементы
+// iOS эквивалент: response=0.3, damping=0.55
+internal val BouncySpring = spring<Float>(
+    dampingRatio = 0.52f,
+    stiffness    = 520f
+)
+
+// Падение — диалоги FALL_TOP / SLIDE_BOTTOM, средний bounce
+internal val FallSpring = spring<Float>(
+    dampingRatio = 0.60f,
+    stiffness    = 380f
+)
+
+// Микро — tooltip, badge, мелкие детали
 val MicroSpring = spring<Float>(
-    dampingRatio = 0.72f,
-    stiffness = 600f
-)
-
-private val SlowElegantSpring = spring<Float>(
-    dampingRatio = 0.9f,
-    stiffness = 180f
+    dampingRatio = 0.75f,
+    stiffness    = 700f
 )
 
 // =============================================================================
-// 1. SWIPE BACK — SMOOTH & FORGIVING
+// SPYDER CONFIG — параметры от Spyder3000Engine через CompositionLocal
+// Когда телефон греется, движок меняет множители → все анимации плавно адаптируются
+// =============================================================================
+
+data class SpyderConfig(
+    val dampingMul: Float = 1f,    // >1 = быстрее затухает (меньше bounce)
+    val stiffnessMul: Float = 1f,  // <1 = мягче пружина (медленнее)
+    val throttleLevel: Int = 0     // 0=норма, 1=тепло, 2=горячо, 3=критично
+)
+
+val LocalSpyderConfig = staticCompositionLocalOf { SpyderConfig() }
+
+@Composable
+fun SpyderConfigProvider(
+    config: SpyderConfig,
+    content: @Composable () -> Unit
+) {
+    CompositionLocalProvider(LocalSpyderConfig provides config) { content() }
+}
+
+// Единый easing — только для tween где spring не подходит (skeleton, beam)
+// iOS использует именно эту кривую для большинства анимаций
+internal val IOSEasing = CubicBezierEasing(0.42f, 0.0f, 0.58f, 1.0f) // ease-in-out
+
+// =============================================================================
+// 1. SWIPE BACK — резиновый отклик
 // =============================================================================
 
 class SwipeBackState(
     private val onBack: () -> Unit,
-    private val threshold: Float = 0.3f
+    private val threshold: Float = 0.28f   // немного ниже — легче активировать
 ) {
     var progress by mutableFloatStateOf(0f)
         private set
-
     var isGestureActive by mutableStateOf(false)
         private set
 
-    private val animatableProgress = Animatable(0f)
+    private val animatable = Animatable(0f)
 
-    fun startGesture() {
-        isGestureActive = true
-        progress = 0f
-    }
+    fun startGesture() { isGestureActive = true; progress = 0f }
 
     fun updateProgress(delta: Float, totalWidth: Float) {
-        progress = (delta / totalWidth).coerceIn(0f, 1.15f)
+        // Rubber band: сопротивление нарастает чем дальше тянешь
+        val raw = delta / totalWidth
+        progress = rubberBand(raw).coerceIn(0f, 1.15f)
+    }
+
+    // iOS rubber band формула: x / (1 + abs(x) * resistance)
+    private fun rubberBand(x: Float, resistance: Float = 0.55f): Float {
+        return if (x <= 1f) x else x / (1f + (x - 1f) * resistance)
     }
 
     fun endGesture(scope: kotlinx.coroutines.CoroutineScope) {
         isGestureActive = false
         val shouldComplete = progress > threshold
-
         scope.launch {
             if (shouldComplete) {
-                animatableProgress.snapTo(progress)
-                animatableProgress.animateTo(
-                    targetValue = 1.15f,
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 280f)
-                )
+                animatable.snapTo(progress)
+                animatable.animateTo(1.15f, spring(0.90f, 380f))
                 onBack()
-                animatableProgress.snapTo(0f)
-                progress = 0f
+                animatable.snapTo(0f); progress = 0f
             } else {
-                animatableProgress.snapTo(progress)
-                animatableProgress.animateTo(
-                    targetValue = 0f,
-                    animationSpec = spring(dampingRatio = 0.78f, stiffness = 320f)
-                )
+                animatable.snapTo(progress)
+                // Возврат пружинистый — iOS так и делает
+                animatable.animateTo(0f, spring(0.75f, 450f))
                 progress = 0f
             }
         }
     }
 
-    fun cancelGesture() {
-        isGestureActive = false
-        progress = 0f
-    }
-
-    fun getAnimatedProgress(): Float {
-        return if (isGestureActive) progress else animatableProgress.value
-    }
+    fun cancelGesture() { isGestureActive = false; progress = 0f }
+    fun getAnimatedProgress() = if (isGestureActive) progress else animatable.value
 }
 
 @Composable
-fun rememberSwipeBackState(onBack: () -> Unit): SwipeBackState {
-    return remember { SwipeBackState(onBack) }
-}
+fun rememberSwipeBackState(onBack: () -> Unit) = remember { SwipeBackState(onBack) }
 
 @Composable
 fun Modifier.interactiveSwipeBack(
@@ -125,37 +177,26 @@ fun Modifier.interactiveSwipeBack(
     enabled: Boolean = true
 ): Modifier {
     val scope = rememberCoroutineScope()
-
-    return this.then(
-        if (enabled) {
-            Modifier.pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        swipeBackState.startGesture()
-                    },
-                    onDragEnd = {
-                        swipeBackState.endGesture(scope)
-                    },
-                    onDragCancel = {
-                        swipeBackState.cancelGesture()
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        swipeBackState.updateProgress(
-                            swipeBackState.progress * size.width + dragAmount,
-                            size.width.toFloat()
-                        )
-                    }
+    return this.then(if (enabled) Modifier.pointerInput(Unit) {
+        detectHorizontalDragGestures(
+            onDragStart  = { swipeBackState.startGesture() },
+            onDragEnd    = { swipeBackState.endGesture(scope) },
+            onDragCancel = { swipeBackState.cancelGesture() },
+            onHorizontalDrag = { change, dragAmount ->
+                change.consume()
+                swipeBackState.updateProgress(
+                    swipeBackState.getAnimatedProgress() * size.width + dragAmount,
+                    size.width.toFloat()
                 )
             }
-        } else {
-            Modifier
-        }
-    )
+        )
+    } else Modifier)
 }
 
 // =============================================================================
-// 2. TACTILE BUTTON — REFINED FEEL
+// 2. TACTILE BUTTON
+// Ключевое исправление: alpha и scale — ОДИН spring PressSpring
+// Раньше они могли закончиться в разное время → рывок
 // =============================================================================
 
 @Composable
@@ -163,54 +204,48 @@ fun TactileButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    scaleOnPress: Float = 0.96f,
-    brightnessOnPress: Float = 0.85f,
+    scaleOnPress: Float = 0.94f,      // iOS использует 0.94, не 0.96
+    brightnessOnPress: Float = 0.82f,
     content: @Composable () -> Unit
 ) {
+    val spyder = LocalSpyderConfig.current
     var isPressed by remember { mutableStateOf(false) }
 
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed && enabled) scaleOnPress else 1f,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f),
-        label = "ts"
+    val adaptedPressSpring = spring<Float>(
+        dampingRatio = (0.70f * spyder.dampingMul).coerceIn(0.3f, 1.0f),
+        stiffness    = (750f  * spyder.stiffnessMul).coerceAtLeast(100f)
     )
-
-    val buttonAlpha by animateFloatAsState(
-        targetValue = if (isPressed && enabled) brightnessOnPress else 1f,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f),
-        label = "tb"
+    // Один animationSpec на оба параметра — заканчиваются синхронно
+    val animValue by animateFloatAsState(
+        targetValue   = if (isPressed && enabled) 0f else 1f,
+        animationSpec = adaptedPressSpring,
+        label         = "press"
     )
+    // animValue 0→1: scale = scaleOnPress→1, alpha = brightnessOnPress→1
+    val scale = scaleOnPress + (1f - scaleOnPress) * animValue
+    val alpha = brightnessOnPress + (1f - brightnessOnPress) * animValue
 
     Box(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                alpha = buttonAlpha
-            }
+            .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
                         when {
-                            event.changes.any { it.pressed } -> isPressed = true
+                            event.changes.any { it.pressed }  -> isPressed = true
                             event.changes.any { !it.pressed } -> {
-                                if (isPressed) {
-                                    onClick()
-                                    isPressed = false
-                                }
+                                if (isPressed) { onClick(); isPressed = false }
                             }
                         }
                     }
                 }
             }
-    ) {
-        content()
-    }
+    ) { content() }
 }
 
 // =============================================================================
-// 3. BOUNCY ICON — PLAYFUL BUT CONTROLLED
+// 3. BOUNCY ICON — упругий отклик
 // =============================================================================
 
 @Composable
@@ -219,93 +254,62 @@ fun BouncyIcon(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    var isBouncing by remember { mutableStateOf(false) }
+    val spyder = LocalSpyderConfig.current
+    var bouncing by remember { mutableStateOf(false) }
 
+    val adaptedBouncySpring = spring<Float>(
+        dampingRatio = (0.52f * spyder.dampingMul).coerceIn(0.3f, 1.0f),
+        stiffness    = (520f  * spyder.stiffnessMul).coerceAtLeast(100f)
+    )
     val scale by animateFloatAsState(
-        targetValue = if (isBouncing) 1.25f else 1f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 550f),
-        label = "bs",
-        finishedListener = { isBouncing = false }
+        targetValue      = if (bouncing) 1.20f else 1f,
+        animationSpec    = adaptedBouncySpring,
+        label            = "bounce",
+        finishedListener = { bouncing = false }
     )
 
     Box(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
                         if (event.changes.any { it.pressed && !it.previousPressed }) {
-                            isBouncing = true
-                            onClick()
+                            bouncing = true; onClick()
                         }
                     }
                 }
             }
-    ) {
-        content()
-    }
+    ) { content() }
 }
 
 // =============================================================================
-// 4. SWIPE BACK INDICATOR — ELEGANT FADE
+// 4. SWIPE BACK INDICATORS
 // =============================================================================
 
 @Composable
-fun SwipeBackIndicator(
-    progress: Float,
-    modifier: Modifier = Modifier
-) {
+fun SwipeBackIndicator(progress: Float, modifier: Modifier = Modifier) {
     if (progress <= 0f) return
-
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
-        label = "si"
-    )
-
-    Box(
-        modifier = modifier
-            .fillMaxHeight()
-            .width(3.dp)
-            .alpha((animatedProgress * 0.7f).coerceIn(0f, 1f))
-            .background(Color.White.copy(alpha = animatedProgress.coerceIn(0f, 1f)))
-    )
+    Box(modifier = modifier.fillMaxHeight().width(3.dp)
+        .alpha((progress * 0.7f).coerceIn(0f, 1f))
+        .background(Color.White.copy(alpha = progress.coerceIn(0f, 1f))))
 }
 
 @Composable
-fun BackArrowIndicator(
-    progress: Float,
-    modifier: Modifier = Modifier
-) {
-    val arrowAlpha by animateFloatAsState(
-        targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
-        label = "aa"
-    )
-
+fun BackArrowIndicator(progress: Float, modifier: Modifier = Modifier) {
     Box(
-        modifier = modifier
-            .size(40.dp)
+        modifier = modifier.size(40.dp)
             .graphicsLayer {
-                alpha = arrowAlpha
+                alpha        = progress.coerceIn(0f, 1f)
                 translationX = -progress.coerceIn(0f, 1f) * 120f
             }
-            .background(
-                color = Color.White.copy(alpha = 0.25f * arrowAlpha),
-                shape = RoundedCornerShape(20.dp)
-            ),
+            .background(Color.White.copy(alpha = 0.25f * progress.coerceIn(0f, 1f)),
+                RoundedCornerShape(20.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "\u2039",
-            color = Color.White.copy(alpha = arrowAlpha),
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Medium
-        )
+        Text("‹", color = Color.White.copy(alpha = progress.coerceIn(0f, 1f)),
+            fontSize = 18.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -319,61 +323,45 @@ fun PullToRefreshIndicator(
     pullProgress: Float,
     modifier: Modifier = Modifier
 ) {
-    val rotation by animateFloatAsState(
-        targetValue = if (isRefreshing) 360f else 0f,
-        animationSpec = if (isRefreshing) {
-            infiniteRepeatable(animation = tween(1200, easing = LinearEasing))
-        } else {
-            spring(dampingRatio = 0.8f, stiffness = 250f)
-        },
-        label = "rr"
+    val infiniteTransition = rememberInfiniteTransition(label = "ptr")
+    val spinRotation by infiniteTransition.animateFloat(
+        initialValue  = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(750, easing = LinearEasing), RepeatMode.Restart),
+        label         = "spin"
     )
-
+    val pullRotation by animateFloatAsState(
+        targetValue   = (pullProgress * 180f).coerceIn(0f, 180f),
+        animationSpec = spring(0.85f, 300f), label = "pull"
+    )
     Box(
-        modifier = modifier
-            .size(44.dp)
+        modifier = modifier.size(44.dp)
             .graphicsLayer {
-                rotationZ = rotation
-                alpha = (pullProgress * 2.2f).coerceIn(0f, 1f)
+                rotationZ = if (isRefreshing) spinRotation else pullRotation
+                alpha     = (pullProgress * 2.2f).coerceIn(0f, 1f)
             }
-            .background(
-                color = Color.White.copy(alpha = 0.18f),
-                shape = RoundedCornerShape(22.dp)
-            ),
+            .background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(22.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = if (isRefreshing) "\u21BB" else "\u2193",
-            color = Color.White.copy(alpha = 0.9f),
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Light
-        )
+        Text(if (isRefreshing) "↻" else "↓",
+            color = Color.White.copy(alpha = 0.9f), fontSize = 18.sp, fontWeight = FontWeight.Light)
     }
 }
 
 // =============================================================================
-// 6. CONFETTI — CANVAS-BASED, GRACEFUL
+// 6. CONFETTI
 // =============================================================================
 
-class ConfettiParticle(
-    val x: Float,
-    val y: Float,
-    val velocityX: Float,
-    val velocityY: Float,
-    val color: Color,
-    val size: Float,
-    val rotation: Float,
-    val rotationSpeed: Float
+data class ConfettiParticle(
+    val x: Float, val y: Float,
+    val velocityX: Float, val velocityY: Float,
+    val color: Color, val size: Float,
+    val rotation: Float, val rotationSpeed: Float
 )
 
 @Composable
-fun ConfettiEffect(
-    trigger: Boolean,
-    modifier: Modifier = Modifier,
-    particleCount: Int = 30
-) {
+fun ConfettiEffect(trigger: Boolean, modifier: Modifier = Modifier, particleCount: Int = 28) {
     var show by remember { mutableStateOf(false) }
-    val animatedProgress = remember { Animatable(0f) }
+    val progress = remember { Animatable(0f) }
 
     val particles = remember {
         List(particleCount) {
@@ -382,51 +370,35 @@ fun ConfettiEffect(
                 y = Random.nextFloat() * 0.3f + 0.25f,
                 velocityX = (Random.nextFloat() - 0.5f) * 0.7f,
                 velocityY = (Random.nextFloat() - 0.5f) * -0.7f - 0.25f,
-                color = Color.hsl(
-                    hue = Random.nextFloat() * 360f,
-                    saturation = 0.75f,
-                    lightness = 0.65f
-                ),
+                color = Color.hsl(Random.nextFloat() * 360f, 0.75f, 0.65f),
                 size = Random.nextFloat() * 7f + 3f,
                 rotation = Random.nextFloat() * 360f,
-                rotationSpeed = (Random.nextFloat() - 0.5f) * 540f
+                rotationSpeed = (Random.nextFloat() - 0.5f) * 480f
             )
         }
     }
 
     LaunchedEffect(trigger) {
         if (trigger) {
-            show = true
-            animatedProgress.snapTo(0f)
-            animatedProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(1800, easing = FastOutSlowInEasing)
-            )
-            delay(600)
-            show = false
+            show = true; progress.snapTo(0f)
+            progress.animateTo(1f, tween(1600, easing = IOSEasing))
+            delay(400); show = false
         }
     }
 
     if (!show) return
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .drawWithContent {
-                drawContent()
-                val progress = animatedProgress.value
-                val fadeOut = if (progress > 0.65f) 1f - ((progress - 0.65f) / 0.35f) else 1f
-
-                particles.forEach { particle ->
-                    val cx = (particle.x + particle.velocityX * progress) * size.width
-                    val cy = (particle.y + particle.velocityY * progress) * size.height
-                    val rot = particle.rotation + particle.rotationSpeed * progress
-                    val alpha = ((1f - progress * 0.8f) * fadeOut).coerceIn(0f, 1f)
-
-                    drawParticle(cx, cy, particle.size, rot, particle.color, alpha)
-                }
-            }
-    )
+    Box(modifier = modifier.fillMaxSize().drawWithContent {
+        drawContent()
+        val p = progress.value
+        val fade = if (p > 0.65f) 1f - ((p - 0.65f) / 0.35f) else 1f
+        particles.forEach { particle ->
+            val cx = (particle.x + particle.velocityX * p) * size.width
+            val cy = (particle.y + particle.velocityY * p) * size.height
+            drawParticle(cx, cy, particle.size,
+                particle.rotation + particle.rotationSpeed * p,
+                particle.color, ((1f - p * 0.8f) * fade).coerceIn(0f, 1f))
+        }
+    })
 }
 
 private fun DrawScope.drawParticle(
@@ -434,257 +406,160 @@ private fun DrawScope.drawParticle(
 ) {
     val half = size / 2f
     val angle = Math.toRadians(rotation.toDouble())
-    val cosA = cos(angle).toFloat()
-    val sinA = sin(angle).toFloat()
-
-    val p1 = androidx.compose.ui.geometry.Offset(
-        x + (-half * cosA - (-half * 0.45f) * sinA),
-        y + (-half * sinA + (-half * 0.45f) * cosA)
-    )
-    val p2 = androidx.compose.ui.geometry.Offset(
-        x + (half * cosA - (-half * 0.45f) * sinA),
-        y + (half * sinA + (-half * 0.45f) * cosA)
-    )
-    val p3 = androidx.compose.ui.geometry.Offset(
-        x + (half * cosA - (half * 0.45f) * sinA),
-        y + (half * sinA + (half * 0.45f) * cosA)
-    )
-    val p4 = androidx.compose.ui.geometry.Offset(
-        x + (-half * cosA - (half * 0.45f) * sinA),
-        y + (-half * sinA + (half * 0.45f) * cosA)
-    )
-
+    val cosA = cos(angle).toFloat(); val sinA = sin(angle).toFloat()
+    fun pt(dx: Float, dy: Float) = Offset(x + dx * cosA - dy * sinA, y + dx * sinA + dy * cosA)
     val path = androidx.compose.ui.graphics.Path().apply {
-        moveTo(p1.x, p1.y)
-        lineTo(p2.x, p2.y)
-        lineTo(p3.x, p3.y)
-        lineTo(p4.x, p4.y)
+        moveTo(pt(-half, -half * 0.45f).x, pt(-half, -half * 0.45f).y)
+        lineTo(pt( half, -half * 0.45f).x, pt( half, -half * 0.45f).y)
+        lineTo(pt( half,  half * 0.45f).x, pt( half,  half * 0.45f).y)
+        lineTo(pt(-half,  half * 0.45f).x, pt(-half,  half * 0.45f).y)
         close()
     }
     drawPath(path, color.copy(alpha = alpha))
 }
 
 // =============================================================================
-// 7. TILT CARD — BUTTERY SMOOTH
+// 7. TILT CARD
 // =============================================================================
 
 @Composable
-fun TiltCard(
-    modifier: Modifier = Modifier,
-    maxTilt: Float = 8f,
-    content: @Composable () -> Unit
-) {
-    val rotationX = remember { Animatable(0f) }
-    val rotationY = remember { Animatable(0f) }
+fun TiltCard(modifier: Modifier = Modifier, maxTilt: Float = 6f, content: @Composable () -> Unit) {
+    val rotX = remember { Animatable(0f) }
+    val rotY = remember { Animatable(0f) }
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    Box(
-        modifier = modifier
-            .graphicsLayer {
-                this.rotationX = rotationX.value
-                this.rotationY = rotationY.value
-                cameraDistance = 14f * density.density
-            }
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
-
-                        if (change.pressed) {
-                            val cx = size.width / 2f
-                            val cy = size.height / 2f
-                            val ty = ((change.position.x - cx) / cx) * maxTilt
-                            val tx = -((change.position.y - cy) / cy) * maxTilt
-
-                            scope.launch {
-                                rotationX.snapTo(tx)
-                                rotationY.snapTo(ty)
-                            }
-                        } else {
-                            scope.launch {
-                                rotationX.animateTo(
-                                    0f,
-                                    animationSpec = spring(dampingRatio = 0.65f, stiffness = 350f)
-                                )
-                                rotationY.animateTo(
-                                    0f,
-                                    animationSpec = spring(dampingRatio = 0.65f, stiffness = 350f)
-                                )
-                            }
-                        }
+    Box(modifier = modifier
+        .graphicsLayer {
+            rotationX = rotX.value; rotationY = rotY.value
+            cameraDistance = 14f * density.density
+        }
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull() ?: break
+                    if (change.pressed) {
+                        val cx = size.width / 2f; val cy = size.height / 2f
+                        scope.launch { rotX.snapTo(-((change.position.y - cy) / cy) * maxTilt) }
+                        scope.launch { rotY.snapTo( ((change.position.x - cx) / cx) * maxTilt) }
+                    } else {
+                        scope.launch { rotX.animateTo(0f, spring(0.68f, 420f)) }
+                        scope.launch { rotY.animateTo(0f, spring(0.68f, 420f)) }
                     }
                 }
             }
-    ) {
-        content()
-    }
+        }
+    ) { content() }
 }
 
 // =============================================================================
-// 8. PARALLAX SCROLL
+// 8. PARALLAX IMAGE
 // =============================================================================
 
 @Composable
 fun ParallaxImage(
-    scrollOffset: Float,
-    parallaxFactor: Float = 0.45f,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
+    scrollOffset: Float, parallaxFactor: Float = 0.45f,
+    modifier: Modifier = Modifier, content: @Composable () -> Unit
 ) {
-    val animatedOffset by animateFloatAsState(
-        targetValue = scrollOffset * parallaxFactor,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 200f),
-        label = "po"
-    )
-
-    Box(
-        modifier = modifier.graphicsLayer {
-            translationY = animatedOffset
-        }
-    ) {
-        content()
-    }
+    val offset by animateFloatAsState(scrollOffset * parallaxFactor,
+        spring(0.90f, 220f), label = "par")
+    Box(modifier = modifier.graphicsLayer { translationY = offset }) { content() }
 }
 
 // =============================================================================
-// 9. GLOW EFFECT — SOFT & ATMOSPHERIC
+// 9. GLOW EFFECT
 // =============================================================================
 
 @Composable
-fun GlowEffect(
-    isActive: Boolean,
-    color: Color = Color.White,
-    modifier: Modifier = Modifier
-) {
+fun GlowEffect(isActive: Boolean, color: Color = Color.White, modifier: Modifier = Modifier) {
     val glowAlpha by animateFloatAsState(
-        targetValue = if (isActive) 0.25f else 0f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 200f),
-        label = "ga"
+        targetValue   = if (isActive) 0.22f else 0f,
+        animationSpec = ContentSpring, label = "glow"
     )
-
-    Box(
-        modifier = modifier.drawWithContent {
-            drawContent()
-            drawCircle(
-                color = color.copy(alpha = glowAlpha),
-                radius = size.minDimension * 0.55f,
-                center = center
-            )
-        }
-    )
+    Box(modifier = modifier.drawWithContent {
+        drawContent()
+        drawCircle(color.copy(alpha = glowAlpha), size.minDimension * 0.55f, center)
+    })
 }
 
 // =============================================================================
-// 10. PULSATING RIPPLE — GENTLE PULSE
+// 10. PULSATING RIPPLE
 // =============================================================================
 
 @Composable
-fun PulsatingRipple(
-    isActive: Boolean,
-    color: Color = Color.White,
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "rip")
-
-    val rippleScale by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "rs"
-    )
-
-    val rippleAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "ra"
-    )
-
-    if (isActive) {
-        Box(
-            modifier = modifier
-                .graphicsLayer {
-                    scaleX = rippleScale
-                    scaleY = rippleScale
-                    alpha = rippleAlpha
-                }
-                .background(color, CircleShape)
-        )
-    }
+fun PulsatingRipple(isActive: Boolean, color: Color = Color.White, modifier: Modifier = Modifier) {
+    if (!isActive) return
+    val t = rememberInfiniteTransition(label = "ripple")
+    // scale и alpha один период — заканчиваются вместе
+    val scale by t.animateFloat(0.88f, 1.12f,
+        infiniteRepeatable(tween(1400, easing = IOSEasing), RepeatMode.Reverse), "rs")
+    val alpha by t.animateFloat(0.20f, 0f,
+        infiniteRepeatable(tween(1400, easing = IOSEasing), RepeatMode.Restart), "ra")
+    Box(modifier = modifier
+        .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
+        .background(color, CircleShape))
 }
 
 // =============================================================================
-// NAVIGATION TRANSITIONS — ELEVATED
+// NAVIGATION TRANSITIONS
+// Ключевое: убраны все tween на основных переходах, только spring
+// Исчезновение на 25% быстрее появления (iOS правило)
 // =============================================================================
 
 fun iosSlideIn(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    slideIntoContainer(
-        towards = AnimatedContentTransitionScope.SlideDirection.Left,
-        animationSpec = NavigationSpringInt,
-        initialOffset = { it }
-    ) + fadeIn(animationSpec = tween(400, easing = AlphaEasing))
+    slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Left, NavSpringInt) +
+            fadeIn(animationSpec = spring(0.95f, 380f), initialAlpha = 0f)
 }
 
 fun iosSlideOutParallax(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    slideOutOfContainer(
-        towards = AnimatedContentTransitionScope.SlideDirection.Left,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 250f),
-        targetOffset = { -(it * 0.3f).toInt() }
-    ) + fadeOut(animationSpec = tween(400, easing = AlphaEasing), targetAlpha = 0.5f)
+    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Left,
+        spring(0.92f, 420f), targetOffset = { -(it * 0.25f).toInt() }) +
+            fadeOut(tween(180, easing = IOSEasing), targetAlpha = 0.6f)
 }
 
 fun iosPopEnterParallax(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    slideIntoContainer(
-        towards = AnimatedContentTransitionScope.SlideDirection.Right,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 250f),
-        initialOffset = { -(it * 0.3f).toInt() }
-    ) + fadeIn(animationSpec = tween(400, easing = AlphaEasing), initialAlpha = 0.5f)
+    slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Right,
+        spring(0.92f, 420f), initialOffset = { -(it * 0.25f).toInt() }) +
+            fadeIn(tween(240, easing = IOSEasing), initialAlpha = 0.6f)
 }
 
 fun iosPopSlideOut(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    slideOutOfContainer(
-        towards = AnimatedContentTransitionScope.SlideDirection.Right,
-        animationSpec = NavigationSpringInt,
-        targetOffset = { it }
-    )
+    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Right, NavSpringInt) +
+            fadeOut(animationSpec = spring(0.95f, 380f))
 }
 
+// Zoom переходы — для модальных экранов
 fun macZoomIn(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    fadeIn(animationSpec = tween(300, easing = FastOutSlowInEasing)) +
-            scaleIn(animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f), initialScale = 0.9f)
+    fadeIn(spring(0.95f, 360f), initialAlpha = 0f) +
+            scaleIn(spring(0.88f, 420f), initialScale = 0.93f)
 }
 
 fun macZoomExitShrink(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    fadeOut(animationSpec = tween(250, easing = FastOutLinearInEasing), targetAlpha = 0.4f) +
-            scaleOut(animationSpec = tween(250, easing = FastOutLinearInEasing), targetScale = 0.94f)
+    // Исчезновение быстрее: tween 200 vs 260 у появления
+    fadeOut(tween(200, easing = IOSEasing), targetAlpha = 0.5f) +
+            scaleOut(tween(200, easing = IOSEasing), targetScale = 0.96f)
 }
 
 fun macZoomPopEnter(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    fadeIn(animationSpec = tween(300, easing = FastOutSlowInEasing), initialAlpha = 0.4f) +
-            scaleIn(animationSpec = tween(300, easing = FastOutSlowInEasing), initialScale = 0.94f)
+    fadeIn(tween(260, easing = IOSEasing), initialAlpha = 0.5f) +
+            scaleIn(tween(260, easing = IOSEasing), initialScale = 0.96f)
 }
 
 fun macZoomPopExit(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    fadeOut(animationSpec = tween(250, easing = FastOutLinearInEasing)) +
-            scaleOut(animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f), targetScale = 0.9f)
+    fadeOut(tween(200, easing = IOSEasing)) +
+            scaleOut(spring(0.88f, 420f), targetScale = 0.93f)
 }
 
+// Fade для homescreen — мягче zoom, база не должна "прыгать"
 fun smoothFadeIn(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    fadeIn(animationSpec = tween(300, easing = LinearOutSlowInEasing)) +
-            scaleIn(animationSpec = spring(dampingRatio = 0.9f, stiffness = 250f), initialScale = 0.97f)
+    fadeIn(spring(0.95f, 240f), initialAlpha = 0f) +
+            scaleIn(spring(0.92f, 280f), initialScale = 0.98f)
 }
 
 fun smoothFadeOut(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-    fadeOut(animationSpec = tween(250, easing = FastOutLinearInEasing)) +
-            scaleOut(animationSpec = tween(250, easing = FastOutLinearInEasing), targetScale = 0.98f)
+    fadeOut(tween(180, easing = IOSEasing)) +
+            scaleOut(tween(180, easing = IOSEasing), targetScale = 0.99f)
 }
 
 // =============================================================================
@@ -695,19 +570,16 @@ fun smoothFadeOut(): AnimatedContentTransitionScope<NavBackStackEntry>.() -> Exi
 fun StaggeredColumn(
     modifier: Modifier = Modifier,
     itemCount: Int = 8,
-    baseDelayMs: Long = 40L,
-    initialDelayMs: Long = 60L,
+    baseDelayMs: Long = 30L,       // немного быстрее — iOS стаггер короче
+    initialDelayMs: Long = 40L,
     content: @Composable StaggeredScope.() -> Unit
 ) {
     val scope = remember(itemCount) { StaggeredScopeImpl(itemCount, baseDelayMs, initialDelayMs) }
-    Column(modifier = modifier) {
-        scope.content()
-    }
+    Column(modifier = modifier) { scope.content() }
 }
 
 interface StaggeredScope {
-    @Composable
-    fun StaggeredItem(index: Int, modifier: Modifier, content: @Composable () -> Unit)
+    @Composable fun StaggeredItem(index: Int, modifier: Modifier, content: @Composable () -> Unit)
 }
 
 private class StaggeredScopeImpl(
@@ -715,35 +587,20 @@ private class StaggeredScopeImpl(
     private val baseDelayMs: Long,
     private val initialDelayMs: Long
 ) : StaggeredScope {
-
     @Composable
     override fun StaggeredItem(index: Int, modifier: Modifier, content: @Composable () -> Unit) {
         var visible by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { delay(initialDelayMs + index * baseDelayMs); visible = true }
 
-        LaunchedEffect(Unit) {
-            delay(initialDelayMs + (index * baseDelayMs))
-            visible = true
-        }
-
-        val alpha by animateFloatAsState(
-            targetValue = if (visible) 1f else 0f,
-            animationSpec = SlowElegantSpring,
-            label = "sa"
+        // alpha и translY — один spring, заканчиваются синхронно
+        val animV by animateFloatAsState(
+            targetValue   = if (visible) 1f else 0f,
+            animationSpec = ContentSpring, label = "stagger_$index"
         )
-        val translationY by animateFloatAsState(
-            targetValue = if (visible) 0f else 20f,
-            animationSpec = SlowElegantSpring,
-            label = "sy"
-        )
-
-        Box(
-            modifier = modifier.graphicsLayer {
-                this.alpha = alpha
-                this.translationY = translationY
-            }
-        ) {
-            content()
-        }
+        Box(modifier = modifier.graphicsLayer {
+            alpha        = animV
+            translationY = (1f - animV) * 14f
+        }) { content() }
     }
 }
 
@@ -753,101 +610,263 @@ private class StaggeredScopeImpl(
 
 @Composable
 fun SpringAnimatedVisibility(
-    visible: Boolean,
-    modifier: Modifier = Modifier,
+    visible: Boolean, modifier: Modifier = Modifier,
     content: @Composable AnimatedVisibilityScope.() -> Unit
 ) {
     AnimatedVisibility(
-        visible = visible,
-        modifier = modifier,
-        enter = fadeIn(animationSpec = SlowElegantSpring) +
-                slideInVertically(
-                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 220f),
-                    initialOffsetY = { it / 8 }
-                ),
-        exit = fadeOut(animationSpec = tween(200)) +
-                slideOutVertically(
-                    animationSpec = tween(200),
-                    targetOffsetY = { it / 10 }
-                ),
+        visible = visible, modifier = modifier,
+        enter = fadeIn(ContentSpring) +
+                slideInVertically(spring(0.88f, 260f)) { it / 10 },
+        exit  = fadeOut(tween(160, easing = IOSEasing)) +
+                slideOutVertically(tween(160, easing = IOSEasing)) { it / 12 },
         content = content
     )
 }
 
 @Composable
 fun SkeletonBlock(modifier: Modifier = Modifier, cornerRadius: Int = 12) {
-    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
-    val shimmerAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.06f,
-        targetValue = 0.14f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "shimmer_alpha"
-    )
-
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(cornerRadius.dp))
-            .background(Color.White.copy(alpha = shimmerAlpha))
-    )
+    val t = rememberInfiniteTransition(label = "sk")
+    val alpha by t.animateFloat(0.04f, 0.11f,
+        infiniteRepeatable(tween(850, easing = IOSEasing), RepeatMode.Reverse), "sk_a")
+    Box(modifier = modifier.clip(RoundedCornerShape(cornerRadius.dp))
+        .background(Color.White.copy(alpha = alpha)))
 }
 
 @Composable
 fun SkeletonList(itemCount: Int = 5, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        SkeletonBlock(
-            modifier = Modifier.fillMaxWidth(0.35f).height(18.dp),
-            cornerRadius = 8
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        repeat(itemCount) {
-            SkeletonBlock(modifier = Modifier.fillMaxWidth().height(68.dp))
-        }
+    Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SkeletonBlock(Modifier.fillMaxWidth(0.35f).height(18.dp), 8)
+        Spacer(Modifier.height(6.dp))
+        repeat(itemCount) { SkeletonBlock(Modifier.fillMaxWidth().height(68.dp)) }
     }
 }
 
 @Composable
 fun SmoothScreen(
-    delayMs: Long = 100L,
+    delayMs: Long = 60L,
     skeleton: @Composable () -> Unit = { SkeletonList() },
     content: @Composable () -> Unit
 ) {
     val ready = remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        delay(delayMs)
-        ready.value = true
-    }
-
-    AnimatedContent(
-        targetState = ready.value,
+    LaunchedEffect(Unit) { delay(delayMs); ready.value = true }
+    AnimatedContent(ready.value,
         transitionSpec = {
-            fadeIn(animationSpec = SlowElegantSpring) togetherWith
-                    fadeOut(animationSpec = spring(dampingRatio = 0.9f, stiffness = 250f))
-        },
-        label = "smooth_screen"
-    ) { isReady ->
-        if (isReady) content() else skeleton()
-    }
+            fadeIn(ContentSpring) togetherWith fadeOut(spring(0.92f, 280f))
+        }, label = "smooth") { isReady -> if (isReady) content() else skeleton() }
 }
 
 @Composable
 fun TransitionScrim(visible: Boolean, modifier: Modifier = Modifier) {
     val alpha by animateFloatAsState(
-        targetValue = if (visible) 0.12f else 0f,
-        animationSpec = spring(dampingRatio = 0.85f, stiffness = 220f),
-        label = "scrim"
+        targetValue   = if (visible) 0.12f else 0f,
+        animationSpec = spring(0.90f, 260f), label = "scrim"
     )
-    if (alpha > 0f) {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = alpha))
+    if (alpha > 0f) Box(modifier = modifier.fillMaxSize()
+        .background(Color.Black.copy(alpha = alpha)))
+}
+
+// =============================================================================
+// 11. ANIMATED COUNTER
+// =============================================================================
+
+@Composable
+fun AnimatedCounter(
+    value: Int, modifier: Modifier = Modifier,
+    suffix: String = "", prefix: String = "",
+    color: Color = Color.White,
+    fontSize: androidx.compose.ui.unit.TextUnit = 18.sp,
+    fontWeight: FontWeight = FontWeight.Bold
+) {
+    val animValue = remember { Animatable(value.toFloat()) }
+    LaunchedEffect(value) { animValue.animateTo(value.toFloat(), spring(0.82f, 240f)) }
+    Text("$prefix${animValue.value.toInt()}$suffix",
+        color = color, fontSize = fontSize, fontWeight = fontWeight, modifier = modifier)
+}
+
+// =============================================================================
+// 12. SHAKE — один spring с bounce вместо цикла tween
+// iOS встряхивание это один physics-based spring, не серия tween
+// =============================================================================
+
+@Composable
+fun Modifier.shake(trigger: Boolean, onFinished: () -> Unit = {}): Modifier {
+    val offsetX = remember { Animatable(0f) }
+    LaunchedEffect(trigger) {
+        if (!trigger) return@LaunchedEffect
+        // Один импульс → spring сам создаёт затухающие колебания
+        offsetX.snapTo(14f)
+        offsetX.animateTo(
+            targetValue   = 0f,
+            animationSpec = spring(dampingRatio = 0.38f, stiffness = 680f)
         )
+        onFinished()
     }
+    return this.graphicsLayer { translationX = offsetX.value }
+}
+
+// =============================================================================
+// 13. SUCCESS BURST
+// =============================================================================
+
+@Composable
+fun SuccessBurst(
+    trigger: Boolean, modifier: Modifier = Modifier,
+    color: Color = Color(0xFF4CAF50)
+) {
+    val scale = remember { Animatable(0f) }
+    val alpha = remember { Animatable(0f) }
+    LaunchedEffect(trigger) {
+        if (!trigger) return@LaunchedEffect
+        scale.snapTo(0.2f); alpha.snapTo(0.6f)
+        kotlinx.coroutines.coroutineScope {
+            launch { scale.animateTo(2.0f, spring(0.75f, 300f)) }
+            launch { alpha.animateTo(0f, tween(450, easing = IOSEasing)) }
+        }
+    }
+    Box(modifier = modifier
+        .graphicsLayer { scaleX = scale.value; scaleY = scale.value; this.alpha = alpha.value }
+        .background(color, CircleShape))
+}
+
+// =============================================================================
+// 14. DOTS LOADER
+// =============================================================================
+
+@Composable
+fun DotsLoader(
+    modifier: Modifier = Modifier,
+    color: Color = Color.White,
+    dotSize: androidx.compose.ui.unit.Dp = 8.dp
+) {
+    val t = rememberInfiniteTransition(label = "dots")
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        listOf(0, 140, 280).forEachIndexed { i, delayMs ->
+            val scale by t.animateFloat(0.5f, 1f,
+                infiniteRepeatable(tween(460, delayMs, IOSEasing), RepeatMode.Reverse), "dot_$i")
+            Box(Modifier.size(dotSize)
+                .graphicsLayer { scaleX = scale; scaleY = scale }
+                .background(color, CircleShape))
+        }
+    }
+}
+
+// =============================================================================
+// 15. ANIMATED PROGRESS BAR
+// =============================================================================
+
+@Composable
+fun AnimatedProgressBar(
+    progress: Float, modifier: Modifier = Modifier,
+    trackColor: Color = Color.White.copy(alpha = 0.12f),
+    fillColor: Color = Color(0xFF6A5AE0),
+    cornerRadius: androidx.compose.ui.unit.Dp = 6.dp
+) {
+    val animProg by animateFloatAsState(progress.coerceIn(0f, 1f),
+        spring(0.88f, 240f), label = "bar")
+    Box(modifier = modifier.height(8.dp)
+        .clip(RoundedCornerShape(cornerRadius)).background(trackColor)) {
+        Box(Modifier.fillMaxHeight().fillMaxWidth(animProg)
+            .background(fillColor, RoundedCornerShape(cornerRadius)))
+    }
+}
+
+// =============================================================================
+// 16. MORPH BUTTON
+// =============================================================================
+
+@Composable
+fun MorphButton(
+    onClick: () -> Unit, isLoading: Boolean,
+    modifier: Modifier = Modifier,
+    containerColor: Color = Color(0xFF6A5AE0),
+    content: @Composable () -> Unit
+) {
+    val cornerPercent by animateIntAsState(
+        if (isLoading) 50 else 16, spring(0.80f, 320f), label = "mb_c")
+    // alpha переходы — одинаковый tween, синхронно
+    val contentAlpha by animateFloatAsState(
+        if (isLoading) 0f else 1f, tween(200, easing = IOSEasing), label = "mb_a")
+    val spinnerAlpha by animateFloatAsState(
+        if (isLoading) 1f else 0f, tween(200, easing = IOSEasing), label = "mb_s")
+
+    Box(
+        modifier = modifier.clip(RoundedCornerShape(cornerPercent))
+            .background(containerColor)
+            .pointerInput(isLoading) {
+                if (!isLoading) awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.any { it.pressed && !it.previousPressed }) onClick()
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(Modifier.alpha(contentAlpha)) { content() }
+        CircularProgressIndicator(Modifier.size(22.dp).alpha(spinnerAlpha),
+            color = Color.White, strokeWidth = 2.5.dp)
+    }
+}
+
+// =============================================================================
+// 17. SCANNER BEAM — замедляется у краёв
+// =============================================================================
+
+@Composable
+fun ScannerBeam(
+    modifier: Modifier = Modifier,
+    color: Color = Color(0xFF6A5AE0),
+    isActive: Boolean = true
+) {
+    val t = rememberInfiniteTransition(label = "beam")
+    val position by t.animateFloat(0.05f, 0.95f,
+        infiniteRepeatable(
+            // EaseInOut: луч ускоряется в середине, замедляется у краёв
+            tween(1800, easing = CubicBezierEasing(0.45f, 0f, 0.55f, 1f)),
+            RepeatMode.Reverse
+        ), "beam_pos")
+    val beamAlpha by animateFloatAsState(
+        if (isActive) 1f else 0f, tween(260, easing = IOSEasing), label = "beam_a")
+    if (beamAlpha == 0f) return
+
+    Box(modifier = modifier.alpha(beamAlpha).drawWithContent {
+        drawContent()
+        val y = position * size.height
+        drawRect(color.copy(alpha = 0.06f),
+            Offset(0f, (y - 24.dp.toPx()).coerceAtLeast(0f)),
+            Size(size.width, 48.dp.toPx()))
+        drawLine(color.copy(alpha = 0.85f), Offset(0f, y), Offset(size.width, y),
+            2.dp.toPx(), StrokeCap.Round)
+        drawLine(Color.White.copy(alpha = 0.40f),
+            Offset(size.width * 0.25f, y), Offset(size.width * 0.75f, y),
+            1.dp.toPx(), StrokeCap.Round)
+    })
+}
+
+// =============================================================================
+// 18. FLOATING ENTRANCE
+// =============================================================================
+
+@Composable
+fun FloatingEntrance(
+    modifier: Modifier = Modifier,
+    delayMs: Int = 0,
+    offsetY: androidx.compose.ui.unit.Dp = 24.dp,
+    content: @Composable () -> Unit
+) {
+    var triggered by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    LaunchedEffect(Unit) { if (delayMs > 0) delay(delayMs.toLong()); triggered = true }
+
+    // alpha и translY — один ContentSpring, заканчиваются вместе
+    val animV by animateFloatAsState(
+        targetValue   = if (triggered) 1f else 0f,
+        animationSpec = ContentSpring, label = "float"
+    )
+    Box(modifier = modifier.graphicsLayer {
+        alpha        = animV
+        translationY = (1f - animV) * with(density) { offsetY.toPx() }
+    }) { content() }
 }

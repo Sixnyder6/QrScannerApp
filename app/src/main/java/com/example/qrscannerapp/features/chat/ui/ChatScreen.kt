@@ -53,11 +53,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.example.qrscannerapp.*
+import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import com.example.qrscannerapp.features.chat.domain.model.ChatMessage
 import com.example.qrscannerapp.features.chat.domain.model.ChatRoom
 import com.example.qrscannerapp.features.chat.domain.model.ChatRoomInfo
@@ -120,7 +119,7 @@ fun FullscreenImageViewer(imageUrl: String, onDismiss: () -> Unit) {
         scale = (scale * zoomChange).coerceIn(0.5f, 5f)
         offset += panChange
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    AnimatedDialogWrapper(onDismiss = onDismiss) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable { onDismiss() }, contentAlignment = Alignment.Center) {
             AsyncImage(
                 model = imageUrl, contentDescription = "Фото", contentScale = ContentScale.Fit,

@@ -1,19 +1,19 @@
 package com.example.qrscannerapp.features.homescreen.ui
 
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,9 +23,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -34,69 +39,66 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.PI
-import kotlin.math.sin
-
-// Apple-style continuous corner squircle — same as before, one shared instance.
-private val IconSquircle = GenericShape { size, _ ->
-    val w = size.width
-    val h = size.height
-    val r = size.minDimension * 0.32f
-    moveTo(0f, h * 0.5f)
-    cubicTo(0f, r * 0.55f, r * 0.55f, 0f, w * 0.5f, 0f)
-    cubicTo(w - r * 0.55f, 0f, w, r * 0.55f, w, h * 0.5f)
-    cubicTo(w, h - r * 0.55f, w - r * 0.55f, h, w * 0.5f, h)
-    cubicTo(r * 0.55f, h, 0f, h - r * 0.55f, 0f, h * 0.5f)
-    close()
-}
 
 /**
- * iOS/visionOS app icon tile with BREATHING glow.
+ * AppIconTile — Apple iOS-стиль для складского приложения.
  *
- * Each icon receives a [phaseOffset] (0f..1f) so it starts at a different point
- * in the breath cycle. This makes the whole grid feel organic — not like a room
- * of lightbulbs blinking in sync.
+ * Принципы:
+ * - Фон иконки: тёмный нейтральный (#1C1C1E), почти чёрный
+ * - Иконка: белая, чёткая, без tint
+ * - Подпись: серая (#8E8E93) — системный серый Apple
+ * - Акцент ТОЛЬКО если есть badge (непрочитанные, активные задачи)
+ * - Никакого glow, shimmer, border-sweep
+ * - Единственная анимация — scale при нажатии (0.92, spring)
  *
- * Breath math: glow alpha = base ± amplitude * sin(2π * (t + phase))
- *   base      = 0.36f   (resting glow, brighter than before at +30%)
- *   amplitude = 0.10f   (±10% = 6-8% of visible range per spec)
- *   period    = 3-4s    (slow, biological feel)
- *
- * @param phaseOffset 0f..1f — caller derives from icon index or label hash.
+ * accentColor сохранён — используется только для badge.
+ * phaseOffset сохранён для совместимости, не используется.
  */
+
+// Apple системные цвета
+private val IconBg       = Color(0xFF1C1C1E)
+private val IconBgPress  = Color(0xFF2C2C2E)
+private val IconFg       = Color(0xFFFFFFFF)
+private val LabelColor   = Color(0xFF8E8E93)
+private val BorderColor  = Color(0xFF2C2C2E)
+
+private val IconHighlightBrush = Brush.verticalGradient(
+    colorStops = arrayOf(
+        0f   to Color.White.copy(alpha = 0.10f),
+        0.4f to Color.White.copy(alpha = 0.03f),
+        1f   to Color.Transparent
+    )
+)
+private val IconHighlightStroke = Stroke(width = 0.5f)
+private val BadgeBorderStroke   = Stroke(width = 1.5f)
+private val BadgeBorderColor    = Color(0xFF000000).copy(alpha = 0.6f)
+
 @Composable
 fun AppIconTile(
     label: String,
     icon: ImageVector,
-    accentColor: Color,
+    accentColor: Color,                        // используется только для badge
     modifier: Modifier = Modifier,
     badgeText: String? = null,
     badgeColor: Color = accentColor,
     iconSize: Int = 56,
-    phaseOffset: Float = 0f,
-    breathPhase: Float = 0f,
+    phaseOffset: Float = 0f,                   // совместимость, не используется
     onClick: () -> Unit
 ) {
     var pressed by remember { mutableStateOf(false) }
 
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.92f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessHigh
-        ),
-        label = "tile_scale"
+        targetValue   = if (pressed) 0.92f else 1f,
+        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessHigh),
+        label         = "scale"
     )
 
-    val breathAlpha = 0.42f + 0.13f * sin((breathPhase + phaseOffset) * 2f * PI.toFloat()).coerceIn(-1f, 1f)
-    val glowAlpha = if (pressed) 0.65f else breathAlpha
+    val shape = RoundedCornerShape(16.dp)   // Apple icon corner — 16dp для 56dp иконки
+    val currentBg = if (pressed) IconBgPress else IconBg
 
     Column(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -107,111 +109,85 @@ fun AppIconTile(
                 )
             },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size((iconSize + 24).dp)
-                .drawBehind {
-                    // External radial glow — the breathing happens entirely here.
-                    // The squircle body stays static; only the halo pulsates.
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                accentColor.copy(alpha = glowAlpha),
-                                accentColor.copy(alpha = glowAlpha * 0.45f),
-                                accentColor.copy(alpha = glowAlpha * 0.12f),
-                                Color.Transparent
-                            ),
-                            center = Offset(size.width / 2f, size.height / 2f),
-                            radius = size.minDimension * 0.68f
-                        ),
-                        radius = size.minDimension * 0.68f,
-                        center = Offset(size.width / 2f, size.height / 2f)
-                    )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            // Squircle body
+        Box(contentAlignment = Alignment.Center) {
+            // Иконка
             Box(
                 modifier = Modifier
                     .size(iconSize.dp)
-                    .clip(IconSquircle)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                accentColor.copy(alpha = 0.60f),
-                                accentColor.copy(alpha = 0.22f)
-                            )
-                        )
-                    )
-                    .border(
-                        width = 0.5.dp,
-                        color = Color.White.copy(alpha = 0.18f),
-                        shape = IconSquircle
-                    )
-                    .drawBehind {
-                        drawLine(
-                            color = Color.White.copy(alpha = 0.30f),
-                            start = Offset(size.width * 0.18f, 1.5f),
-                            end = Offset(size.width * 0.82f, 1.5f),
-                            strokeWidth = 1f
-                        )
-                        drawLine(
-                            color = accentColor.copy(alpha = 0.75f),
-                            start = Offset(size.width * 0.15f, size.height - 0.5f),
-                            end = Offset(size.width * 0.85f, size.height - 0.5f),
-                            strokeWidth = 1f
-                        )
+                    .clip(shape)
+                    .background(currentBg)
+                    // Тонкая граница — едва видна, даёт форму
+                    .drawWithCache {
+                        val cPx  = 16.dp.toPx()
+                        val half = 0.5f
+                        val path = Path().apply {
+                            addRoundRect(RoundRect(
+                                half, half,
+                                size.width - half, size.height - half,
+                                CornerRadius(cPx, cPx)
+                            ))
+                        }
+                        onDrawWithContent {
+                            drawContent()
+                            drawPath(path = path, brush = IconHighlightBrush, style = IconHighlightStroke)
+                        }
                     },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = icon,
+                    imageVector        = icon,
                     contentDescription = label,
-                    tint = Color.White,
-                    modifier = Modifier.size((iconSize * 0.42f).dp)
+                    tint               = IconFg,
+                    modifier           = Modifier.size((iconSize * 0.46f).dp)
                 )
             }
 
-            // Badge
+            // Badge — единственное место где появляется цвет
             if (badgeText != null) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .size(20.dp)
                         .graphicsLayer {
-                            translationX = -10f
-                            translationY = 10f
+                            translationX =  (iconSize * 0.12f)
+                            translationY = -(iconSize * 0.12f)
                         }
-                        .clip(RoundedCornerShape(10.dp))
+                        .size(18.dp)
+                        .clip(RoundedCornerShape(9.dp))
                         .background(badgeColor)
-                        .border(
-                            width = 1.dp,
-                            color = Color(0xFF02020A),
-                            shape = RoundedCornerShape(10.dp)
-                        ),
+                        // Тонкая тёмная граница отделяет badge от фона
+                        .drawBehind {
+                            drawCircle(
+                                color  = BadgeBorderColor,
+                                radius = size.minDimension / 2f,
+                                style  = BadgeBorderStroke
+                            )
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (badgeText.length > 2) "•" else badgeText,
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
+                        text       = if (badgeText.length > 2) "•" else badgeText,
+                        color      = Color.White,
+                        fontSize   = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign  = TextAlign.Center
                     )
                 }
             }
         }
 
+        Spacer(Modifier.height(6.dp))
+
+        // Подпись — серая, нейтральная
         Text(
-            text = label,
-            color = Color.White.copy(alpha = 0.85f),
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            text       = label,
+            color      = LabelColor,
+            fontSize   = 11.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign  = TextAlign.Center,
+            maxLines   = 1,
+            overflow   = TextOverflow.Ellipsis
         )
     }
 }

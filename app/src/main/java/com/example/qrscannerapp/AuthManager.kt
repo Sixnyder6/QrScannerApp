@@ -275,6 +275,44 @@ class AuthManager(
                     }
 
                     presenceManager.pingNow()
+
+                    // Автозавершение смены по 12ч — надёжный fallback вместо WorkManager
+                    val state = _authState.value
+                    if (state.isShiftActive && state.shiftStartTime > 0L) {
+                        val elapsed = System.currentTimeMillis() - state.shiftStartTime
+                        if (elapsed >= 12 * 60 * 60 * 1000L) {
+                            Log.w(TAG, "Shift exceeded 12h — auto-ending via heartbeat")
+                            try {
+                                val activeShiftId = firestore.collection("internal_users").document(uid)
+                                    .get().await().getString("activeShiftId")
+                                val batch = firestore.batch()
+                                batch.update(
+                                    firestore.collection("internal_users").document(uid),
+                                    mapOf(
+                                        "isShiftActive" to false,
+                                        "activeShiftId" to FieldValue.delete(),
+                                        "shiftStartTime" to FieldValue.delete()
+                                    )
+                                )
+                                if (activeShiftId != null) {
+                                    batch.update(
+                                        firestore.collection("shifts").document(activeShiftId),
+                                        mapOf(
+                                            "endTime" to System.currentTimeMillis(),
+                                            "status" to "AUTO_ENDED",
+                                            "endReason" to "auto_12h"
+                                        )
+                                    )
+                                }
+                                batch.commit().await()
+                                endShiftLocally()
+                                Log.d(TAG, "Shift auto-ended via heartbeat. ShiftId: $activeShiftId")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Heartbeat shift auto-end failed", e)
+                            }
+                        }
+                    }
+
                     firestore.collection("internal_users").document(uid)
                         .update(mapOf("activeDeviceId" to deviceId, "appVersion" to currentVersion))
                         .await()
