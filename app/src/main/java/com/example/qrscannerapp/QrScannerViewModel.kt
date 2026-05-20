@@ -21,6 +21,8 @@ import com.example.qrscannerapp.features.scanner.data.local.entity.ScanSessionEn
 import com.example.qrscannerapp.features.scanner.data.repository.ScanSessionRepository
 import com.example.qrscannerapp.features.scanner.domain.model.ScanItem
 import com.example.qrscannerapp.features.scanner.domain.model.ScanSession
+import com.example.qrscannerapp.features.scanner.domain.model.StickerDirection
+import com.example.qrscannerapp.features.scanner.domain.model.StickerItem
 import com.example.qrscannerapp.features.scanner.domain.util.ScannerCodeUtils
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
@@ -172,6 +174,15 @@ class QrScannerViewModel @Inject constructor(
     private val _isSearchMode = MutableStateFlow(false)
     val isSearchMode: StateFlow<Boolean> = _isSearchMode.asStateFlow()
 
+    private val _isNumberMode = MutableStateFlow(false)
+    val isNumberMode: StateFlow<Boolean> = _isNumberMode.asStateFlow()
+
+    private val _numberItems = MutableStateFlow<List<StickerItem>>(emptyList())
+    val numberItems: StateFlow<List<StickerItem>> = _numberItems.asStateFlow()
+
+    private val _expandedStickerCode = MutableStateFlow<String?>(null)
+    val expandedStickerCode: StateFlow<String?> = _expandedStickerCode.asStateFlow()
+
     private val _searchResult = MutableStateFlow<BatterySearchResult?>(null)
     val searchResult: StateFlow<BatterySearchResult?> = _searchResult.asStateFlow()
 
@@ -312,12 +323,86 @@ class QrScannerViewModel @Inject constructor(
         if (!_isSearchMode.value) {
             _searchResult.value = null
             clearScooterSearchResult()
+        } else {
+            _isNumberMode.value = false
         }
         updateStatus(if (_isSearchMode.value) "РЕЖИМ ПОИСКА" else "Наведите камеру на QR-код")
     }
 
     fun clearSearchResult() { _searchResult.value = null }
     fun clearScooterSearchResult() { _scooterSearchResult.value = null }
+
+    fun toggleNumberMode() {
+        _isNumberMode.update { !it }
+        if (_isNumberMode.value) {
+            _isSearchMode.value = false
+            _searchResult.value = null
+            updateStatus("РЕЖИМ НОМЕРОВ")
+        } else {
+            _numberItems.value = emptyList()
+            _expandedStickerCode.value = null
+            updateStatus("Наведите камеру на QR-код")
+        }
+    }
+
+    fun onNumberCodeScanned(rawCode: String) {
+        if (_expandedStickerCode.value != null) return
+        val code = ScannerCodeUtils.extractScooterCode(rawCode) ?: rawCode
+        if (_numberItems.value.any { it.code == code }) return
+        _numberItems.update { it + StickerItem(code = code) }
+        updateStatus("Добавлен: $code")
+    }
+
+    fun expandSticker(code: String) {
+        _expandedStickerCode.update { if (it == code) null else code }
+    }
+
+    fun toggleDirection(code: String, dir: StickerDirection) {
+        _numberItems.update { items ->
+            items.map { item ->
+                if (item.code == code) {
+                    val newDirs = if (dir in item.directions) item.directions - dir else item.directions + dir
+                    item.copy(directions = newDirs)
+                } else item
+            }
+        }
+    }
+
+    fun selectAllDirections(code: String) {
+        _numberItems.update { items ->
+            items.map { item ->
+                if (item.code == code) item.copy(directions = StickerDirection.entries.toSet())
+                else item
+            }
+        }
+    }
+
+    fun removeNumberItem(code: String) {
+        _numberItems.update { it.filter { item -> item.code != code } }
+        if (_expandedStickerCode.value == code) _expandedStickerCode.value = null
+    }
+
+    fun clearNumberItems() {
+        _numberItems.value = emptyList()
+        _expandedStickerCode.value = null
+    }
+
+    fun distributeNumberItemsToCell(cell: StorageCell) {
+        viewModelScope.launch {
+            _storageState.update { it.copy(isLoading = true) }
+            val items = _numberItems.value
+            storageRepository.distributeNumberItemsToCell(cell, items)
+                .onSuccess { count ->
+                    val msg = "Добавлено $count номеров с метками"
+                    _storageState.update { it.copy(isLoading = false, distributionResult = msg) }
+                    clearNumberItems()
+                    _isNumberMode.value = false
+                }
+                .onFailure { error ->
+                    _storageState.update { it.copy(isLoading = false, distributionResult = "Ошибка: ${error.message}") }
+                }
+        }
+    }
 
     private fun searchBatteryInFirestore(code: String) {
         if (_isSearching.value) return
@@ -603,6 +688,12 @@ class QrScannerViewModel @Inject constructor(
         presenceManager.pingNow()
 
         viewModelScope.launch {
+            // РЕЖИМ НОМЕРОВ
+            if (_isNumberMode.value) {
+                onNumberCodeScanned(rawCode)
+                return@launch
+            }
+
             // РЕЖИМ ПОИСКА
             if (_isSearchMode.value) {
                 when (_activeTab.value) {
@@ -844,6 +935,10 @@ class QrScannerViewModel @Inject constructor(
     // ============================================================================================
 
     fun addManualCode(code: String) {
+        if (_isNumberMode.value) {
+            onNumberCodeScanned(code)
+            return
+        }
         if (_isSearchMode.value) {
             when (_activeTab.value) {
                 ActiveTab.SCOOTERS -> searchForScooter(code)

@@ -112,6 +112,10 @@ class StreetDoctorViewModel @Inject constructor(
                                 lat            = lat,
                                 lon            = lon,
                                 model          = doc.getString("model") ?: "",
+                                mileage        = (doc.getLong("mileage") ?: 0L).toInt(),
+                                vin            = doc.getString("vin") ?: "",
+                                region         = doc.getString("region") ?: "",
+                                isUnlocked     = doc.getBoolean("isUnlocked") ?: false,
                                 isMine         = true,
                                 photoUrls      = photoUrls,
                                 workerName     = doc.getString("assignedToName"),
@@ -119,7 +123,9 @@ class StreetDoctorViewModel @Inject constructor(
                                     ?.split(" ")?.mapNotNull { it.firstOrNull()?.toString() }?.take(2)?.joinToString(""),
                                 workerRole     = "Техник",
                                 workStartTime  = if (status == ScooterFieldStatus.IN_PROGRESS)
-                                    doc.getLong("updatedAt") ?: doc.getLong("createdAt") else null
+                                    doc.getLong("updatedAt") ?: doc.getLong("createdAt") else null,
+                                problem        = doc.getString("problem") ?: doc.getString("defect") ?: "",
+                                createdAt      = doc.getLong("createdAt") ?: 0L
                             )
                         } catch (e: Exception) {
                             Log.e(TAG, "Error parsing task ${doc.id}", e); null

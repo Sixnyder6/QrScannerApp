@@ -141,6 +141,9 @@ fun StardustScreen(
     LaunchedEffect(key1 = true) { launcher.launch(Manifest.permission.CAMERA) }
 
     val isSearchMode by viewModel.isSearchMode.collectAsState()
+    val isNumberMode by viewModel.isNumberMode.collectAsState()
+    val numberItems by viewModel.numberItems.collectAsState()
+    val expandedStickerCode by viewModel.expandedStickerCode.collectAsState()
     val searchResult by viewModel.searchResult.collectAsState()
     val scooterSearchResult by viewModel.scooterSearchResult.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
@@ -173,21 +176,40 @@ fun StardustScreen(
                 onStatusUpdate = { msg: String, isErr: Boolean -> viewModel.updateStatus(msg, isErr) }
             )
 
-            IconButton(
-                onClick = { viewModel.toggleSearchMode() },
+            // Кнопки поиска и «Номер» — верхний правый угол
+            Column(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(16.dp)
-                    .background(
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                IconButton(
+                    onClick = { viewModel.toggleSearchMode() },
+                    modifier = Modifier.background(
                         if (isSearchMode) StardustWarning else Color.Black.copy(alpha = 0.3f),
                         CircleShape
                     )
-            ) {
-                Icon(
-                    Icons.Default.Search,
-                    "Поиск",
-                    tint = if (isSearchMode) Color.Black else Color.White
-                )
+                ) {
+                    Icon(Icons.Default.Search, "Поиск", tint = if (isSearchMode) Color.Black else Color.White)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            if (isNumberMode) StardustPrimary else Color.Black.copy(alpha = 0.3f),
+                            CircleShape
+                        )
+                        .clickable { viewModel.toggleNumberMode() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "#",
+                        color = if (isNumberMode) Color.White else Color(0xFFA0A0A5),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             IconButton(
@@ -231,6 +253,9 @@ fun StardustScreen(
                 hapticManager = hapticManager,
                 view = view,
                 isSearchMode = isSearchMode,
+                isNumberMode = isNumberMode,
+                numberItems = numberItems,
+                expandedStickerCode = expandedStickerCode,
                 onNavigateToPalletDistribution = onNavigateToPalletDistribution,
                 onNavigateToStorage = onNavigateToStorage,
                 onNavigateToHistory = onNavigateToHistory
@@ -282,6 +307,9 @@ fun ScannerOverlayUi(
     hapticManager: HapticFeedbackManager,
     view: View,
     isSearchMode: Boolean,
+    isNumberMode: Boolean = false,
+    numberItems: List<com.example.qrscannerapp.features.scanner.domain.model.StickerItem> = emptyList(),
+    expandedStickerCode: String? = null,
     onNavigateToPalletDistribution: () -> Unit,
     onNavigateToStorage: () -> Unit,
     onNavigateToHistory: () -> Unit
@@ -741,7 +769,17 @@ fun ScannerOverlayUi(
         HorizontalDivider(color = StardustItemBg)
 
         Box(modifier = Modifier.weight(1f)) {
-            when (activeTab) {
+            if (isNumberMode) {
+                com.example.qrscannerapp.features.scanner.ui.components.NumberModePanel(
+                    items = numberItems,
+                    expandedCode = expandedStickerCode,
+                    onExpandToggle = { code -> viewModel.expandSticker(code) },
+                    onDirectionToggle = { code, dir -> viewModel.toggleDirection(code, dir) },
+                    onRemoveItem = { code -> viewModel.removeNumberItem(code) },
+                    onSelectAllDirections = { code -> viewModel.selectAllDirections(code) },
+                    onSendToStorage = { onNavigateToStorage() }
+                )
+            } else when (activeTab) {
                 ActiveTab.SCOOTERS, ActiveTab.BATTERIES, ActiveTab.NEW_BATTERIES -> {
                     if (currentList.isEmpty()) {
                         EmptyState(

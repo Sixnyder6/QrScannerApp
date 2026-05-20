@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.qrscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 40
-        versionName = "1.5.0"
+        versionCode = 41
+        versionName = "1.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -157,6 +157,9 @@ dependencies {
     // Rive — векторные анимации фона
     implementation("app.rive:rive-android:9.6.2")
     implementation("androidx.startup:startup-runtime:1.1.1")
+
+    // ExifInterface — чтение ориентации фото
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // CameraX
     val camerax_version = "1.3.1"

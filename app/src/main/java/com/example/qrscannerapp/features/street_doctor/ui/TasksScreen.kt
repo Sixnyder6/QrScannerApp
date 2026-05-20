@@ -1,5 +1,10 @@
 package com.example.qrscannerapp.features.street_doctor.ui
 
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,9 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import android.Manifest
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -65,6 +68,19 @@ private fun getBatteryColor(pct: Int): Color = when {
     pct <= 10 -> SdDanger
     pct <= 30 -> SdStatusWork
     else      -> SdTextMuted
+}
+
+private fun formatTimeAgo(createdAt: Long): String {
+    if (createdAt == 0L) return ""
+    val diff = System.currentTimeMillis() - createdAt
+    val h = diff / 3_600_000
+    val m = (diff % 3_600_000) / 60_000
+    return when {
+        h >= 24 -> "${h / 24}д в очереди"
+        h > 0   -> "${h}ч в очереди"
+        m > 0   -> "${m}м в очереди"
+        else    -> "только что"
+    }
 }
 
 @Composable
@@ -160,6 +176,7 @@ private fun ScooterCard(
     onOpenPassport: () -> Unit,
     onNotFound: () -> Unit,
 ) {
+    val context = LocalContext.current
     var fullscreenUrl by remember { mutableStateOf<String?>(null) }
     if (fullscreenUrl != null) {
         FullscreenPhotoDialog(url = fullscreenUrl!!, onDismiss = { fullscreenUrl = null })
@@ -167,6 +184,7 @@ private fun ScooterCard(
     val isDone = scooter.status == ScooterFieldStatus.DONE ||
             scooter.status == ScooterFieldStatus.TO_STORAGE ||
             scooter.status == ScooterFieldStatus.NOT_FOUND
+    val canNavigate = scooter.lat != 0.0 && scooter.lon != 0.0
 
     Card(
         modifier = Modifier
@@ -183,12 +201,13 @@ private fun ScooterCard(
                     .clickable { onToggle() }
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    // Строка 1: код + модель + стрелка + БЛИЖАЙШИЙ
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
                             scooter.code,
@@ -197,6 +216,14 @@ private fun ScooterCard(
                             color = if (isDone) SdTextMuted else SdTextMain,
                             letterSpacing = 1.sp
                         )
+                        if (scooter.model.isNotBlank()) {
+                            Text(
+                                scooter.model,
+                                fontSize = 11.sp,
+                                color = SdPrimary.copy(alpha = 0.8f),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                         Icon(
                             if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                             contentDescription = null,
@@ -220,7 +247,11 @@ private fun ScooterCard(
                             }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Строка 2: дистанция + батарея + замок + время в очереди
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -245,8 +276,32 @@ private fun ScooterCard(
                                 fontWeight = if (scooter.batteryPct <= 10) FontWeight.Bold else FontWeight.Normal
                             )
                         }
+                        if (scooter.isUnlocked) {
+                            Icon(Icons.Default.LockOpen, null, tint = SdStatusDone, modifier = Modifier.size(13.dp))
+                        }
+                        val timeAgo = if (!isDone) formatTimeAgo(scooter.createdAt) else ""
+                        if (timeAgo.isNotEmpty()) {
+                            Text(timeAgo, color = SdTextMuted.copy(alpha = 0.6f), fontSize = 11.sp)
+                        }
+                    }
+                    // Строка 3: адрес (если есть)
+                    if (scooter.address.isNotBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Outlined.LocationOn, null, tint = SdTextMuted, modifier = Modifier.size(12.dp))
+                            Text(
+                                scooter.address,
+                                color = SdTextMuted,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
+                Spacer(Modifier.width(8.dp))
                 StatusBadge(scooter.status)
             }
 
@@ -264,6 +319,42 @@ private fun ScooterCard(
 
                         // ── Новый: взять в работу (→ паспорт) + не найден ──
                         ScooterFieldStatus.NEW -> {
+                            // Описание проблемы
+                            if (scooter.problem.isNotBlank()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(SdStatusWork.copy(alpha = 0.08f))
+                                        .border(1.dp, SdStatusWork.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Icon(Icons.Outlined.Build, null, tint = SdStatusWork, modifier = Modifier.size(14.dp).padding(top = 1.dp))
+                                    Text(scooter.problem, color = SdTextMain, fontSize = 13.sp)
+                                }
+                            }
+                            // VIN + пробег
+                            if (scooter.vin.isNotBlank() || scooter.mileage > 0) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    if (scooter.vin.isNotBlank()) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text("VIN", fontSize = 10.sp, color = SdTextMuted, letterSpacing = 0.5.sp)
+                                            Text(scooter.vin, fontSize = 12.sp, color = SdTextMain, fontFamily = FontFamily.Monospace)
+                                        }
+                                    }
+                                    if (scooter.mileage > 0) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Icon(Icons.Outlined.Speed, null, tint = SdTextMuted, modifier = Modifier.size(12.dp))
+                                            Text("${scooter.mileage} км", fontSize = 12.sp, color = SdTextMuted)
+                                        }
+                                    }
+                                }
+                            }
                             Button(
                                 onClick = onTakeWork,
                                 modifier = Modifier.fillMaxWidth(),
@@ -273,6 +364,28 @@ private fun ScooterCard(
                                 Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("Взять в работу", fontWeight = FontWeight.Bold)
+                            }
+                            // Маршрут
+                            if (canNavigate) {
+                                OutlinedButton(
+                                    onClick = {
+                                        try {
+                                            val uri = Uri.parse("google.navigation:q=${scooter.lat},${scooter.lon}")
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                        } catch (_: Exception) {
+                                            val uri = Uri.parse("geo:${scooter.lat},${scooter.lon}?q=${scooter.lat},${scooter.lon}")
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SdStatusNew),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, SdStatusNew.copy(alpha = 0.4f))
+                                ) {
+                                    Icon(Icons.Outlined.Navigation, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Маршрут", fontSize = 13.sp)
+                                }
                             }
                             OutlinedButton(
                                 onClick = onNotFound,
@@ -292,6 +405,42 @@ private fun ScooterCard(
                         // ── В работе: открыть паспорт для завершения ──
                         ScooterFieldStatus.IN_PROGRESS -> {
                             if (scooter.isMine) {
+                                if (scooter.problem.isNotBlank()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(SdStatusWork.copy(alpha = 0.08f))
+                                            .border(1.dp, SdStatusWork.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Icon(Icons.Outlined.Build, null, tint = SdStatusWork, modifier = Modifier.size(14.dp).padding(top = 1.dp))
+                                        Text(scooter.problem, color = SdTextMain, fontSize = 13.sp)
+                                    }
+                                }
+                                if (canNavigate) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            try {
+                                                val uri = Uri.parse("google.navigation:q=${scooter.lat},${scooter.lon}")
+                                                context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                            } catch (_: Exception) {
+                                                val uri = Uri.parse("geo:${scooter.lat},${scooter.lon}?q=${scooter.lat},${scooter.lon}")
+                                                context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = SdStatusNew),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, SdStatusNew.copy(alpha = 0.4f))
+                                    ) {
+                                        Icon(Icons.Outlined.Navigation, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Маршрут", fontSize = 13.sp)
+                                    }
+                                }
                                 Button(
                                     onClick = onOpenPassport,
                                     modifier = Modifier.fillMaxWidth(),

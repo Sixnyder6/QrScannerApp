@@ -34,9 +34,10 @@ data class StorageCell(
     val createdBy: String? = null,
     val createdByName: String? = null,
     val createdByRole: String? = null,   // "admin" / "worker"
-    val operations: List<CellOperation> = emptyList()
+    val operations: List<CellOperation> = emptyList(),
+    val stickerDirections: Map<String, List<String>>? = null
 ) {
-    constructor() : this("", 0, "", 700, emptyList(), null, null, null, null, emptyList())
+    constructor() : this("", 0, "", 700, emptyList(), null, null, null, null, emptyList(), null)
 
     val name: String
         get() = "Ячейка $cellNumber"

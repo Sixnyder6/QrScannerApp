@@ -34,6 +34,11 @@
     <!-- 📬 FCM при закрытом приложении -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <queries>
+        <package android:name="com.google.android.gms" />
+        <package android:name="com.google.android.gsf" />
+    </queries>
+
     <application
         android:name=".MyApplication"
         android:allowBackup="true"

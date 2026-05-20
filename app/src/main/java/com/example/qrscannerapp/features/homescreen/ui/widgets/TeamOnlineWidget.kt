@@ -1,11 +1,5 @@
 package com.example.qrscannerapp.features.homescreen.ui.widgets
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,8 +20,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -71,17 +63,8 @@ fun TeamOnlineWidget(
         }
     }
 
-    // Shimmer sweep — идёт слева направо, 2.2s цикл
-    val shimmerTransition = rememberInfiniteTransition(label = "team_shimmer")
-    val shimmerX by shimmerTransition.animateFloat(
-        initialValue = -1f,
-        targetValue  =  2f,
-        animationSpec = infiniteRepeatable(
-            animation  = tween(durationMillis = 2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shimmer_x"
-    )
+    // Shimmer: получаем общий таймер из ProvideShimmerPhase (15fps, нет InfiniteTransition)
+    val shimmerTime = LocalShimmerPhase.current
 
     WidgetCard(
         accentColor      = TeamAccent,
@@ -128,56 +111,22 @@ fun TeamOnlineWidget(
                         fontSize = 10.sp
                     )
                 } else {
-                    // Загрузка — shimmer-полоска вместо серого прямоугольника
+                    // Загрузка — GPU shimmer-скелетон (angle=0 горизонталь, period=2.2s)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(28.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .drawWithContent {
-                                // Тёмная подложка
-                                drawRect(color = Color.White.copy(alpha = 0.06f))
-                                // Бегущий блик
-                                val centerX = shimmerX * size.width
-                                val hw = size.width * 0.5f
-                                drawRect(
-                                    brush = Brush.linearGradient(
-                                        colors = listOf(
-                                            Color.Transparent,
-                                            Color.White.copy(alpha = 0.18f),
-                                            Color.White.copy(alpha = 0.32f),
-                                            Color.White.copy(alpha = 0.18f),
-                                            Color.Transparent
-                                        ),
-                                        start = Offset(centerX - hw, 0f),
-                                        end   = Offset(centerX + hw, 0f)
-                                    )
-                                )
-                            }
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .shimmerSheen(shimmerTime, phaseOffset = 0f,    period = 2.2f, angle = 0f, intensity = 0.32f)
                     )
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(0.6f)
                             .height(10.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .drawWithContent {
-                                drawRect(color = Color.White.copy(alpha = 0.06f))
-                                val centerX = shimmerX * size.width
-                                val hw = size.width * 0.5f
-                                drawRect(
-                                    brush = Brush.linearGradient(
-                                        colors = listOf(
-                                            Color.Transparent,
-                                            Color.White.copy(alpha = 0.18f),
-                                            Color.White.copy(alpha = 0.28f),
-                                            Color.White.copy(alpha = 0.18f),
-                                            Color.Transparent
-                                        ),
-                                        start = Offset(centerX - hw, 0f),
-                                        end   = Offset(centerX + hw, 0f)
-                                    )
-                                )
-                            }
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .shimmerSheen(shimmerTime, phaseOffset = 0.15f, period = 2.2f, angle = 0f, intensity = 0.28f)
                     )
                 }
             }

@@ -26,6 +26,9 @@ interface StorageCellDao {
     @Query("UPDATE storage_cells SET operations = :operations, isDirty = 1 WHERE id = :cellId")
     suspend fun updateOperations(cellId: String, operations: List<String>)
 
+    @Query("UPDATE storage_cells SET stickerDirections = :json WHERE id = :cellId")
+    suspend fun updateStickerDirections(cellId: String, json: String)
+
     @Query("SELECT * FROM storage_cells WHERE isDirty = 1")
     suspend fun getDirtyCells(): List<StorageCellEntity>
 

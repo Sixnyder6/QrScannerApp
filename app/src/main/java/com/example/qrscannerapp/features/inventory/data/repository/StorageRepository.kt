@@ -10,6 +10,7 @@ import com.example.qrscannerapp.AuthManager
 import com.example.qrscannerapp.CellOperation
 import com.example.qrscannerapp.StorageActivityLogEntry
 import com.example.qrscannerapp.StorageCell
+import com.example.qrscannerapp.features.scanner.domain.model.StickerItem
 import com.example.qrscannerapp.features.inventory.data.local.dao.StorageCellDao
 import com.example.qrscannerapp.features.inventory.data.local.dao.StoragePalletDao
 import com.example.qrscannerapp.features.inventory.data.mapper.toDomain
@@ -308,6 +309,70 @@ class StorageRepository @Inject constructor(
             Result.success(scooterIds.size)
         } catch (e: Exception) {
             Log.e("StorageRepository", "Error distributing scooters", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun distributeNumberItemsToCell(cell: StorageCell, items: List<StickerItem>): Result<Int> {
+        if (items.isEmpty()) return Result.success(0)
+
+        return try {
+            val scooterIds = items.map { it.code }
+            val updatedItems = (cell.items + scooterIds).distinct()
+
+            if (updatedItems.size > cell.capacity) {
+                return Result.failure(Exception("Недостаточно места (${cell.items.size}/${cell.capacity})"))
+            }
+
+            storageCellDao.updateItems(cell.id, updatedItems)
+
+            val existing = cell.stickerDirections ?: emptyMap()
+            val incoming = items.associate { item -> item.code to item.directions.map { it.name } }
+            val merged = existing + incoming
+            storageCellDao.updateStickerDirections(cell.id, merged.toJson())
+
+            addOperationToCell(
+                cellId = cell.id,
+                action = "ITEMS_ADDED",
+                details = "Добавил ${scooterIds.size} номеров с метками",
+                itemCount = scooterIds.size
+            )
+
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val existing = cell.stickerDirections ?: emptyMap()
+                    val incoming = items.associate { item -> item.code to item.directions.map { it.name } }
+                    val merged = existing + incoming
+
+                    val batch = firestore.batch()
+                    batch.update(
+                        cellsCollection.document(cell.id),
+                        mapOf(
+                            "items" to FieldValue.arrayUnion(*scooterIds.toTypedArray()),
+                            "stickerDirections" to merged
+                        )
+                    )
+                    scooterIds.forEach { scooterId ->
+                        batch.set(
+                            scootersCollection.document(scooterId),
+                            mapOf(
+                                "status" to "in_storage",
+                                "cellId" to cell.id,
+                                "lastUpdate" to FieldValue.serverTimestamp()
+                            )
+                        )
+                    }
+                    batch.commit().await()
+                    logActivity("SCOOTERS_ADDED", "Добавил ${scooterIds.size} номеров с метками в '${cell.name}'")
+                } catch (e: Exception) {
+                    Log.w("StorageRepository", "NumberItems offline — queued: ${e.message}")
+                    triggerSync()
+                }
+            }
+
+            Result.success(scooterIds.size)
+        } catch (e: Exception) {
+            Log.e("StorageRepository", "Error distributing number items", e)
             Result.failure(e)
         }
     }

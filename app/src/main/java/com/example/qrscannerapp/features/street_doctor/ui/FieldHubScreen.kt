@@ -398,7 +398,7 @@ fun FieldHubScreen(viewModel: FieldHubViewModel = hiltViewModel()) {
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().background(HubBg),
+        modifier = Modifier.fillMaxSize().background(HubBg).statusBarsPadding(),
         contentPadding = PaddingValues(bottom = 40.dp)
     ) {
 

@@ -370,6 +370,7 @@ private fun WarehouseCatalogTopAppBar(
     val focusRequester = remember { FocusRequester() }
 
     TopAppBar(
+        windowInsets = WindowInsets(0),
         title = {
             AnimatedContent(
                 targetState = isSearchActive,

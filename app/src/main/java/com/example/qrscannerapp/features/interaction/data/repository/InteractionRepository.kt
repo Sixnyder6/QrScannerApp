@@ -28,15 +28,14 @@ class InteractionRepository @Inject constructor(
     // Active issuances (Firestore realtime)
     fun getActiveIssuances(): Flow<List<BatteryIssuance>> = callbackFlow {
         val listener = firestore.collection("battery_issuances")
-            .whereEqualTo("isActive", true)
             .addSnapshotListener { snap, err ->
                 if (err != null) { Log.e("InteractionRepo", "getActiveIssuances", err); return@addSnapshotListener }
                 val list = snap?.documents?.mapNotNull { doc ->
                     try {
-                        @Suppress("UNCHECKED_CAST")
                         BatteryIssuance(
                             id = doc.id,
-                            batteryCodes = doc.get("batteryCodes") as? List<String> ?: emptyList(),
+                            batteryCount = (doc.getLong("batteryCount")?.toInt())
+                                ?: (doc.get("batteryCodes") as? List<*>)?.size ?: 0,
                             reanimatorCount = (doc.getLong("reanimatorCount") ?: 0L).toInt(),
                             photoUrl = doc.getString("photoUrl"),
                             comment = doc.getString("comment") ?: "",
@@ -79,7 +78,8 @@ class InteractionRepository @Inject constructor(
                         @Suppress("UNCHECKED_CAST")
                         BatteryReception(
                             id = doc.id,
-                            batteryCodes = doc.get("batteryCodes") as? List<String> ?: emptyList(),
+                            batteryCount = (doc.getLong("batteryCount")?.toInt())
+                                ?: (doc.get("batteryCodes") as? List<*>)?.size ?: 0,
                             scooterCodes = doc.get("scooterCodes") as? List<String> ?: emptyList(),
                             reanimatorCount = (doc.getLong("reanimatorCount") ?: 0L).toInt(),
                             photoUrl = doc.getString("photoUrl"),
@@ -88,7 +88,9 @@ class InteractionRepository @Inject constructor(
                             receivedByName = doc.getString("receivedByName") ?: "",
                             receivedFromId = doc.getString("receivedFromId") ?: "",
                             receivedFromName = doc.getString("receivedFromName") ?: "",
-                            timestamp = doc.getLong("timestamp") ?: 0L
+                            timestamp = doc.getLong("timestamp") ?: 0L,
+                            closedIssuanceId = doc.getString("closedIssuanceId"),
+                            expectedBatteryCount = (doc.getLong("expectedBatteryCount")?.toInt()) ?: 0
                         )
                     } catch (e: Exception) { Log.e("InteractionRepo", "parse error doc=${doc.id}", e); null }
                 } ?: emptyList()
@@ -100,7 +102,7 @@ class InteractionRepository @Inject constructor(
     suspend fun saveReception(reception: BatteryReception): Result<Unit> {
         return try {
             val data = hashMapOf<String, Any?>(
-                "batteryCodes" to reception.batteryCodes,
+                "batteryCount" to reception.batteryCount,
                 "scooterCodes" to reception.scooterCodes,
                 "reanimatorCount" to reception.reanimatorCount,
                 "photoUrl" to reception.photoUrl,
@@ -109,7 +111,9 @@ class InteractionRepository @Inject constructor(
                 "receivedByName" to reception.receivedByName,
                 "receivedFromId" to reception.receivedFromId,
                 "receivedFromName" to reception.receivedFromName,
-                "timestamp" to reception.timestamp
+                "timestamp" to reception.timestamp,
+                "closedIssuanceId" to reception.closedIssuanceId,
+                "expectedBatteryCount" to reception.expectedBatteryCount
             )
             firestore.collection("battery_receptions")
                 .document(reception.id)
@@ -141,10 +145,21 @@ class InteractionRepository @Inject constructor(
         }
     }
 
+    suspend fun closeIssuance(id: String): Result<Unit> {
+        return try {
+            firestore.collection("battery_issuances").document(id)
+                .update("isActive", false).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("InteractionRepo", "closeIssuance", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun saveIssuance(issuance: BatteryIssuance): Result<Unit> {
         return try {
             val data = hashMapOf<String, Any?>(
-                "batteryCodes" to issuance.batteryCodes,
+                "batteryCount" to issuance.batteryCount,
                 "reanimatorCount" to issuance.reanimatorCount,
                 "photoUrl" to issuance.photoUrl,
                 "comment" to issuance.comment,

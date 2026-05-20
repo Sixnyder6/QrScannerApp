@@ -1,0 +1,39 @@
+uniform float2 iResolution;
+uniform float  iTime;
+uniform float3 u_color;
+
+half4 main(float2 fragCoord) {
+    float2 uv = fragCoord / iResolution;
+    float2 center = float2(0.5, 0.5);
+
+    // Preserve circular shape regardless of component aspect ratio
+    float aspect = iResolution.x / iResolution.y;
+    float2 p = uv - center;
+    if (aspect >= 1.0) {
+        p.x *= aspect;
+    } else {
+        p.y /= aspect;
+    }
+    float dist = length(p);
+
+    // Period = 1.4s matching original tween(1400)
+    float period = 1.4;
+    float t = fract(iTime / period);   // 0..1 per cycle
+
+    // Scale: ping-pong 0.88..1.12 with smoothstep ease (≈ IOSEasing, RepeatMode.Reverse)
+    float tri   = 1.0 - abs(2.0 * t - 1.0);        // triangle wave: 0→1→0
+    float eased = tri * tri * (3.0 - 2.0 * tri);   // smoothstep
+    float scale = mix(0.88, 1.12, eased);
+
+    // Alpha: 0.20 → 0 linear per cycle (RepeatMode.Restart)
+    float alpha = mix(0.20, 0.0, t);
+
+    // Filled circle SDF — scale the distance space to resize the circle
+    float radius = 0.48;
+    float aa     = 1.5 / min(iResolution.x, iResolution.y);
+    float circle = 1.0 - smoothstep(radius / scale - aa, radius / scale + aa, dist);
+
+    // Premultiplied RGBA output
+    float a = circle * alpha;
+    return half4(half3(u_color) * a, a);
+}

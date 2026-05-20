@@ -15,7 +15,8 @@ data class StorageCellEntity(
     val createdBy: String? = null,
     val createdByRole: String? = null,      // <<< НОВОЕ: роль создателя
     val createdAt: Long? = null,
-    val operations: List<String> = emptyList(), // <<< НОВОЕ: JSON-строки CellOperation
+    val operations: List<String> = emptyList(),
+    val stickerDirections: String? = null, // JSON: {"code":["UP","LEFT"]}
 
     val isDirty: Boolean = false
 ) {

@@ -49,7 +49,7 @@ import com.example.qrscannerapp.features.settings.ui.SpyderAnimationLog
         TelemetryBuffer::class,
         SpyderAnimationLog::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = false
 )
 @TypeConverters(

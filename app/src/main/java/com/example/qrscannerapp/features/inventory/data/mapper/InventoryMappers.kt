@@ -5,6 +5,7 @@ import com.example.qrscannerapp.StorageCell
 import com.example.qrscannerapp.features.inventory.data.local.entity.StorageCellEntity
 import com.example.qrscannerapp.features.inventory.data.local.entity.StoragePalletEntity
 import com.example.qrscannerapp.features.inventory.domain.model.StoragePallet
+import org.json.JSONArray
 import org.json.JSONObject
 
 // ============================================================================================
@@ -44,6 +45,31 @@ fun String.toCellOperation(): CellOperation? {
 // StorageCell Mappers
 // ============================================================================================
 
+fun Map<String, List<String>>.toJson(): String {
+    val obj = JSONObject()
+    forEach { (key, dirs) ->
+        val arr = JSONArray()
+        dirs.forEach { arr.put(it) }
+        obj.put(key, arr)
+    }
+    return obj.toString()
+}
+
+fun String.toStickerDirectionsMap(): Map<String, List<String>> {
+    return try {
+        val obj = JSONObject(this)
+        val result = mutableMapOf<String, List<String>>()
+        obj.keys().forEach { key ->
+            val arr = obj.getJSONArray(key)
+            val list = (0 until arr.length()).map { arr.getString(it) }
+            result[key] = list
+        }
+        result
+    } catch (e: Exception) {
+        emptyMap()
+    }
+}
+
 fun StorageCell.toEntity(): StorageCellEntity {
     return StorageCellEntity(
         id = this.id,
@@ -56,6 +82,7 @@ fun StorageCell.toEntity(): StorageCellEntity {
         createdByRole = this.createdByRole,
         createdAt = this.createdAt?.time,
         operations = this.operations.map { it.toJson() },
+        stickerDirections = this.stickerDirections?.toJson(),
         isDirty = false
     )
 }
@@ -71,7 +98,8 @@ fun StorageCellEntity.toDomain(): StorageCell {
         createdBy = this.createdBy,
         createdByRole = this.createdByRole,
         createdAt = this.createdAt?.let { java.util.Date(it) },
-        operations = this.operations.mapNotNull { it.toCellOperation() }
+        operations = this.operations.mapNotNull { it.toCellOperation() },
+        stickerDirections = this.stickerDirections?.toStickerDirectionsMap()
     )
 }
 

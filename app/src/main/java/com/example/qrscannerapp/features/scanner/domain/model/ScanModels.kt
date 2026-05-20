@@ -1,8 +1,16 @@
 package com.example.qrscannerapp.features.scanner.domain.model
 
-import androidx.annotation.Keep // <-- ДОБАВИЛИ ИМПОРТ ДЛЯ ЩИТА
+import androidx.annotation.Keep
 import com.example.qrscannerapp.core.model.SessionType
 import java.util.UUID
+
+enum class StickerDirection { UP, DOWN, LEFT, RIGHT }
+
+@Keep
+data class StickerItem(
+    val code: String,
+    val directions: Set<StickerDirection> = emptySet()
+)
 
 @Keep // <-- ЩИТ ДЛЯ ПЕРВОГО КЛАССА
 data class ScanItem(

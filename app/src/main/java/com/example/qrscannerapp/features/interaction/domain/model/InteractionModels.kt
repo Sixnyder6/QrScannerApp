@@ -2,7 +2,7 @@ package com.example.qrscannerapp.features.interaction.domain.model
 
 data class BatteryIssuance(
     val id: String = "",
-    val batteryCodes: List<String> = emptyList(),
+    val batteryCount: Int = 0,
     val reanimatorCount: Int = 0,
     val photoUrl: String? = null,
     val comment: String = "",
@@ -22,7 +22,7 @@ data class SbEmployee(
 
 data class BatteryReception(
     val id: String = "",
-    val batteryCodes: List<String> = emptyList(),
+    val batteryCount: Int = 0,
     val scooterCodes: List<String> = emptyList(),
     val reanimatorCount: Int = 0,
     val photoUrl: String? = null,
@@ -31,7 +31,9 @@ data class BatteryReception(
     val receivedByName: String = "",
     val receivedFromId: String = "",
     val receivedFromName: String = "",
-    val timestamp: Long = 0L
+    val timestamp: Long = 0L,
+    val closedIssuanceId: String? = null,
+    val expectedBatteryCount: Int = 0
 )
 
 // Kept for Room backward compatibility (table still exists in DB schema)

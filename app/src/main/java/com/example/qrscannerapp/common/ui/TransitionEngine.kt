@@ -2,6 +2,9 @@
 // Настроен под 120fps ProMotion физику
 package com.example.qrscannerapp.common.ui
 
+import android.graphics.RuntimeShader
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -19,17 +22,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavBackStackEntry
+import com.example.qrscannerapp.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.cos
@@ -469,10 +476,56 @@ fun ParallaxImage(
 
 // =============================================================================
 // 9. GLOW EFFECT
+// GPU: bloom rendering + breathing animation via shader.
+// CPU: spring для toggle (1 float) + iTime тик 15fps.
+// Fallback (API < 33): оригинальная реализация.
 // =============================================================================
 
 @Composable
 fun GlowEffect(isActive: Boolean, color: Color = Color.White, modifier: Modifier = Modifier) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        GlowEffectShader(isActive, color, modifier)
+    } else {
+        GlowEffectLegacy(isActive, color, modifier)
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@Composable
+private fun GlowEffectShader(isActive: Boolean, color: Color, modifier: Modifier) {
+    val context = LocalContext.current
+    val shader = remember {
+        context.resources.openRawResource(R.raw.glow_effect)
+            .bufferedReader().use { it.readText() }
+            .let { RuntimeShader(it) }
+    }
+    val shaderBrush = remember(shader) { ShaderBrush(shader) }
+    // Spring: 1 scalar на кадр во время toggle — CPU cost ничтожен
+    val glowAlpha = animateFloatAsState(
+        targetValue   = if (isActive) 0.22f else 0f,
+        animationSpec = ContentSpring, label = "glow"
+    )
+    var time by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        val t0 = System.currentTimeMillis()
+        while (true) {
+            delay(66L)
+            time = (System.currentTimeMillis() - t0) / 1000f
+        }
+    }
+    Box(modifier = modifier.drawWithCache {
+        shader.setFloatUniform("iResolution", size.width, size.height)
+        shader.setFloatUniform("u_color", color.red, color.green, color.blue)
+        onDrawBehind {
+            shader.setFloatUniform("iTime", time)
+            shader.setFloatUniform("u_alpha", glowAlpha.value)
+            drawRect(shaderBrush)
+        }
+    })
+}
+
+@Composable
+private fun GlowEffectLegacy(isActive: Boolean, color: Color, modifier: Modifier) {
     val glowAlpha by animateFloatAsState(
         targetValue   = if (isActive) 0.22f else 0f,
         animationSpec = ContentSpring, label = "glow"
@@ -485,13 +538,52 @@ fun GlowEffect(isActive: Boolean, color: Color = Color.White, modifier: Modifier
 
 // =============================================================================
 // 10. PULSATING RIPPLE
+// GPU: вся математика scale/alpha/easing внутри шейдера.
+// CPU: только delay(66) → iTime. Нет rememberInfiniteTransition, нет 60fps recomp.
+// Fallback (API < 33): оригинальная реализация.
 // =============================================================================
 
 @Composable
 fun PulsatingRipple(isActive: Boolean, color: Color = Color.White, modifier: Modifier = Modifier) {
     if (!isActive) return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        PulsatingRippleShader(color, modifier)
+    } else {
+        PulsatingRippleLegacy(color, modifier)
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@Composable
+private fun PulsatingRippleShader(color: Color, modifier: Modifier) {
+    val context = LocalContext.current
+    val shader = remember {
+        context.resources.openRawResource(R.raw.pulsating_ripple)
+            .bufferedReader().use { it.readText() }
+            .let { RuntimeShader(it) }
+    }
+    val shaderBrush = remember(shader) { ShaderBrush(shader) }
+    var time by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        val t0 = System.currentTimeMillis()
+        while (true) {
+            delay(66L)
+            time = (System.currentTimeMillis() - t0) / 1000f
+        }
+    }
+    Box(modifier = modifier.drawWithCache {
+        shader.setFloatUniform("iResolution", size.width, size.height)
+        shader.setFloatUniform("u_color", color.red, color.green, color.blue)
+        onDrawBehind {
+            shader.setFloatUniform("iTime", time)
+            drawRect(shaderBrush)
+        }
+    })
+}
+
+@Composable
+private fun PulsatingRippleLegacy(color: Color, modifier: Modifier) {
     val t = rememberInfiniteTransition(label = "ripple")
-    // scale и alpha один период — заканчиваются вместе
     val scale by t.animateFloat(0.88f, 1.12f,
         infiniteRepeatable(tween(1400, easing = IOSEasing), RepeatMode.Reverse), "rs")
     val alpha by t.animateFloat(0.20f, 0f,

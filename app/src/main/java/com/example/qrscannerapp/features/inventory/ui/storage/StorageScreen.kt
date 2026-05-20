@@ -121,6 +121,7 @@ fun StorageScreen(
     setTopBarActions: (@Composable RowScope.() -> Unit) -> Unit
 ) {
     val uiState by viewModel.storageState.collectAsState()
+    val numberItems by viewModel.numberItems.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -139,6 +140,7 @@ fun StorageScreen(
     var showClearLogDialog by remember { mutableStateOf(false) }
     var showBulkDeleteConfirmDialog by remember { mutableStateOf(false) }
     var cellForDistributionConfirm by remember { mutableStateOf<StorageCell?>(null) }
+    var cellForNumberDistributionConfirm by remember { mutableStateOf<StorageCell?>(null) }
     var cellForContextMenu by remember { mutableStateOf<StorageCell?>(null) }
 
     var isSelectionMode by remember { mutableStateOf(false) }
@@ -218,7 +220,16 @@ fun StorageScreen(
                         )
                     } else {
                         TopAppBar(
-                            title = { },
+                            windowInsets = WindowInsets(0),
+                            title = {
+                                Text(
+                                    "Самокаты",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = StardustTextPrimary,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = (-0.5).sp
+                                )
+                            },
                             navigationIcon = {
                                 IconButton(onClick = onNavigateBack) {
                                     Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = StardustTextPrimary)
@@ -282,22 +293,14 @@ fun StorageScreen(
                                 .fillMaxSize()
                                 .padding(horizontal = 16.dp)
                         ) {
-                            Column(modifier = Modifier.padding(bottom = 12.dp)) {
+                            if (!isSelectionMode) {
                                 Text(
-                                    "Самокаты",
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    color = StardustTextPrimary,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    letterSpacing = (-0.5).sp
+                                    "Удерживайте ячейку для действий",
+                                    fontSize = 12.sp,
+                                    color = StardustTextSecondary.copy(alpha = 0.6f),
+                                    letterSpacing = 0.sp,
+                                    modifier = Modifier.padding(bottom = 12.dp)
                                 )
-                                if (!isSelectionMode) {
-                                    Text(
-                                        "Удерживайте ячейку для действий",
-                                        fontSize = 12.sp,
-                                        color = StardustTextSecondary.copy(alpha = 0.6f),
-                                        letterSpacing = 0.sp
-                                    )
-                                }
                             }
 
                             if (uiState.cells.isNotEmpty()) {
@@ -381,6 +384,40 @@ fun StorageScreen(
                             val undistributedCount by remember {
                                 derivedStateOf { viewModel.scooterCodes.size }
                             }
+                            // Баннер буфера номеров с метками
+                            AnimatedVisibility(
+                                visible = numberItems.isNotEmpty(),
+                                enter = fadeIn(tween(300)) + expandVertically(tween(300)),
+                                exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
+                            ) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+                                    border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.5f))
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Brush.horizontalGradient(listOf(StardustPrimary.copy(alpha = 0.15f), StardustGlassBg)))
+                                            .padding(14.dp)
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier.size(36.dp).clip(CircleShape).background(StardustPrimary.copy(alpha = 0.2f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text("#", color = StardustPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column {
+                                                Text("Номера с метками: ${numberItems.size} шт.", color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                                Text("Нажмите на ячейку для размещения", color = StardustTextSecondary, fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             // Баннер буфера
                             AnimatedVisibility(
@@ -457,7 +494,8 @@ fun StorageScreen(
                                                     else selectedCellIds + cell.id
                                                     if (selectedCellIds.isEmpty()) isSelectionMode = false
                                                 } else {
-                                                    if (undistributedCount > 0) cellForDistributionConfirm = cell
+                                                    if (numberItems.isNotEmpty()) cellForNumberDistributionConfirm = cell
+                                                    else if (undistributedCount > 0) cellForDistributionConfirm = cell
                                                     else selectedCellForDetails = cell
                                                 }
                                             },
@@ -501,6 +539,24 @@ fun StorageScreen(
             text = { Text("Будет добавлено $count самокатов.\nСвободных мест: ${cell.capacity - cell.items.size}.", color = StardustTextSecondary) },
             confirmButton = { Button(onClick = { viewModel.distributeScootersToCell(cell); cellForDistributionConfirm = null }, colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) { Text("Добавить") } },
             dismissButton = { TextButton(onClick = { cellForDistributionConfirm = null }) { Text("Отмена", color = StardustTextSecondary) } },
+            containerColor = StardustModalBg
+        )
+    }
+
+    if (cellForNumberDistributionConfirm != null) {
+        val cell = cellForNumberDistributionConfirm!!
+        val count = numberItems.size
+        AlertDialog(
+            onDismissRequest = { cellForNumberDistributionConfirm = null },
+            title = { Text("Разместить номера в ${cell.name}?", color = StardustTextPrimary) },
+            text = { Text("Будет добавлено $count номеров с метками направлений.\nСвободных мест: ${cell.capacity - cell.items.size}.", color = StardustTextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.distributeNumberItemsToCell(cell); cellForNumberDistributionConfirm = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
+                ) { Text("Добавить") }
+            },
+            dismissButton = { TextButton(onClick = { cellForNumberDistributionConfirm = null }) { Text("Отмена", color = StardustTextSecondary) } },
             containerColor = StardustModalBg
         )
     }
@@ -1138,10 +1194,23 @@ fun CellDetailsSheet(
                             }
                             LazyColumn(modifier = Modifier.fillMaxHeight(0.55f)) {
                                 items(displayedItems, key = { it }) { scooterId ->
+                                    val itemDirs = cell.stickerDirections?.get(scooterId)
                                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Icon(imageVector = Icons.Default.QrCode2, contentDescription = null, tint = if (scooterId.contains(searchQuery, true) && searchQuery.isNotBlank()) StardustPrimary else StardustTextSecondary.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         HighlightedText(text = scooterId, highlight = searchQuery, color = StardustTextPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                        if (!itemDirs.isNullOrEmpty()) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(end = 4.dp)) {
+                                                itemDirs.forEach { dirName ->
+                                                    val dir = runCatching {
+                                                        com.example.qrscannerapp.features.scanner.domain.model.StickerDirection.valueOf(dirName)
+                                                    }.getOrNull()
+                                                    if (dir != null) {
+                                                        com.example.qrscannerapp.features.scanner.ui.components.DirectionBadge(dir)
+                                                    }
+                                                }
+                                            }
+                                        }
                                         IconButton(onClick = { scooterToRemove = scooterId }, modifier = Modifier.size(40.dp)) {
                                             Icon(Icons.Default.Clear, contentDescription = null, tint = StardustError.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
                                         }

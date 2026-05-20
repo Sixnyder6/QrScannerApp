@@ -20,6 +20,8 @@ data class StreetScooter(
     val workStartTime: Long? = null,
     val isMine: Boolean = false,
     val photoUrls: List<String> = emptyList(),
+    val problem: String = "",
+    val createdAt: Long = 0L,
 )
 
 enum class ScooterFieldStatus {

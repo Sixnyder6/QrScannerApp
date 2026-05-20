@@ -2,11 +2,6 @@ package com.example.qrscannerapp.features.interaction.ui
 
 import android.Manifest
 import android.content.Context
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
-import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
@@ -70,8 +65,6 @@ fun InteractionScreen(
     onNavigateBack: () -> Unit
 ) {
     val step by viewModel.step.collectAsState()
-    val scannedCodes by viewModel.scannedCodes.collectAsState()
-    val receptionBatteryCodes by viewModel.receptionBatteryCodes.collectAsState()
     val receptionScooterCodes by viewModel.receptionScooterCodes.collectAsState()
     val activeIssuances by viewModel.activeIssuances.collectAsState()
     val recentReceptions by viewModel.recentReceptions.collectAsState()
@@ -92,7 +85,6 @@ fun InteractionScreen(
                 title = {
                     Text(
                         when (step) {
-                            IssuanceStep.SCANNING -> "Сканирование АКБ"
                             IssuanceStep.CONFIRMING -> "Выдача АКБ"
                             IssuanceStep.DETAILS -> "Детали выдачи"
                             IssuanceStep.SCANNING_RECEPTION -> "Сканирование приёмки"
@@ -106,7 +98,7 @@ fun InteractionScreen(
                 navigationIcon = {
                     IconButton(onClick = {
                         when (step) {
-                            IssuanceStep.SCANNING, IssuanceStep.CONFIRMING -> viewModel.cancelScanning()
+                            IssuanceStep.CONFIRMING -> viewModel.cancelIssuance()
                             IssuanceStep.DETAILS -> viewModel.closeDetails()
                             IssuanceStep.SCANNING_RECEPTION, IssuanceStep.CONFIRMING_RECEPTION -> viewModel.cancelReception()
                             IssuanceStep.DETAILS_RECEPTION -> viewModel.closeReceptionDetails()
@@ -132,28 +124,18 @@ fun InteractionScreen(
                     issuances = activeIssuances,
                     receptions = recentReceptions,
                     padding = padding,
-                    onIssueClick = { viewModel.startScanning() },
+                    onIssueClick = { viewModel.startIssuance() },
                     onReceiveClick = { viewModel.startReceptionScanning() },
                     onIssuanceCardClick = { viewModel.openDetails(it) },
                     onReceptionCardClick = { viewModel.openReceptionDetails(it) }
                 )
-                IssuanceStep.SCANNING -> ScanningScreen(
-                    hasPermission = cameraPermission,
-                    scannedCodes = scannedCodes,
-                    scanEventFlow = viewModel.scanEventFlow,
-                    padding = padding,
-                    onCodeScanned = viewModel::onCodeScanned,
-                    onRemoveCode = viewModel::removeCode,
-                    onDone = { viewModel.finishScanning() }
-                )
                 IssuanceStep.CONFIRMING -> ConfirmingScreen(
                     sbEmployees = sbEmployees,
-                    scannedCount = scannedCodes.size,
                     isSaving = isSaving,
                     padding = padding,
                     isReception = false,
-                    onConfirm = { employeeId, employeeName, reaniCount, comment, photoUri ->
-                        viewModel.confirmIssuance(employeeId, employeeName, reaniCount, comment, photoUri, context)
+                    onConfirm = { employeeId, employeeName, batteryCount, reaniCount, comment, photoUri, _, _ ->
+                        viewModel.confirmIssuance(employeeId, employeeName, batteryCount, reaniCount, comment, photoUri, context)
                     }
                 )
                 IssuanceStep.DETAILS -> selectedIssuance?.let {
@@ -174,24 +156,22 @@ fun InteractionScreen(
                 }
                 IssuanceStep.SCANNING_RECEPTION -> ReceptionScanningScreen(
                     hasPermission = cameraPermission,
-                    batteryCodes = receptionBatteryCodes,
                     scooterCodes = receptionScooterCodes,
                     scanEventFlow = viewModel.scanEventFlow,
                     padding = padding,
                     onCodeScanned = viewModel::onReceptionCodeScanned,
-                    onRemoveBatteryCode = viewModel::removeReceptionBatteryCode,
                     onRemoveScooterCode = viewModel::removeReceptionScooterCode,
                     onDone = { viewModel.finishReceptionScanning() }
                 )
                 IssuanceStep.CONFIRMING_RECEPTION -> ConfirmingScreen(
                     sbEmployees = sbEmployees,
-                    scannedCount = receptionBatteryCodes.size,
                     scooterCount = receptionScooterCodes.size,
                     isSaving = isSaving,
                     padding = padding,
                     isReception = true,
-                    onConfirm = { employeeId, employeeName, reaniCount, comment, photoUri ->
-                        viewModel.confirmReception(employeeId, employeeName, reaniCount, comment, photoUri, context)
+                    activeIssuances = activeIssuances,
+                    onConfirm = { employeeId, employeeName, batteryCount, reaniCount, comment, photoUri, closedIssuanceId, expectedCount ->
+                        viewModel.confirmReception(employeeId, employeeName, batteryCount, reaniCount, comment, photoUri, context, closedIssuanceId, expectedCount)
                     }
                 )
             }
@@ -386,13 +366,45 @@ private fun EmptyState(icon: androidx.compose.ui.graphics.vector.ImageVector, te
 }
 
 @Composable
+private fun formatElapsed(ms: Long): String {
+    val totalMin = ms / 60_000
+    val hours = totalMin / 60
+    val mins = totalMin % 60
+    return when {
+        hours >= 24 -> "${hours / 24}д ${hours % 24}ч"
+        hours > 0   -> "${hours}ч ${mins}мин"
+        else        -> "${mins}мин"
+    }
+}
+
+@Composable
 private fun IssuanceCard(issuance: BatteryIssuance, onClick: () -> Unit) {
     val fmt = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
+    val statusColor = if (issuance.isActive) AccentGreen else StardustTextSecondary
+    val borderAlpha = if (issuance.isActive) 0.35f else 0.12f
+
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    if (issuance.isActive) {
+        LaunchedEffect(issuance.id) {
+            while (true) {
+                kotlinx.coroutines.delay(60_000L)
+                now = System.currentTimeMillis()
+            }
+        }
+    }
+    val elapsedMs = now - issuance.timestamp
+    val timerColor = when {
+        elapsedMs < 4 * 3600_000L  -> AccentGreen
+        elapsedMs < 8 * 3600_000L  -> Color(0xFFFBBF24)
+        else                        -> StardustError
+    }
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = CardBg),
-        border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.25f))
+        colors = CardDefaults.cardColors(
+            containerColor = if (issuance.isActive) CardBg else CardBg.copy(alpha = 0.6f)
+        ),
+        border = BorderStroke(1.dp, StardustPrimary.copy(alpha = borderAlpha))
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -402,22 +414,63 @@ private fun IssuanceCard(issuance: BatteryIssuance, onClick: () -> Unit) {
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(StardustPrimary.copy(alpha = 0.15f)),
+                    .background(StardustPrimary.copy(alpha = if (issuance.isActive) 0.15f else 0.07f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Outlined.Person, null, tint = StardustPrimary, modifier = Modifier.size(24.dp))
+                Icon(Icons.Outlined.Person, null, tint = if (issuance.isActive) StardustPrimary else StardustTextSecondary, modifier = Modifier.size(24.dp))
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(issuance.issuedToName, color = StardustTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        issuance.issuedToName,
+                        color = if (issuance.isActive) StardustTextPrimary else StardustTextSecondary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(statusColor.copy(alpha = 0.15f))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Icon(
+                            if (issuance.isActive) Icons.Filled.RadioButtonChecked else Icons.Filled.CheckCircle,
+                            null,
+                            tint = statusColor,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (issuance.isActive) "Активная" else "Завершена",
+                            color = statusColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BadgeChip(icon = Icons.Outlined.BatteryFull, label = "${issuance.batteryCodes.size} АКБ", color = AccentCyan)
+                    BadgeChip(icon = Icons.Outlined.BatteryFull, label = "${issuance.batteryCount} АКБ", color = AccentCyan)
                     if (issuance.reanimatorCount > 0)
                         BadgeChip(icon = Icons.Outlined.ElectricBolt, label = "${issuance.reanimatorCount} реан.", color = StardustSuccess)
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(fmt.format(Date(issuance.timestamp)), color = StardustTextSecondary, fontSize = 12.sp)
+                if (issuance.isActive) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Outlined.Timer, null, tint = timerColor, modifier = Modifier.size(12.dp))
+                        Text(formatElapsed(elapsedMs), color = timerColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("·", color = StardustTextSecondary, fontSize = 12.sp)
+                        Text(fmt.format(Date(issuance.timestamp)), color = StardustTextSecondary, fontSize = 12.sp)
+                    }
+                } else {
+                    Text(fmt.format(Date(issuance.timestamp)), color = StardustTextSecondary, fontSize = 12.sp)
+                }
             }
             Icon(Icons.Filled.ChevronRight, null, tint = StardustTextSecondary)
         }
@@ -456,8 +509,8 @@ private fun ReceptionCard(reception: BatteryReception, onClick: () -> Unit) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (reception.batteryCodes.isNotEmpty())
-                        BadgeChip(icon = Icons.Outlined.BatteryFull, label = "${reception.batteryCodes.size} АКБ", color = AccentCyan)
+                    if (reception.batteryCount > 0)
+                        BadgeChip(icon = Icons.Outlined.BatteryFull, label = "${reception.batteryCount} АКБ", color = AccentCyan)
                     if (reception.scooterCodes.isNotEmpty())
                         BadgeChip(icon = Icons.Filled.ElectricScooter, label = "${reception.scooterCodes.size} самок.", color = AccentGreen)
                     if (reception.reanimatorCount > 0)
@@ -465,6 +518,26 @@ private fun ReceptionCard(reception: BatteryReception, onClick: () -> Unit) {
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(fmt.format(Date(reception.timestamp)), color = StardustTextSecondary, fontSize = 12.sp)
+                if (reception.expectedBatteryCount > 0 && reception.expectedBatteryCount != reception.batteryCount) {
+                    val diff = reception.batteryCount - reception.expectedBatteryCount
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(StardustError.copy(alpha = 0.18f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Icon(Icons.Filled.Warning, null, tint = StardustError, modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (diff < 0) "Недостача: $diff АКБ" else "Излишек: +$diff АКБ",
+                            color = StardustError,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
             Icon(Icons.Filled.ChevronRight, null, tint = StardustTextSecondary)
         }
@@ -486,107 +559,19 @@ private fun BadgeChip(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
     }
 }
 
-// ─── SCANNING (ISSUANCE) ──────────────────────────────────────────────────────
-
-@Composable
-private fun ScanningScreen(
-    hasPermission: Boolean,
-    scannedCodes: List<String>,
-    scanEventFlow: kotlinx.coroutines.flow.Flow<com.example.qrscannerapp.core.model.ScanEvent>,
-    padding: PaddingValues,
-    onCodeScanned: (String) -> Unit,
-    onRemoveCode: (String) -> Unit,
-    onDone: () -> Unit
-) {
-    var isTorchOn by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-    ) {
-        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            CameraView(
-                isSearchMode = false,
-                hasPermission = hasPermission,
-                scanEventFlow = scanEventFlow,
-                isTorchOn = isTorchOn,
-                onTorchChange = { isTorchOn = it },
-                onCodeScanned = onCodeScanned,
-                onStatusUpdate = { _, _ -> }
-            )
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(CardBg)
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Отсканировано: ${scannedCodes.size} АКБ",
-                    color = StardustTextPrimary,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp
-                )
-                if (scannedCodes.isNotEmpty())
-                    Text("Нажми чтобы удалить", color = StardustTextSecondary, fontSize = 11.sp)
-            }
-
-            if (scannedCodes.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(scannedCodes) { code ->
-                        ScannedCodeRow(
-                            icon = Icons.Outlined.BatteryFull,
-                            iconColor = AccentCyan,
-                            code = code,
-                            onClick = { onRemoveCode(code) }
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-            Button(
-                onClick = onDone,
-                enabled = scannedCodes.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
-            ) {
-                Icon(Icons.Filled.CheckCircle, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Готово — ${scannedCodes.size} АКБ", fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
 // ─── SCANNING (RECEPTION) ─────────────────────────────────────────────────────
 
 @Composable
 private fun ReceptionScanningScreen(
     hasPermission: Boolean,
-    batteryCodes: List<String>,
     scooterCodes: List<String>,
     scanEventFlow: kotlinx.coroutines.flow.Flow<com.example.qrscannerapp.core.model.ScanEvent>,
     padding: PaddingValues,
     onCodeScanned: (String) -> Unit,
-    onRemoveBatteryCode: (String) -> Unit,
     onRemoveScooterCode: (String) -> Unit,
     onDone: () -> Unit
 ) {
     var isTorchOn by remember { mutableStateOf(false) }
-    val totalCount = batteryCodes.size + scooterCodes.size
 
     Column(
         modifier = Modifier
@@ -617,27 +602,22 @@ private fun ReceptionScanningScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (batteryCodes.isNotEmpty())
-                        BadgeChip(Icons.Outlined.BatteryFull, "${batteryCodes.size} АКБ", AccentCyan)
                     if (scooterCodes.isNotEmpty())
                         BadgeChip(Icons.Filled.ElectricScooter, "${scooterCodes.size} самок.", AccentGreen)
-                    if (totalCount == 0)
-                        Text("Сканируй коды АКБ и самокатов", color = StardustTextSecondary, fontSize = 13.sp)
+                    else
+                        Text("Сканируй QR-коды самокатов", color = StardustTextSecondary, fontSize = 13.sp)
                 }
-                if (totalCount > 0)
+                if (scooterCodes.isNotEmpty())
                     Text("Нажми чтобы удалить", color = StardustTextSecondary, fontSize = 11.sp)
             }
 
-            if (batteryCodes.isNotEmpty() || scooterCodes.isNotEmpty()) {
+            if (scooterCodes.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(batteryCodes, key = { "b_$it" }) { code ->
-                        ScannedCodeRow(Icons.Outlined.BatteryFull, AccentCyan, code) { onRemoveBatteryCode(code) }
-                    }
-                    items(scooterCodes, key = { "s_$it" }) { code ->
+                    items(scooterCodes, key = { it }) { code ->
                         ScannedCodeRow(Icons.Filled.ElectricScooter, AccentGreen, code) { onRemoveScooterCode(code) }
                     }
                 }
@@ -646,14 +626,17 @@ private fun ReceptionScanningScreen(
             Spacer(Modifier.height(14.dp))
             Button(
                 onClick = onDone,
-                enabled = totalCount > 0,
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
             ) {
                 Icon(Icons.Filled.CheckCircle, null, tint = Color.Black)
                 Spacer(Modifier.width(8.dp))
-                Text("Готово — $totalCount шт.", fontWeight = FontWeight.Bold, color = Color.Black)
+                Text(
+                    if (scooterCodes.isEmpty()) "Продолжить без самокатов" else "Готово — ${scooterCodes.size} шт.",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black
+                )
             }
         }
     }
@@ -691,16 +674,19 @@ private fun ScannedCodeRow(
 @Composable
 private fun ConfirmingScreen(
     sbEmployees: List<SbEmployee>,
-    scannedCount: Int,
     scooterCount: Int = 0,
     isSaving: Boolean,
     padding: PaddingValues,
     isReception: Boolean,
-    onConfirm: (String, String, Int, String, Uri?) -> Unit
+    activeIssuances: List<BatteryIssuance> = emptyList(),
+    onConfirm: (String, String, Int, Int, String, Uri?, String?, Int) -> Unit
 ) {
     val context = LocalContext.current
     var selectedEmployee by remember { mutableStateOf<SbEmployee?>(null) }
     var dropdownExpanded by remember { mutableStateOf(false) }
+    var selectedIssuanceToClose by remember { mutableStateOf<BatteryIssuance?>(null) }
+    var issuanceDropdownExpanded by remember { mutableStateOf(false) }
+    var batteryCount by remember { mutableIntStateOf(0) }
     var reanimatorCount by remember { mutableIntStateOf(0) }
     var comment by remember { mutableStateOf("") }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
@@ -742,14 +728,15 @@ private fun ConfirmingScreen(
                 Icon(Icons.Outlined.MoveToInbox, null, tint = AccentGreen, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 val parts = buildList {
-                    if (scannedCount > 0) add("$scannedCount АКБ")
+                    if (batteryCount > 0) add("$batteryCount АКБ")
                     if (scooterCount > 0) add("$scooterCount самок.")
                 }
-                Text(parts.joinToString(" + ") + " к приёмке", color = AccentGreen, fontWeight = FontWeight.SemiBold)
+                val label = if (parts.isEmpty()) "Укажи кол-во АКБ" else parts.joinToString(" + ") + " к приёмке"
+                Text(label, color = AccentGreen, fontWeight = FontWeight.SemiBold)
             } else {
                 Icon(Icons.Outlined.BatteryFull, null, tint = AccentCyan, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("$scannedCount АКБ готовы к выдаче", color = AccentCyan, fontWeight = FontWeight.SemiBold)
+                Text(if (batteryCount > 0) "$batteryCount АКБ к выдаче" else "Укажи кол-во АКБ", color = AccentCyan, fontWeight = FontWeight.SemiBold)
             }
         }
 
@@ -794,6 +781,37 @@ private fun ConfirmingScreen(
             }
         }
 
+        // Battery counter
+        SectionLabel("Кол-во АКБ")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(CardBg)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            IconButton(
+                onClick = { if (batteryCount > 0) batteryCount-- },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(Icons.Filled.Remove, null, tint = if (batteryCount > 0) AccentCyan else StardustTextSecondary)
+            }
+            Text(
+                "$batteryCount",
+                color = StardustTextPrimary,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(48.dp),
+                textAlign = TextAlign.Center
+            )
+            IconButton(
+                onClick = { batteryCount++ },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(Icons.Filled.Add, null, tint = AccentCyan)
+            }
+        }
+
         // Reanimator counter
         SectionLabel("Кол-во реаниматоров")
         Row(
@@ -822,6 +840,55 @@ private fun ConfirmingScreen(
                 modifier = Modifier.size(36.dp)
             ) {
                 Icon(Icons.Filled.Add, null, tint = StardustPrimary)
+            }
+        }
+
+        // Close issuance dropdown (reception only)
+        val openIssuances = activeIssuances.filter { it.isActive }
+        if (isReception && openIssuances.isNotEmpty()) {
+            SectionLabel("Закрыть выдачу (опционально)")
+            ExposedDropdownMenuBox(
+                expanded = issuanceDropdownExpanded,
+                onExpandedChange = { issuanceDropdownExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = selectedIssuanceToClose?.let { "СБ ${it.issuedToName} — ${it.batteryCount} АКБ" } ?: "",
+                    onValueChange = {},
+                    readOnly = true,
+                    placeholder = { Text("Не привязывать к выдаче", color = StardustTextSecondary) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = issuanceDropdownExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen,
+                        unfocusedBorderColor = StardustItemBg,
+                        focusedTextColor = StardustTextPrimary,
+                        unfocusedTextColor = StardustTextPrimary,
+                        focusedContainerColor = CardBg,
+                        unfocusedContainerColor = CardBg
+                    )
+                )
+                ExposedDropdownMenu(
+                    expanded = issuanceDropdownExpanded,
+                    onDismissRequest = { issuanceDropdownExpanded = false },
+                    modifier = Modifier.background(CardBg)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Не привязывать", color = StardustTextSecondary) },
+                        onClick = { selectedIssuanceToClose = null; issuanceDropdownExpanded = false }
+                    )
+                    activeIssuances.forEach { issuance ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text("СБ ${issuance.issuedToName}", color = StardustTextPrimary, fontWeight = FontWeight.SemiBold)
+                                    Text("${issuance.batteryCount} АКБ", color = StardustTextSecondary, fontSize = 12.sp)
+                                }
+                            },
+                            onClick = { selectedIssuanceToClose = issuance; issuanceDropdownExpanded = false }
+                        )
+                    }
+                }
             }
         }
 
@@ -898,7 +965,11 @@ private fun ConfirmingScreen(
                     Toast.makeText(context, "Выберите сотрудника", Toast.LENGTH_SHORT).show()
                     return@Button
                 }
-                onConfirm(emp.id, emp.displayName, reanimatorCount, comment.trim(), photoUri)
+                onConfirm(
+                    emp.id, emp.displayName, batteryCount, reanimatorCount, comment.trim(), photoUri,
+                    selectedIssuanceToClose?.id,
+                    selectedIssuanceToClose?.batteryCount ?: 0
+                )
             },
             enabled = !isSaving,
             modifier = Modifier.fillMaxWidth().height(54.dp),
@@ -949,12 +1020,7 @@ private fun SectionLabel(text: String) {
 private fun DetailsScreen(issuance: BatteryIssuance, padding: PaddingValues, context: Context, onDelete: () -> Unit) {
     val fmt = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
     var showDeleteDialog by remember { mutableStateOf(false) }
-
-    val pdfLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/pdf")
-    ) { uri ->
-        uri?.let { writePdfToUri(issuance, it, context) }
-    }
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -1009,7 +1075,7 @@ private fun DetailsScreen(issuance: BatteryIssuance, padding: PaddingValues, con
                 HorizontalDivider(color = StardustItemBg)
                 DetailRow(Icons.Outlined.Schedule, "Дата / время", fmt.format(Date(issuance.timestamp)))
                 HorizontalDivider(color = StardustItemBg)
-                DetailRow(Icons.Outlined.BatteryFull, "АКБ", "${issuance.batteryCodes.size} шт.")
+                DetailRow(Icons.Outlined.BatteryFull, "АКБ", "${issuance.batteryCount} шт.")
                 if (issuance.reanimatorCount > 0) {
                     HorizontalDivider(color = StardustItemBg)
                     DetailRow(Icons.Outlined.ElectricBolt, "Реаниматоры", "${issuance.reanimatorCount} шт.")
@@ -1034,42 +1100,19 @@ private fun DetailsScreen(issuance: BatteryIssuance, padding: PaddingValues, con
             }
         }
 
-        if (issuance.batteryCodes.isNotEmpty()) {
-            Text("Список АКБ", color = StardustTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = CardBg)
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    issuance.batteryCodes.forEachIndexed { i, code ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(StardustItemBg)
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("${i + 1}.", color = StardustTextSecondary, fontSize = 12.sp, modifier = Modifier.width(24.dp))
-                            Icon(Icons.Outlined.BatteryFull, null, tint = AccentCyan, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(code, color = StardustTextPrimary, fontSize = 14.sp)
-                        }
-                    }
-                }
-            }
-        }
-
         Button(
-            onClick = { pdfLauncher.launch("akb_выдача_${issuance.id.take(8)}.pdf") },
+            onClick = {
+                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(buildIssuanceText(issuance, fmt)))
+                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+            },
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D2D3A)),
             border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.4f))
         ) {
-            Icon(Icons.Outlined.PictureAsPdf, null, tint = StardustPrimary)
+            Icon(Icons.Outlined.ContentCopy, null, tint = StardustPrimary)
             Spacer(Modifier.width(8.dp))
-            Text("Экспорт в PDF", color = StardustTextPrimary, fontWeight = FontWeight.SemiBold)
+            Text("Скопировать текст", color = StardustTextPrimary, fontWeight = FontWeight.SemiBold)
         }
 
         OutlinedButton(
@@ -1092,12 +1135,7 @@ private fun DetailsScreen(issuance: BatteryIssuance, padding: PaddingValues, con
 private fun ReceptionDetailsScreen(reception: BatteryReception, padding: PaddingValues, context: Context, onDelete: () -> Unit) {
     val fmt = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
     var showDeleteDialog by remember { mutableStateOf(false) }
-
-    val pdfLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/pdf")
-    ) { uri ->
-        uri?.let { writeReceptionPdfToUri(reception, it, context) }
-    }
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -1126,6 +1164,42 @@ private fun ReceptionDetailsScreen(reception: BatteryReception, padding: Padding
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if (reception.expectedBatteryCount > 0) {
+            val diff = reception.batteryCount - reception.expectedBatteryCount
+            val isShortage = diff < 0
+            val bgColor = if (isShortage) StardustError else AccentGreen
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(bgColor.copy(alpha = if (isShortage) 0.22f else 0.15f))
+                    .border(1.dp, bgColor.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(
+                    if (isShortage) Icons.Filled.Warning else Icons.Filled.CheckCircle,
+                    null,
+                    tint = bgColor,
+                    modifier = Modifier.size(28.dp)
+                )
+                Column {
+                    Text(
+                        if (isShortage) "НЕДОСТАЧА: $diff АКБ" else "ИЗЛИШЕК: +$diff АКБ",
+                        color = bgColor,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        "Выдано: ${reception.expectedBatteryCount} АКБ / Принято: ${reception.batteryCount} АКБ",
+                        color = bgColor.copy(alpha = 0.8f),
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
         if (reception.photoUrl != null) {
             val photoModel = if (reception.photoUrl.startsWith("/")) JavaFile(reception.photoUrl) else reception.photoUrl
             AsyncImage(
@@ -1146,9 +1220,9 @@ private fun ReceptionDetailsScreen(reception: BatteryReception, padding: Padding
                 DetailRow(Icons.Outlined.AdminPanelSettings, "Кем принято", reception.receivedByName)
                 HorizontalDivider(color = StardustItemBg)
                 DetailRow(Icons.Outlined.Schedule, "Дата / время", fmt.format(Date(reception.timestamp)))
-                if (reception.batteryCodes.isNotEmpty()) {
+                if (reception.batteryCount > 0) {
                     HorizontalDivider(color = StardustItemBg)
-                    DetailRow(Icons.Outlined.BatteryFull, "АКБ принято", "${reception.batteryCodes.size} шт.")
+                    DetailRow(Icons.Outlined.BatteryFull, "АКБ принято", "${reception.batteryCount} шт.")
                 }
                 if (reception.scooterCodes.isNotEmpty()) {
                     HorizontalDivider(color = StardustItemBg)
@@ -1172,38 +1246,28 @@ private fun ReceptionDetailsScreen(reception: BatteryReception, padding: Padding
             }
         }
 
-        if (reception.batteryCodes.isNotEmpty()) {
-            Text("Список АКБ", color = StardustTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = CardBg)) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    reception.batteryCodes.forEachIndexed { i, code ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(StardustItemBg).padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("${i + 1}.", color = StardustTextSecondary, fontSize = 12.sp, modifier = Modifier.width(24.dp))
-                            Icon(Icons.Outlined.BatteryFull, null, tint = AccentCyan, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(code, color = StardustTextPrimary, fontSize = 14.sp)
-                        }
-                    }
-                }
-            }
-        }
-
         if (reception.scooterCodes.isNotEmpty()) {
-            Text("Список самокатов", color = StardustTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text("Самокаты — нажми для копирования", color = StardustTextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = CardBg)) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     reception.scooterCodes.forEachIndexed { i, code ->
                         Row(
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(StardustItemBg).padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(StardustItemBg)
+                                .clickable {
+                                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(code))
+                                    Toast.makeText(context, "Скопировано: $code", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("${i + 1}.", color = StardustTextSecondary, fontSize = 12.sp, modifier = Modifier.width(24.dp))
                             Icon(Icons.Filled.ElectricScooter, null, tint = AccentGreen, modifier = Modifier.size(15.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text(code, color = StardustTextPrimary, fontSize = 14.sp)
+                            Text(code, color = StardustTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                            Icon(Icons.Outlined.ContentCopy, null, tint = StardustTextSecondary.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
                         }
                     }
                 }
@@ -1211,15 +1275,18 @@ private fun ReceptionDetailsScreen(reception: BatteryReception, padding: Padding
         }
 
         Button(
-            onClick = { pdfLauncher.launch("акт_приёмки_${reception.id.take(8)}.pdf") },
+            onClick = {
+                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(buildReceptionText(reception, fmt)))
+                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+            },
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D2D3A)),
             border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.4f))
         ) {
-            Icon(Icons.Outlined.PictureAsPdf, null, tint = AccentGreen)
+            Icon(Icons.Outlined.ContentCopy, null, tint = AccentGreen)
             Spacer(Modifier.width(8.dp))
-            Text("Экспорт в PDF", color = StardustTextPrimary, fontWeight = FontWeight.SemiBold)
+            Text("Скопировать текст", color = StardustTextPrimary, fontWeight = FontWeight.SemiBold)
         }
 
         OutlinedButton(
@@ -1246,163 +1313,36 @@ private fun DetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
     }
 }
 
-// ─── PDF EXPORT ───────────────────────────────────────────────────────────────
+// ─── TEXT EXPORT ──────────────────────────────────────────────────────────────
 
-private fun writeReceptionPdfToUri(reception: BatteryReception, outputUri: Uri, context: Context) {
-    val fmt = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
-    val doc = PdfDocument()
-    val pageWidth = 595; val pageHeight = 842
-    val page = doc.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create())
-    val canvas: Canvas = page.canvas
+private fun buildIssuanceText(issuance: BatteryIssuance, fmt: java.text.SimpleDateFormat): String {
+    val sb = StringBuilder()
+    sb.appendLine("📦 Выдача АКБ")
+    sb.appendLine(fmt.format(java.util.Date(issuance.timestamp)))
+    sb.appendLine("Склад Бестужевская 10Б")
+    sb.appendLine("Выдал: ${issuance.issuedByName}")
+    sb.appendLine("Кому СБ: ${issuance.issuedToName}")
+    sb.appendLine("АКБ: ${issuance.batteryCount} шт.")
+    if (issuance.reanimatorCount > 0) sb.appendLine("Реаниматоры: ${issuance.reanimatorCount} шт.")
+    if (issuance.comment.isNotEmpty()) sb.appendLine("💬 ${issuance.comment}")
+    return sb.toString().trimEnd()
+}
 
-    val paintTitle = Paint().apply { color = android.graphics.Color.BLACK; textSize = 18f; isFakeBoldText = true }
-    val paintSubtitle = Paint().apply { color = android.graphics.Color.rgb(60, 60, 60); textSize = 13f; isFakeBoldText = true }
-    val paintLabel = Paint().apply { color = android.graphics.Color.DKGRAY; textSize = 12f }
-    val paintValue = Paint().apply { color = android.graphics.Color.BLACK; textSize = 13f }
-    val paintLine = Paint().apply { color = android.graphics.Color.LTGRAY; strokeWidth = 1f }
-    val paintHeader = Paint().apply { color = android.graphics.Color.rgb(74, 222, 128); textSize = 14f; isFakeBoldText = true }
-
-    var y = 60f; val left = 40f; val right = (pageWidth - 40).toFloat()
-
-    canvas.drawText("Акт приёмки АКБ", left, y, paintTitle); y += 22f
-    canvas.drawText("${reception.receivedByName} принял от СБ: ${reception.receivedFromName}", left, y, paintSubtitle); y += 24f
-    canvas.drawLine(left, y, right, y, paintLine); y += 18f
-
-    fun row(label: String, value: String) {
-        canvas.drawText(label, left, y, paintLabel); canvas.drawText(value, left + 170f, y, paintValue); y += 22f
-    }
-
-    row("Принял:", reception.receivedByName)
-    row("От кого:", "СБ: ${reception.receivedFromName}")
-    row("Дата / время:", fmt.format(Date(reception.timestamp)))
-    if (reception.batteryCodes.isNotEmpty()) row("АКБ принято:", "${reception.batteryCodes.size} шт.")
-    if (reception.scooterCodes.isNotEmpty()) row("Самокатов принято:", "${reception.scooterCodes.size} шт.")
-    if (reception.reanimatorCount > 0) row("Реаниматоры:", "${reception.reanimatorCount} шт.")
-    if (reception.comment.isNotEmpty()) row("Комментарий:", reception.comment)
-
-    if (reception.batteryCodes.isNotEmpty()) {
-        y += 10f; canvas.drawLine(left, y, right, y, paintLine); y += 18f
-        canvas.drawText("Список АКБ:", left, y, paintHeader); y += 20f
-        reception.batteryCodes.forEachIndexed { i, code ->
-            if (y < pageHeight - 80f) { canvas.drawText("${i + 1}.  $code", left + 10f, y, paintValue); y += 18f }
-        }
-    }
-
+private fun buildReceptionText(reception: BatteryReception, fmt: java.text.SimpleDateFormat): String {
+    val sb = StringBuilder()
+    sb.appendLine("📥 Приёмка")
+    sb.appendLine(fmt.format(java.util.Date(reception.timestamp)))
+    sb.appendLine("Склад Бестужевская 10Б")
+    sb.appendLine("Принял: ${reception.receivedByName}")
+    sb.appendLine("От СБ: ${reception.receivedFromName}")
+    if (reception.batteryCount > 0) sb.appendLine("АКБ: ${reception.batteryCount} шт.")
+    if (reception.scooterCodes.isNotEmpty()) sb.appendLine("Самокаты: ${reception.scooterCodes.size} шт.")
+    if (reception.reanimatorCount > 0) sb.appendLine("Реаниматоры: ${reception.reanimatorCount} шт.")
+    if (reception.comment.isNotEmpty()) sb.appendLine("💬 ${reception.comment}")
     if (reception.scooterCodes.isNotEmpty()) {
-        y += 10f; canvas.drawLine(left, y, right, y, paintLine); y += 18f
-        canvas.drawText("Список самокатов:", left, y, paintHeader); y += 20f
-        reception.scooterCodes.forEachIndexed { i, code ->
-            if (y < pageHeight - 80f) { canvas.drawText("${i + 1}.  $code", left + 10f, y, paintValue); y += 18f }
-        }
+        sb.appendLine()
+        reception.scooterCodes.forEach { code -> sb.appendLine("`$code`") }
     }
-
-    if (reception.photoUrl != null && reception.photoUrl.startsWith("/")) {
-        val bitmap = try { BitmapFactory.decodeFile(reception.photoUrl) } catch (_: Exception) { null }
-        if (bitmap != null) {
-            y += 14f; canvas.drawLine(left, y, right, y, paintLine); y += 18f
-            canvas.drawText("Фото:", left, y, paintHeader); y += 12f
-            val scale = minOf((right - left) / bitmap.width, 200f / bitmap.height)
-            val bmpW = bitmap.width * scale; val bmpH = bitmap.height * scale
-            if (y + bmpH < pageHeight - 40f) {
-                canvas.drawBitmap(bitmap, null, RectF(left, y, left + bmpW, y + bmpH), null); y += bmpH + 10f
-            }
-            bitmap.recycle()
-        }
-    }
-
-    doc.finishPage(page)
-    try {
-        context.contentResolver.openOutputStream(outputUri)?.use { doc.writeTo(it) }
-        Toast.makeText(context, "PDF сохранён", Toast.LENGTH_LONG).show()
-    } catch (e: Exception) {
-        Toast.makeText(context, "Ошибка PDF: ${e.message}", Toast.LENGTH_SHORT).show()
-    } finally {
-        doc.close()
-    }
+    return sb.toString().trimEnd()
 }
 
-private fun writePdfToUri(issuance: BatteryIssuance, outputUri: Uri, context: Context) {
-    val fmt = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
-    val doc = PdfDocument()
-    val pageWidth = 595
-    val pageHeight = 842
-
-    val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
-    val page = doc.startPage(pageInfo)
-    val canvas: Canvas = page.canvas
-
-    val paintTitle = Paint().apply { color = android.graphics.Color.BLACK; textSize = 18f; isFakeBoldText = true }
-    val paintSubtitle = Paint().apply { color = android.graphics.Color.rgb(60, 60, 60); textSize = 13f; isFakeBoldText = true }
-    val paintLabel = Paint().apply { color = android.graphics.Color.DKGRAY; textSize = 12f }
-    val paintValue = Paint().apply { color = android.graphics.Color.BLACK; textSize = 13f }
-    val paintLine = Paint().apply { color = android.graphics.Color.LTGRAY; strokeWidth = 1f }
-    val paintHeader = Paint().apply { color = android.graphics.Color.rgb(106, 90, 224); textSize = 14f; isFakeBoldText = true }
-
-    var y = 60f
-    val left = 40f
-    val right = (pageWidth - 40).toFloat()
-
-    // Заголовок
-    canvas.drawText("Акт выдачи АКБ", left, y, paintTitle); y += 22f
-
-    // Краткая сводка "Кто кому"
-    val issuedByLabel = if (issuance.issuedByRole.isNotEmpty()) "${issuance.issuedByRole}: ${issuance.issuedByName}" else issuance.issuedByName
-    canvas.drawText("$issuedByLabel  →  СБ: ${issuance.issuedToName}", left, y, paintSubtitle); y += 24f
-
-    canvas.drawLine(left, y, right, y, paintLine); y += 18f
-
-    fun row(label: String, value: String) {
-        canvas.drawText(label, left, y, paintLabel)
-        canvas.drawText(value, left + 170f, y, paintValue)
-        y += 22f
-    }
-
-    row("Кем выдано:", issuedByLabel)
-    row("Кому выдано:", "СБ: ${issuance.issuedToName}")
-    row("Дата / время:", fmt.format(Date(issuance.timestamp)))
-    row("Кол-во АКБ:", "${issuance.batteryCodes.size} шт.")
-    if (issuance.reanimatorCount > 0) row("Реаниматоры:", "${issuance.reanimatorCount} шт.")
-    if (issuance.comment.isNotEmpty()) row("Комментарий:", issuance.comment)
-
-    // Список АКБ
-    y += 10f
-    canvas.drawLine(left, y, right, y, paintLine); y += 18f
-    canvas.drawText("Список АКБ:", left, y, paintHeader); y += 20f
-    issuance.batteryCodes.forEachIndexed { i, code ->
-        if (y < pageHeight - 80f) {
-            canvas.drawText("${i + 1}.  $code", left + 10f, y, paintValue)
-            y += 18f
-        }
-    }
-
-    // Фото
-    if (issuance.photoUrl != null && issuance.photoUrl.startsWith("/")) {
-        val bitmap = try { BitmapFactory.decodeFile(issuance.photoUrl) } catch (_: Exception) { null }
-        if (bitmap != null) {
-            y += 14f
-            canvas.drawLine(left, y, right, y, paintLine); y += 18f
-            canvas.drawText("Фото:", left, y, paintHeader); y += 12f
-            val maxW = right - left
-            val maxH = 200f
-            val scale = minOf(maxW / bitmap.width, maxH / bitmap.height)
-            val bmpW = bitmap.width * scale
-            val bmpH = bitmap.height * scale
-            if (y + bmpH < pageHeight - 40f) {
-                canvas.drawBitmap(bitmap, null, RectF(left, y, left + bmpW, y + bmpH), null)
-                y += bmpH + 10f
-            }
-            bitmap.recycle()
-        }
-    }
-
-    doc.finishPage(page)
-
-    try {
-        context.contentResolver.openOutputStream(outputUri)?.use { doc.writeTo(it) }
-        Toast.makeText(context, "PDF сохранён", Toast.LENGTH_LONG).show()
-    } catch (e: Exception) {
-        Toast.makeText(context, "Ошибка PDF: ${e.message}", Toast.LENGTH_SHORT).show()
-    } finally {
-        doc.close()
-    }
-}

@@ -20,7 +20,7 @@ import java.io.FileOutputStream
 import java.util.UUID
 import javax.inject.Inject
 
-enum class IssuanceStep { IDLE, SCANNING, CONFIRMING, DETAILS, SCANNING_RECEPTION, CONFIRMING_RECEPTION, DETAILS_RECEPTION }
+enum class IssuanceStep { IDLE, CONFIRMING, DETAILS, SCANNING_RECEPTION, CONFIRMING_RECEPTION, DETAILS_RECEPTION }
 
 @HiltViewModel
 class InteractionViewModel @Inject constructor(
@@ -29,7 +29,9 @@ class InteractionViewModel @Inject constructor(
 ) : ViewModel() {
 
     val activeIssuances: StateFlow<List<BatteryIssuance>> = repository.getActiveIssuances()
-        .map { list -> list.sortedByDescending { it.timestamp } }
+        .map { list ->
+            list.sortedWith(compareByDescending<BatteryIssuance> { it.isActive }.thenByDescending { it.timestamp })
+        }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val recentReceptions: StateFlow<List<BatteryReception>> = repository.getRecentReceptions()
@@ -38,12 +40,6 @@ class InteractionViewModel @Inject constructor(
 
     private val _step = MutableStateFlow(IssuanceStep.IDLE)
     val step = _step.asStateFlow()
-
-    private val _scannedCodes = MutableStateFlow<List<String>>(emptyList())
-    val scannedCodes = _scannedCodes.asStateFlow()
-
-    private val _receptionBatteryCodes = MutableStateFlow<List<String>>(emptyList())
-    val receptionBatteryCodes = _receptionBatteryCodes.asStateFlow()
 
     private val _receptionScooterCodes = MutableStateFlow<List<String>>(emptyList())
     val receptionScooterCodes = _receptionScooterCodes.asStateFlow()
@@ -63,9 +59,8 @@ class InteractionViewModel @Inject constructor(
     private val _scanEventChannel = Channel<ScanEvent>()
     val scanEventFlow = _scanEventChannel.receiveAsFlow()
 
-    fun startScanning() {
-        _scannedCodes.value = emptyList()
-        _step.value = IssuanceStep.SCANNING
+    fun startIssuance() {
+        _step.value = IssuanceStep.CONFIRMING
         loadSbEmployees()
     }
 
@@ -75,28 +70,9 @@ class InteractionViewModel @Inject constructor(
         }
     }
 
-    fun onCodeScanned(rawCode: String) {
-        viewModelScope.launch {
-            val code = parseCode(rawCode)
-            if (!_scannedCodes.value.contains(code)) {
-                _scannedCodes.value = listOf(code) + _scannedCodes.value
-                _scanEventChannel.send(ScanEvent.Success)
-            } else {
-                _scanEventChannel.send(ScanEvent.Duplicate)
-            }
-        }
-    }
-
-    fun removeCode(code: String) { _scannedCodes.value = _scannedCodes.value.filter { it != code } }
-
-    fun finishScanning() {
-        if (_scannedCodes.value.isNotEmpty()) _step.value = IssuanceStep.CONFIRMING
-    }
-
-    fun cancelScanning() { _step.value = IssuanceStep.IDLE; _scannedCodes.value = emptyList() }
+    fun cancelIssuance() { _step.value = IssuanceStep.IDLE }
 
     fun startReceptionScanning() {
-        _receptionBatteryCodes.value = emptyList()
         _receptionScooterCodes.value = emptyList()
         _step.value = IssuanceStep.SCANNING_RECEPTION
         loadSbEmployees()
@@ -104,41 +80,30 @@ class InteractionViewModel @Inject constructor(
 
     fun onReceptionCodeScanned(rawCode: String) {
         viewModelScope.launch {
-            val upper = rawCode.trim().uppercase()
-            if (isBatteryCode(upper)) {
-                if (!_receptionBatteryCodes.value.contains(upper)) {
-                    _receptionBatteryCodes.value = listOf(upper) + _receptionBatteryCodes.value
-                    _scanEventChannel.send(ScanEvent.Success)
-                } else {
-                    _scanEventChannel.send(ScanEvent.Duplicate)
-                }
+            val scooterCode = parseCode(rawCode)
+            if (!_receptionScooterCodes.value.contains(scooterCode)) {
+                _receptionScooterCodes.value = listOf(scooterCode) + _receptionScooterCodes.value
+                _scanEventChannel.send(ScanEvent.Success)
             } else {
-                val scooterCode = parseCode(rawCode)
-                if (!_receptionScooterCodes.value.contains(scooterCode)) {
-                    _receptionScooterCodes.value = listOf(scooterCode) + _receptionScooterCodes.value
-                    _scanEventChannel.send(ScanEvent.Success)
-                } else {
-                    _scanEventChannel.send(ScanEvent.Duplicate)
-                }
+                _scanEventChannel.send(ScanEvent.Duplicate)
             }
         }
     }
 
-    fun removeReceptionBatteryCode(code: String) { _receptionBatteryCodes.value = _receptionBatteryCodes.value.filter { it != code } }
     fun removeReceptionScooterCode(code: String) { _receptionScooterCodes.value = _receptionScooterCodes.value.filter { it != code } }
 
-    fun finishReceptionScanning() {
-        if (_receptionBatteryCodes.value.isNotEmpty() || _receptionScooterCodes.value.isNotEmpty())
-            _step.value = IssuanceStep.CONFIRMING_RECEPTION
-    }
+    fun finishReceptionScanning() { _step.value = IssuanceStep.CONFIRMING_RECEPTION }
 
     fun cancelReception() {
         _step.value = IssuanceStep.IDLE
-        _receptionBatteryCodes.value = emptyList()
         _receptionScooterCodes.value = emptyList()
     }
 
-    fun confirmReception(employeeId: String, employeeName: String, reanimatorCount: Int, comment: String, photoUri: android.net.Uri?, context: android.content.Context) {
+    fun confirmReception(
+        employeeId: String, employeeName: String, batteryCount: Int, reanimatorCount: Int,
+        comment: String, photoUri: android.net.Uri?, context: android.content.Context,
+        closedIssuanceId: String? = null, expectedBatteryCount: Int = 0
+    ) {
         val user = authManager.authState.value
         val receptionId = UUID.randomUUID().toString()
         viewModelScope.launch {
@@ -146,7 +111,7 @@ class InteractionViewModel @Inject constructor(
             val photoUrl = if (photoUri != null) savePhotoLocally(receptionId, photoUri, context) else null
             val reception = BatteryReception(
                 id = receptionId,
-                batteryCodes = _receptionBatteryCodes.value,
+                batteryCount = batteryCount,
                 scooterCodes = _receptionScooterCodes.value,
                 reanimatorCount = reanimatorCount,
                 photoUrl = photoUrl,
@@ -155,11 +120,13 @@ class InteractionViewModel @Inject constructor(
                 receivedByName = user.userName ?: "Неизвестно",
                 receivedFromId = employeeId,
                 receivedFromName = employeeName,
-                timestamp = System.currentTimeMillis()
+                timestamp = System.currentTimeMillis(),
+                closedIssuanceId = closedIssuanceId,
+                expectedBatteryCount = expectedBatteryCount
             )
             val result = repository.saveReception(reception)
             if (result.isSuccess) {
-                _receptionBatteryCodes.value = emptyList()
+                if (closedIssuanceId != null) repository.closeIssuance(closedIssuanceId)
                 _receptionScooterCodes.value = emptyList()
                 _step.value = IssuanceStep.IDLE
             } else {
@@ -169,18 +136,7 @@ class InteractionViewModel @Inject constructor(
         }
     }
 
-    private fun isBatteryCode(code: String): Boolean {
-        if (code.startsWith("5BB") && code.length == 14 && code.substring(3).all { it.isDigit() }) return true
-        if (code.startsWith("4BB") && code.length == 14 && code.substring(3).all { it.isDigit() }) return true
-        if (code.startsWith("4BZ") && code.length == 14 && code.substring(3).all { it.isDigit() }) return true
-        if (code.startsWith("SF") && code.length in 14..16) {
-            val afterSF = code.substring(2)
-            if (afterSF.length >= 12 && afterSF.substring(0, 2).all { it.isLetter() } && afterSF.substring(2).all { it.isLetterOrDigit() }) return true
-        }
-        return false
-    }
-
-    fun confirmIssuance(employeeId: String, employeeName: String, reanimatorCount: Int, comment: String, photoUri: Uri?, context: Context) {
+    fun confirmIssuance(employeeId: String, employeeName: String, batteryCount: Int, reanimatorCount: Int, comment: String, photoUri: Uri?, context: Context) {
         val user = authManager.authState.value
         val issuanceId = UUID.randomUUID().toString()
         viewModelScope.launch {
@@ -188,7 +144,7 @@ class InteractionViewModel @Inject constructor(
             val photoPath = if (photoUri != null) savePhotoLocally(issuanceId, photoUri, context) else null
             val issuance = BatteryIssuance(
                 id = issuanceId,
-                batteryCodes = _scannedCodes.value,
+                batteryCount = batteryCount,
                 reanimatorCount = reanimatorCount,
                 photoUrl = photoPath,
                 comment = comment,
@@ -202,7 +158,6 @@ class InteractionViewModel @Inject constructor(
             )
             val result = repository.saveIssuance(issuance)
             if (result.isSuccess) {
-                _scannedCodes.value = emptyList()
                 _step.value = IssuanceStep.IDLE
             } else {
                 Log.e("InteractionVM", "saveIssuance failed", result.exceptionOrNull())

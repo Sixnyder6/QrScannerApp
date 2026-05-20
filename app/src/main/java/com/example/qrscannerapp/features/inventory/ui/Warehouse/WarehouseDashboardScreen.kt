@@ -155,6 +155,7 @@ fun WarehouseDashboardScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0),
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { /* Навигация на сканер */ },
