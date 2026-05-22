@@ -34,10 +34,10 @@ import com.example.qrscannerapp.common.ui.ChatNotification
 import com.example.qrscannerapp.common.ui.ChatNotificationBanner
 import com.example.qrscannerapp.common.ui.ShiftRequestBanner
 import com.example.qrscannerapp.common.ui.ShiftRequestNotification
-import com.example.qrscannerapp.common.ui.macZoomIn
-import com.example.qrscannerapp.common.ui.macZoomExitShrink
-import com.example.qrscannerapp.common.ui.macZoomPopEnter
-import com.example.qrscannerapp.common.ui.macZoomPopExit
+import com.example.qrscannerapp.common.ui.LocalSpyderConfig
+import com.example.qrscannerapp.common.ui.navTransitionsFor
+import com.example.qrscannerapp.common.ui.homescreenFadeIn
+import com.example.qrscannerapp.common.ui.homescreenFadeOut
 import com.example.qrscannerapp.common.ui.smoothFadeIn
 import com.example.qrscannerapp.common.ui.smoothFadeOut
 import com.example.qrscannerapp.features.chat.domain.model.ChatRoom
@@ -282,12 +282,7 @@ fun MainApp(
     val globalDialogAnimation by appSettingsViewModel.dialogAnimation.collectAsState()
 
     val spyderViewModel: com.example.qrscannerapp.features.settings.ui.SpyderSettingsViewModel = hiltViewModel()
-    val spyderRenderConfig by spyderViewModel.spyderEngine.renderConfig.collectAsState()
-    val spyderConfig = com.example.qrscannerapp.common.ui.SpyderConfig(
-        dampingMul    = spyderRenderConfig.dampingMultiplier,
-        stiffnessMul  = spyderRenderConfig.stiffnessMultiplier,
-        throttleLevel = spyderRenderConfig.throttleLevel
-    )
+    val spyderConfig by spyderViewModel.spyderEngine.renderConfig.collectAsState()
 
     var topBarActions: @Composable RowScope.() -> Unit by remember { mutableStateOf({}) }
     LaunchedEffect(currentRoute) { topBarActions = {} }
@@ -402,7 +397,6 @@ fun MainApp(
                 },
                 bottomBar = {
                     val screensWithoutBottomBar = listOf(
-                        Screen.Scanner.route,
                         Screen.Chat.route,
                         Screen.DirectChat.route,
                         Screen.VisualRepair.route,
@@ -517,17 +511,19 @@ fun AppNavHost(
     val authState by authManager.authState.collectAsState()
     if (authState.isLoading) { LoadingScreen(); return }
 
-    val iosEnter    = macZoomIn()
-    val iosExit     = macZoomExitShrink()
-    val iosPopEnter = macZoomPopEnter()
-    val iosPopExit  = macZoomPopExit()
+    val spyder      = LocalSpyderConfig.current
+    val navT        = navTransitionsFor(spyder.navTransition)
+    val iosEnter    = navT.enter
+    val iosExit     = navT.exit
+    val iosPopEnter = navT.popEnter
+    val iosPopExit  = navT.popExit
     val modalEnter  = smoothFadeIn()
     val modalExit   = smoothFadeOut()
 
-    // For the homescreen we use a softer fade — it's the "base layer" that other
-    // screens zoom out from, so a fade reads more like "returning to desktop".
-    val homeEnter = smoothFadeIn()
-    val homeExit  = smoothFadeOut()
+    // Хомскрин — чистый alpha fade без scale. Тяжёлые виджеты + dot-grid
+    // делают scale дорогим; потемнение→появление дешевле и чище.
+    val homeEnter = homescreenFadeIn()
+    val homeExit  = homescreenFadeOut()
 
     NavHost(
         navController = navController,
@@ -607,7 +603,7 @@ fun AppNavHost(
         }
 
         // ── REGULAR SCREENS ───────────────────────────────────────────────────
-        composable(route = Screen.Scanner.route, enterTransition = modalEnter, exitTransition = iosExit, popEnterTransition = iosPopEnter, popExitTransition = modalExit) {
+        composable(route = Screen.Scanner.route, enterTransition = modalEnter, exitTransition = modalExit, popEnterTransition = modalEnter, popExitTransition = modalExit) {
             StardustScreen(
                 viewModel = viewModel,
                 onMenuClick = onHomeClick,   // every old onMenuClick now goes home

@@ -5,6 +5,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,17 +22,26 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +50,7 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.qrscannerapp.common.ui.AnimatedProgressBar
+import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.common.ui.DotsLoader
 import com.example.qrscannerapp.common.ui.MorphButton
 import com.example.qrscannerapp.common.ui.shake
@@ -47,18 +59,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // =================================================================================
-// КОРПОРАТИВНАЯ ЦВЕТОВАЯ ПАЛИТРА
+// ПАЛИТРА
 // =================================================================================
 object CorporateColors {
-    val Background   = Color(0xFF09090E)
-    val CardSurface  = Color(0xFF14141E)
-    val CardBorder   = Color(0xFF2A2A3A)
-    val TextPrimary  = Color(0xFFF3F4F6)
-    val TextSecondary = Color(0xFF8E8E9F)
-    val AccentGreen  = Color(0xFF10B981)
-    val AccentPurple = Color(0xFF7C3AED)
-    val AccentRed    = Color(0xFFEF4444)
-    val AccentAmber  = Color(0xFFF59E0B)
+    val Background    = Color.Transparent
+    val CardSurface   = StardustGlassBg
+    val CardBorder    = Color(0xFF1E1E2E)
+    val TextPrimary   = Color(0xFFF3F4F6)
+    val TextSecondary = Color(0xFF6B6B80)
+    val AccentGreen   = Color(0xFF10B981)
+    val AccentPurple  = Color(0xFF7C3AED)
+    val AccentRed     = Color(0xFFEF4444)
+    val AccentAmber   = Color(0xFFF59E0B)
 }
 
 private const val GITHUB_EMPLOYEES_URL =
@@ -66,8 +78,8 @@ private const val GITHUB_EMPLOYEES_URL =
 
 fun getEmployeePhotoUrl(userName: String): String? {
     val filename = when (userName) {
-        "Николай Никасов"  -> "nikasov.png"
-        "Михаил Ситников"  -> "sitnikov.png"
+        "Николай Никасов"   -> "nikasov.png"
+        "Михаил Ситников"   -> "sitnikov.png"
         "Соболев Владислав" -> "sobolev.png"
         else -> null
     }
@@ -75,13 +87,13 @@ fun getEmployeePhotoUrl(userName: String): String? {
 }
 
 // =================================================================================
-// ГЛАВНЫЙ ЭКРАН АККАУНТА
+// ГЛАВНЫЙ ЭКРАН
 // =================================================================================
 
 @Composable
 fun AccountScreen(authManager: AuthManager) {
-    val authState by authManager.authState.collectAsState()
-    val context = LocalContext.current
+    val authState  by authManager.authState.collectAsState()
+    val context    = LocalContext.current
     var showForceUpdateDialog by remember { mutableStateOf(false) }
     var loginErrorKey by remember { mutableIntStateOf(0) }
 
@@ -95,208 +107,218 @@ fun AccountScreen(authManager: AuthManager) {
             authManager.clearError()
         }
     }
-
     LaunchedEffect(authState.versionError) {
-        if (authState.versionError) {
-            showForceUpdateDialog = true
-            updateManager.checkForUpdates()
-        }
+        if (authState.versionError) { showForceUpdateDialog = true; updateManager.checkForUpdates() }
     }
-
     LaunchedEffect(updateState) {
         if (updateState is UpdateState.ReadyToInstall) {
-            updateManager.installApk((updateState as UpdateState.ReadyToInstall).uri)
-            updateManager.resetState()
+            updateManager.installApk((updateState as UpdateState.ReadyToInstall).uri); updateManager.resetState()
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(CorporateColors.Background)) {
-        when {
-            authState.isLoading -> {
-                CircularProgressIndicator(
-                    color = CorporateColors.AccentPurple,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            }
-            authState.isLoggedIn && !authState.versionError -> {
-                val viewModel: AccountViewModel =
-                    androidx.hilt.navigation.compose.hiltViewModel()
-                val uiState by viewModel.uiState.collectAsState()
-
-                when {
-                    uiState.isLoading && uiState.userName == "Загрузка..." -> {
-                        CircularProgressIndicator(
-                            color = CorporateColors.AccentPurple,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    }
-                    uiState.error != null -> {
-                        Text(
-                            text = uiState.error!!,
-                            color = CorporateColors.AccentRed,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.align(Alignment.Center).padding(16.dp)
-                        )
-                    }
-                    else -> {
-                        PersonalProfileScreen(
-                            viewModel = viewModel,
-                            state = uiState,
-                            authManager = authManager
-                        )
+    AppBackground {
+        Box(modifier = Modifier.fillMaxSize()) {
+            when {
+                authState.isLoading -> CircularProgressIndicator(color = CorporateColors.AccentPurple, modifier = Modifier.align(Alignment.Center))
+                authState.isLoggedIn && !authState.versionError -> {
+                    val viewModel: AccountViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+                    val uiState by viewModel.uiState.collectAsState()
+                    when {
+                        uiState.isLoading && uiState.userName == "Загрузка..." ->
+                            CircularProgressIndicator(color = CorporateColors.AccentPurple, modifier = Modifier.align(Alignment.Center))
+                        uiState.error != null ->
+                            Text(uiState.error!!, color = CorporateColors.AccentRed, textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(16.dp))
+                        else ->
+                            PersonalProfileScreen(viewModel = viewModel, state = uiState, authManager = authManager)
                     }
                 }
-            }
-            !authState.isLoggedIn && !authState.versionError -> {
-                Column(
-                    modifier = Modifier.fillMaxSize().padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    LoginFormComponent(authManager = authManager, loginErrorKey = loginErrorKey)
+                !authState.isLoggedIn && !authState.versionError -> {
+                    LoginScreen(authManager = authManager, loginErrorKey = loginErrorKey)
                 }
             }
         }
-    }
+    } // AppBackground
 
     if (showForceUpdateDialog) {
         ForceUpdateDialog(
-            message     = authState.error ?: "Ваша версия приложения устарела. Пожалуйста, обновитесь.",
+            message     = authState.error ?: "Ваша версия устарела. Обновитесь.",
             updateState = updateState,
-            onUpdate    = {
-                val info = (updateState as? UpdateState.UpdateAvailable)?.info
-                if (info != null) updateManager.startUpdate(info)
-                else updateManager.startCheckForUpdates()
-            },
-            onExit = {
-                android.os.Process.killProcess(android.os.Process.myPid())
-            }
+            onUpdate    = { val info = (updateState as? UpdateState.UpdateAvailable)?.info; if (info != null) updateManager.startUpdate(info) else updateManager.startCheckForUpdates() },
+            onExit      = { android.os.Process.killProcess(android.os.Process.myPid()) }
         )
     }
 }
 
 // =================================================================================
-// ДИАЛОГ ПРИНУДИТЕЛЬНОГО ОБНОВЛЕНИЯ
+// ЭКРАН ВХОДА — iOS стиль
 // =================================================================================
+
 @Composable
-fun ForceUpdateDialog(
-    message: String,
-    updateState: UpdateState,
-    onUpdate: () -> Unit,
-    onExit: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = { },
-        properties = DialogProperties(
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false
-        )
+private fun LoginScreen(authManager: AuthManager, loginErrorKey: Int) {
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var showPass by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val passwordFocusRequester = remember { FocusRequester() }
+
+    var shakeTrigger by remember { mutableStateOf(false) }
+    LaunchedEffect(loginErrorKey) { if (loginErrorKey > 0) shakeTrigger = !shakeTrigger }
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Transparent),
+        contentAlignment = Alignment.Center
     ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)
+        // Фоновое свечение
+        Box(
+            modifier = Modifier.size(300.dp).align(Alignment.Center).blur(80.dp)
+                .background(CorporateColors.AccentPurple.copy(alpha = 0.12f), CircleShape)
+        )
+
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(24.dp).shake(trigger = shakeTrigger),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(24.dp))
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            // Иконка
+            Box(
+                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp))
+                    .background(Brush.linearGradient(listOf(CorporateColors.AccentPurple.copy(alpha = 0.3f), CorporateColors.AccentPurple.copy(alpha = 0.1f)))),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Filled.SystemUpdate,
-                    contentDescription = null,
-                    tint = CorporateColors.AccentAmber,
-                    modifier = Modifier.size(64.dp)
-                )
+                Icon(Icons.Default.Lock, null, tint = CorporateColors.AccentPurple, modifier = Modifier.size(32.dp))
+            }
+            Spacer(Modifier.height(20.dp))
+            Text("Вход в систему", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = CorporateColors.TextPrimary)
+            Spacer(Modifier.height(6.dp))
+            Text("Stardust Field Operations", fontSize = 13.sp, color = CorporateColors.TextSecondary)
+            Spacer(Modifier.height(32.dp))
 
-                Spacer(modifier = Modifier.height(16.dp))
+            // Поле логина
+            AccountInputField(
+                value       = username,
+                onChange    = { username = it },
+                placeholder = "Логин",
+                icon        = Icons.Default.Person,
+                onNext      = { passwordFocusRequester.requestFocus() }
+            )
+            Spacer(Modifier.height(10.dp))
 
-                Text(
-                    text = "Требуется обновление",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = CorporateColors.TextPrimary
-                )
+            // Поле пароля
+            AccountInputField(
+                value        = password,
+                onChange     = { password = it },
+                placeholder  = "Пароль",
+                icon         = Icons.Default.Lock,
+                isPassword   = true,
+                showPassword = showPass,
+                onTogglePass = { showPass = !showPass },
+                focusRequester = passwordFocusRequester,
+                onDone       = { focusManager.clearFocus() }
+            )
 
-                Spacer(modifier = Modifier.height(12.dp))
+            Spacer(Modifier.height(24.dp))
 
-                Text(
-                    text = message,
-                    fontSize = 14.sp,
-                    color = CorporateColors.TextSecondary,
-                    textAlign = TextAlign.Center
-                )
+            // Кнопка войти
+            val canLogin = username.isNotBlank() && password.isNotBlank()
+            val btnAlpha by animateFloatAsState(if (canLogin) 1f else 0.45f, tween(200), label = "btn")
+            Box(
+                modifier = Modifier.fillMaxWidth().height(54.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(CorporateColors.AccentPurple.copy(alpha = btnAlpha), CorporateColors.AccentPurple.copy(alpha = btnAlpha * 0.7f))
+                        )
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        enabled = canLogin
+                    ) { focusManager.clearFocus(); scope.launch { authManager.login(username.trim(), password.trim()) } },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Login, null, tint = Color.White.copy(alpha = btnAlpha), modifier = Modifier.size(18.dp))
+                    Text("Войти", color = Color.White.copy(alpha = btnAlpha), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            }
+        }
+    }
+}
 
-                Spacer(modifier = Modifier.height(24.dp))
+@Composable
+private fun AccountInputField(
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String,
+    icon: ImageVector,
+    isPassword: Boolean = false,
+    showPassword: Boolean = false,
+    onTogglePass: (() -> Unit)? = null,
+    focusRequester: FocusRequester? = null,
+    onNext: (() -> Unit)? = null,
+    onDone: (() -> Unit)? = null
+) {
+    var focused by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        if (focused) CorporateColors.AccentPurple.copy(alpha = 0.7f) else Color.Transparent,
+        tween(180), label = "border"
+    )
+    val iconColor by animateColorAsState(
+        if (focused) CorporateColors.AccentPurple else CorporateColors.TextSecondary.copy(alpha = 0.5f),
+        tween(180), label = "icon"
+    )
 
-                when (updateState) {
-                    is UpdateState.Downloading -> {
-                        val progress = updateState.progress
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            LinearProgressIndicator(
-                                progress = { progress / 100f },
-                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                                color = CorporateColors.AccentPurple,
-                                trackColor = CorporateColors.CardBorder
-                            )
-                            Text(
-                                "Загрузка... $progress%",
-                                color = CorporateColors.TextSecondary,
-                                fontSize = 13.sp
-                            )
-                        }
-                    }
-                    is UpdateState.Error -> {
-                        Button(
-                            onClick = onUpdate,
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentRed)
-                        ) {
-                            Icon(Icons.Filled.Refresh, null, tint = Color.White)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Повторить", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                    else -> {
-                        val isChecking = updateState is UpdateState.Checking
-                        Button(
-                            onClick = onUpdate,
-                            enabled = !isChecking,
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentPurple)
-                        ) {
-                            if (isChecking) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(Icons.Filled.Download, null, tint = Color.White)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Обновить приложение", color = Color.White, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
+    var mod = Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(14.dp))
+        .background(StardustGlassBg)
+        .drawBehind {
+            drawRoundRect(
+                color        = borderColor,
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx()),
+                style        = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx())
+            )
+        }
+
+    Box(modifier = mod) {
+        Row(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = iconColor, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(10.dp))
+            var fMod = Modifier.weight(1f).onFocusChanged { focused = it.isFocused }
+            if (focusRequester != null) fMod = fMod.then(Modifier.focusRequester(focusRequester))
+
+            androidx.compose.foundation.text.BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                singleLine = true,
+                modifier = fMod,
+                textStyle = TextStyle(color = CorporateColors.TextPrimary, fontSize = 15.sp),
+                visualTransformation = if (isPassword && !showPassword) PasswordVisualTransformation() else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = if (isPassword) KeyboardType.Password else KeyboardType.Text,
+                    imeAction    = if (onNext != null) ImeAction.Next else ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(
+                    onNext = { onNext?.invoke() },
+                    onDone = { onDone?.invoke() }
+                ),
+                cursorBrush = Brush.verticalGradient(listOf(CorporateColors.AccentPurple, CorporateColors.AccentPurple)),
+                decorationBox = { inner ->
+                    Box {
+                        if (value.isEmpty()) Text(placeholder, color = CorporateColors.TextSecondary.copy(alpha = 0.4f), fontSize = 15.sp)
+                        inner()
                     }
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                TextButton(
-                    onClick = onExit,
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
+            )
+            if (isPassword && onTogglePass != null) {
+                Box(
+                    modifier = Modifier.size(28.dp).clip(CircleShape)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onTogglePass() },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Выйти из приложения", color = CorporateColors.AccentRed)
+                    Icon(
+                        if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        null, tint = CorporateColors.TextSecondary.copy(alpha = 0.5f), modifier = Modifier.size(17.dp)
+                    )
                 }
             }
         }
@@ -308,11 +330,7 @@ fun ForceUpdateDialog(
 // =================================================================================
 
 @Composable
-fun PersonalProfileScreen(
-    viewModel: AccountViewModel,
-    state: AccountUiState,
-    authManager: AuthManager
-) {
+fun PersonalProfileScreen(viewModel: AccountViewModel, state: AccountUiState, authManager: AuthManager) {
     val scope = rememberCoroutineScope()
     val isTechnic = state.userRoleEnum == UserRole.TECHNIC
 
@@ -320,460 +338,290 @@ fun PersonalProfileScreen(
     var showLogoutDialog   by remember { mutableStateOf(false) }
     var showHistorySheet   by remember { mutableStateOf(false) }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-
-        item {
-            ProfileHeader(
-                userName      = state.userName,
-                userRole      = state.userRole,
-                isShiftActive = state.isShiftActive,
-                onStartShift  = { viewModel.startShift() },
-                onEndShift    = { showEndShiftDialog = true }
-            )
-        }
-
-        item {
-            AnimatedVisibility(
-                visible = state.isShiftActive,
-                enter = fadeIn(tween(300)) + expandVertically(tween(500)),
-                exit  = fadeOut(tween(300)) + shrinkVertically(tween(500))
-            ) {
-                ShiftProgressBar(
-                    modifier = Modifier.padding(top = 16.dp),
-                    shiftStartTime = state.shiftStartTime
-                )
-            }
-        }
-
-        item {
-            Spacer(Modifier.height(16.dp))
-            if (isTechnic) {
-                TechnicFieldStatsCard(
-                    stats     = state.fieldRepairStats,
-                    isLoading = state.fieldRepairLoading
-                )
-            } else {
-                AnimatedVisibility(
-                    visible = state.isShiftActive,
-                    enter = fadeIn(tween(400)) + expandVertically(tween(500)),
-                    exit  = fadeOut(tween(300)) + shrinkVertically(tween(400))
-                ) {
-                    TodayStatsCard(
-                        scansToday    = state.scansToday,
-                        sessionsToday = state.sessionsToday
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ── Градиентный фон за шапкой ────────────────────────────────
+        Box(
+            modifier = Modifier.fillMaxWidth().height(280.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            CorporateColors.AccentPurple.copy(alpha = 0.22f),
+                            CorporateColors.AccentPurple.copy(alpha = 0.06f),
+                            Color.Transparent
+                        )
                     )
-                }
-            }
-        }
+                )
+        )
+        // Боковое свечение
+        Box(
+            modifier = Modifier.size(200.dp).align(Alignment.TopStart).offset((-40).dp, (-40).dp).blur(60.dp)
+                .background(CorporateColors.AccentPurple.copy(alpha = 0.15f), CircleShape)
+        )
 
-        if (!isTechnic) {
+        LazyColumn(
+            modifier            = Modifier.fillMaxSize(),
+            contentPadding      = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item { ProfileHeader(userName = state.userName, userRole = state.userRole, isShiftActive = state.isShiftActive, onStartShift = { viewModel.startShift() }, onEndShift = { showEndShiftDialog = true }) }
+
             item {
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    StreakCard(streakDays = state.streakDays, modifier = Modifier.weight(1f))
-                    RecordCard(record = state.personalRecord, modifier = Modifier.weight(1f))
+                AnimatedVisibility(visible = state.isShiftActive, enter = fadeIn(tween(300)) + expandVertically(tween(500)), exit = fadeOut(tween(300)) + shrinkVertically(tween(500))) {
+                    ShiftProgressBar(shiftStartTime = state.shiftStartTime)
                 }
             }
 
             item {
-                Spacer(Modifier.height(16.dp))
-                WeeklyChartCard(weeklyScans = state.weeklyScans)
-            }
-        }
-
-        item {
-            Spacer(Modifier.height(24.dp))
-            Button(
-                onClick = { showHistorySheet = true },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.CardSurface)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(Icons.Outlined.History, null, tint = CorporateColors.TextPrimary)
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "Открыть журнал смен",
-                        color = CorporateColors.TextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-        }
-
-        item {
-            Spacer(Modifier.height(32.dp))
-            Text(
-                "Общая статистика",
-                color = CorporateColors.TextPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp, start = 4.dp)
-            )
-        }
-
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(CorporateColors.CardSurface)
-                    .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp))
-                    .padding(vertical = 8.dp)
-            ) {
                 if (isTechnic) {
-                    StatListItem(
-                        Icons.Default.TwoWheeler,
-                        "Самокатов завершено",
-                        state.fieldRepairStats.doneAllTime.toString(),
-                        Color(0xFF22C55E)
-                    )
-                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
-                    StatListItem(
-                        Icons.Default.List,
-                        "Всего заданий",
-                        state.fieldRepairStats.totalAllTime.toString(),
-                        CorporateColors.AccentPurple
-                    )
-                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
-                    StatListItem(
-                        Icons.Default.Timer,
-                        "Среднее время",
-                        if (state.fieldRepairStats.avgMinutesPerScooter > 0)
-                            "${state.fieldRepairStats.avgMinutesPerScooter} мин"
-                        else "—",
-                        CorporateColors.AccentAmber
-                    )
-                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
-                    StatListItem(
-                        Icons.Outlined.Event,
-                        "В системе с",
-                        state.registrationDate,
-                        CorporateColors.TextSecondary
-                    )
+                    TechnicFieldStatsCard(stats = state.fieldRepairStats, isLoading = state.fieldRepairLoading)
                 } else {
-                    StatListItem(
-                        Icons.Outlined.QrCodeScanner,
-                        "Всего сканирований",
-                        state.totalScans.toString(),
-                        CorporateColors.AccentPurple
-                    )
-                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
-                    StatListItem(
-                        Icons.Outlined.Inventory2,
-                        "Обработано партий",
-                        state.totalSessions.toString(),
-                        CorporateColors.AccentPurple
-                    )
-                    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 20.dp))
-                    StatListItem(
-                        Icons.Outlined.Event,
-                        "В системе с",
-                        state.registrationDate,
-                        CorporateColors.TextSecondary
-                    )
+                    AnimatedVisibility(visible = state.isShiftActive, enter = fadeIn(tween(400)) + expandVertically(tween(500)), exit = fadeOut(tween(300)) + shrinkVertically(tween(400))) {
+                        TodayStatsCard(scansToday = state.scansToday, sessionsToday = state.sessionsToday)
+                    }
                 }
             }
-        }
 
-        item {
-            Spacer(Modifier.height(32.dp))
-            OutlinedButton(
-                onClick = { showLogoutDialog = true },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = CorporateColors.AccentRed),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CorporateColors.AccentRed.copy(alpha = 0.5f))
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ExitToApp, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Выйти из системы", fontWeight = FontWeight.Medium, fontSize = 16.sp)
+            if (!isTechnic) {
+                item {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StreakCard(streakDays = state.streakDays, modifier = Modifier.weight(1f))
+                        RecordCard(record = state.personalRecord, modifier = Modifier.weight(1f))
+                    }
+                }
+                item { WeeklyChartCard(weeklyScans = state.weeklyScans) }
+            }
+
+            // Журнал смен
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                        .background(StardustGlassBg)
+                        .drawBehind {
+                            drawRoundRect(
+                                color = CorporateColors.CardBorder,
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())
+                            )
+                        }
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { showHistorySheet = true }
+                        .padding(horizontal = 18.dp, vertical = 16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(CorporateColors.AccentPurple.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Outlined.History, null, tint = CorporateColors.AccentPurple, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text("Журнал смен", color = CorporateColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Icon(Icons.Default.ChevronRight, null, tint = CorporateColors.TextSecondary.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+
+            // Общая статистика
+            item {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Общая статистика", color = CorporateColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 2.dp, bottom = 10.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                            .background(StardustGlassBg)
+                            .drawBehind {
+                                drawRoundRect(color = CorporateColors.CardBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                            }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        if (isTechnic) {
+                            StatListItem(Icons.Default.TwoWheeler, "Самокатов завершено", state.fieldRepairStats.doneAllTime.toString(), Color(0xFF22C55E))
+                            StatDivider()
+                            StatListItem(Icons.Default.List, "Всего заданий", state.fieldRepairStats.totalAllTime.toString(), CorporateColors.AccentPurple)
+                            StatDivider()
+                            StatListItem(Icons.Default.Timer, "Среднее время", if (state.fieldRepairStats.avgMinutesPerScooter > 0) "${state.fieldRepairStats.avgMinutesPerScooter} мин" else "—", CorporateColors.AccentAmber)
+                            StatDivider()
+                            StatListItem(Icons.Outlined.Event, "В системе с", state.registrationDate, CorporateColors.TextSecondary)
+                        } else {
+                            StatListItem(Icons.Outlined.QrCodeScanner, "Всего сканирований", state.totalScans.toString(), CorporateColors.AccentPurple)
+                            StatDivider()
+                            StatListItem(Icons.Outlined.Inventory2, "Обработано партий", state.totalSessions.toString(), CorporateColors.AccentPurple)
+                            StatDivider()
+                            StatListItem(Icons.Outlined.Event, "В системе с", state.registrationDate, CorporateColors.TextSecondary)
+                        }
+                    }
+                }
+            }
+
+            // Выход
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                        .background(CorporateColors.AccentRed.copy(alpha = 0.08f))
+                        .drawBehind {
+                            drawRoundRect(color = CorporateColors.AccentRed.copy(alpha = 0.25f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                        }
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { showLogoutDialog = true }
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                        Icon(Icons.AutoMirrored.Filled.ExitToApp, null, tint = CorporateColors.AccentRed, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Выйти из системы", color = CorporateColors.AccentRed, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    }
+                }
             }
         }
     }
 
     if (showHistorySheet) {
-        ShiftHistoryBottomSheet(
-            shifts    = state.shiftHistory,
-            onDismiss = { showHistorySheet = false }
+        ShiftHistoryBottomSheet(shifts = state.shiftHistory, onDismiss = { showHistorySheet = false })
+    }
+    if (showEndShiftDialog) {
+        AccountConfirmDialog(
+            title       = "Завершение смены",
+            message     = "Статистика работы будет сохранена. Вы уверены?",
+            confirmText = "Завершить",
+            accentColor = CorporateColors.AccentRed,
+            onDismiss   = { showEndShiftDialog = false },
+            onConfirm   = { showEndShiftDialog = false; viewModel.endShift() }
         )
     }
-
-    EndShiftDialog(
-        showDialog = showEndShiftDialog,
-        onDismiss  = { showEndShiftDialog = false },
-        onConfirm  = { showEndShiftDialog = false; viewModel.endShift() }
-    )
-
-    LogoutDialog(
-        showDialog    = showLogoutDialog,
-        isShiftActive = state.isShiftActive,
-        onDismiss     = { showLogoutDialog = false },
-        onConfirm     = {
-            showLogoutDialog = false
-            scope.launch {
-                if (state.isShiftActive) viewModel.endShiftOnLogout()
-                authManager.logout()
-            }
-        }
-    )
-}
-
-// =================================================================================
-// ШТОРКА ИСТОРИИ СМЕН
-// =================================================================================
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ShiftHistoryBottomSheet(
-    shifts: List<com.example.qrscannerapp.features.shift.domain.model.Shift>,
-    onDismiss: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState       = sheetState,
-        containerColor   = CorporateColors.Background,
-        dragHandle       = { BottomSheetDefaults.DragHandle(color = CorporateColors.CardBorder) }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-        ) {
-            Text(
-                "Журнал работы",
-                color      = CorporateColors.TextPrimary,
-                fontSize   = 20.sp,
-                fontWeight = FontWeight.Bold,
-                modifier   = Modifier.padding(bottom = 16.dp)
-            )
-
-            if (shifts.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("История смен пока пуста", color = CorporateColors.TextSecondary)
-                }
-            } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxHeight(0.8f)
-                ) {
-                    items(shifts) { shift ->
-                        ShiftHistoryCard(shift = shift)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ShiftHistoryCard(shift: com.example.qrscannerapp.features.shift.domain.model.Shift) {
-    val dateFormat = remember { java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale("ru")) }
-    val timeFormat = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale("ru")) }
-
-    val dateStr      = dateFormat.format(java.util.Date(shift.startTime))
-    val startTimeStr = timeFormat.format(java.util.Date(shift.startTime))
-    val endTimeStr   = shift.endTime?.let { timeFormat.format(java.util.Date(it)) } ?: "..."
-    val hours        = shift.durationMinutes / 60
-    val mins         = shift.durationMinutes % 60
-    val durationStr  = if (hours > 0) "${hours}ч ${mins}м" else "${mins}м"
-
-    val (statusColor, statusIcon, statusText) = when {
-        shift.isActive -> Triple(CorporateColors.AccentGreen, Icons.Default.PlayCircle, "В процессе")
-        shift.status == "COMPLETED" || shift.endReason == "manual" ->
-            Triple(CorporateColors.AccentPurple, Icons.Default.CheckCircle, "Завершена")
-        shift.endReason == "auto_12h" ->
-            Triple(CorporateColors.AccentAmber, Icons.Default.Warning, "Авто-закрытие")
-        shift.status == "FORCE_ENDED" || shift.endReason == "admin_force" ->
-            Triple(CorporateColors.AccentRed, Icons.Default.GppBad, "Закрыто админом")
-        else -> Triple(CorporateColors.TextSecondary, Icons.Default.Info, "Завершена")
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(16.dp),
-        colors   = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(16.dp))
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "$dateStr • $startTimeStr - $endTimeStr",
-                    color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium
-                )
-                Surface(color = statusColor.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)) {
-                    Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(statusIcon, null, tint = statusColor, modifier = Modifier.size(12.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(statusText, color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            HorizontalDivider(color = CorporateColors.CardBorder)
-            Spacer(Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.QrCodeScanner, null, tint = CorporateColors.TextSecondary, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("${shift.totalScanCount}", color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text(" скан.", color = CorporateColors.TextSecondary, fontSize = 12.sp)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Inventory2, null, tint = CorporateColors.TextSecondary, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("${shift.sessionsCreated}", color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text(" парт.", color = CorporateColors.TextSecondary, fontSize = 12.sp)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Schedule, null, tint = CorporateColors.TextSecondary, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(durationStr, color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
+    if (showLogoutDialog) {
+        AccountConfirmDialog(
+            title       = "Выход из аккаунта",
+            message     = if (state.isShiftActive) "У вас активная смена — она будет завершена автоматически. Продолжить?" else "Выйти из корпоративной системы?",
+            confirmText = "Выйти",
+            accentColor = CorporateColors.AccentRed,
+            onDismiss   = { showLogoutDialog = false },
+            onConfirm   = { showLogoutDialog = false; scope.launch { if (state.isShiftActive) viewModel.endShiftOnLogout(); authManager.logout() } }
+        )
     }
 }
 
 // =================================================================================
-// КОМПОНЕНТЫ
+// ШАПКА ПРОФИЛЯ
 // =================================================================================
 
 @Composable
-fun ProfileHeader(
-    userName: String,
-    userRole: String,
-    isShiftActive: Boolean,
-    onStartShift: () -> Unit,
-    onEndShift: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun ProfileHeader(userName: String, userRole: String, isShiftActive: Boolean, onStartShift: () -> Unit, onEndShift: () -> Unit, modifier: Modifier = Modifier) {
     val photoUrl = remember(userName) { getEmployeePhotoUrl(userName) }
     var isShiftLoading by remember { mutableStateOf(false) }
     LaunchedEffect(isShiftActive) { isShiftLoading = false }
 
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(24.dp),
-        colors   = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)
+    // Пульс онлайн-индикатора
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        0.4f, 1f,
+        infiniteRepeatable(tween(1000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        "pulse"
+    )
+
+    Column(
+        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+            .background(StardustGlassBg)
+            .drawBehind {
+                // Цветная линия сверху
+                drawRect(
+                    brush = Brush.horizontalGradient(listOf(Color.Transparent, CorporateColors.AccentPurple.copy(alpha = 0.7f), CorporateColors.AccentPurple.copy(alpha = 0.3f), Color.Transparent)),
+                    topLeft = Offset(0f, 0f),
+                    size = androidx.compose.ui.geometry.Size(size.width, 1.5.dp.toPx())
+                )
+                drawRoundRect(color = CorporateColors.CardBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(24.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+            }
+            .padding(20.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(24.dp))
-                .padding(24.dp)
-        ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(CorporateColors.Background)
-                            .border(2.dp, CorporateColors.CardBorder, CircleShape)
-                    ) {
-                        if (photoUrl != null) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current).data(photoUrl).crossfade(true).build(),
-                                contentDescription = "Profile Photo",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.Person, null,
-                                modifier = Modifier.size(40.dp).align(Alignment.Center),
-                                tint = CorporateColors.TextSecondary
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Аватар
+            Box(modifier = Modifier.size(72.dp)) {
+                Box(
+                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                        .background(Color.Transparent)
+                        .drawBehind {
+                            drawCircle(
+                                brush = Brush.sweepGradient(listOf(CorporateColors.AccentPurple.copy(alpha = 0.6f), CorporateColors.AccentPurple.copy(alpha = 0.1f), CorporateColors.AccentPurple.copy(alpha = 0.6f))),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx())
                             )
                         }
+                ) {
+                    if (photoUrl != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current).data(photoUrl).crossfade(true).build(),
+                            contentDescription = "Photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape)
+                        )
+                    } else {
+                        Icon(Icons.Default.Person, null, modifier = Modifier.size(36.dp).align(Alignment.Center), tint = CorporateColors.TextSecondary)
                     }
-                    Spacer(Modifier.width(20.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(userName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = CorporateColors.TextPrimary)
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier.size(8.dp).clip(CircleShape)
-                                    .background(if (isShiftActive) CorporateColors.AccentGreen else CorporateColors.TextSecondary)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                if (isShiftActive) "На смене • $userRole" else "Не в сети • $userRole",
-                                fontSize = 13.sp, fontWeight = FontWeight.Medium, color = CorporateColors.TextSecondary
-                            )
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.LocationOn,
-                                contentDescription = null,
-                                tint = CorporateColors.AccentGreen,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "Бестужевская 10",
-                                fontSize = 12.sp,
-                                color = CorporateColors.TextSecondary
-                            )
+                }
+                // Онлайн точка
+                Box(
+                    modifier = Modifier.size(16.dp).align(Alignment.BottomEnd)
+                        .clip(CircleShape).background(StardustGlassBg).padding(2.dp)
+                        .clip(CircleShape).background(if (isShiftActive) CorporateColors.AccentGreen.copy(alpha = pulseAlpha) else Color(0xFF3A3A4A))
+                )
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(userName, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = CorporateColors.TextPrimary)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(CorporateColors.AccentPurple.copy(alpha = 0.12f)).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                        Text(userRole, color = CorporateColors.AccentPurple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (isShiftActive) {
+                        Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(CorporateColors.AccentGreen.copy(alpha = 0.1f)).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                            Text("На смене", color = CorporateColors.AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
-                Spacer(Modifier.height(24.dp))
-                if (!isShiftActive) {
-                    MorphButton(
-                        onClick = { isShiftLoading = true; onStartShift() },
-                        isLoading = isShiftLoading,
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
-                        containerColor = CorporateColors.AccentGreen
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.PlayArrow, null, tint = Color.White)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Начать смену", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                        }
-                    }
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.LocationOn, null, tint = CorporateColors.AccentGreen, modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text("Бестужевская 10", fontSize = 12.sp, color = CorporateColors.TextSecondary)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        if (!isShiftActive) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(14.dp))
+                    .background(Brush.linearGradient(listOf(CorporateColors.AccentGreen, CorporateColors.AccentGreen.copy(alpha = 0.7f))))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { isShiftLoading = true; onStartShift() },
+                contentAlignment = Alignment.Center
+            ) {
+                if (isShiftLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color.White, strokeWidth = 2.5.dp)
                 } else {
-                    Button(
-                        onClick = onEndShift,
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.Background)
-                    ) {
-                        Icon(Icons.Default.Stop, null, tint = CorporateColors.AccentRed)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Завершить смену", color = CorporateColors.AccentRed, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        Text("Начать смену", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(14.dp))
+                    .background(CorporateColors.AccentRed.copy(alpha = 0.1f))
+                    .drawBehind { drawRoundRect(color = CorporateColors.AccentRed.copy(alpha = 0.3f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onEndShift() },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Stop, null, tint = CorporateColors.AccentRed, modifier = Modifier.size(20.dp))
+                    Text("Завершить смену", color = CorporateColors.AccentRed, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 }
             }
         }
     }
 }
+
+// =================================================================================
+// ПРОГРЕСС СМЕНЫ
+// =================================================================================
 
 @Composable
 fun ShiftProgressBar(modifier: Modifier = Modifier, shiftStartTime: Long) {
@@ -784,48 +632,60 @@ fun ShiftProgressBar(modifier: Modifier = Modifier, shiftStartTime: Long) {
     LaunchedEffect(shiftStartTime) {
         if (shiftStartTime == 0L) { progress = 0f; elapsedTimeText = "00:00:00"; return@LaunchedEffect }
         while (true) {
-            val elapsedMillis = (System.currentTimeMillis() - shiftStartTime).coerceAtLeast(0)
-            progress = (elapsedMillis.toFloat() / totalShiftDuration).coerceIn(0f, 1f)
-            val hours = elapsedMillis / 3600000; val minutes = (elapsedMillis / 60000) % 60; val seconds = (elapsedMillis / 1000) % 60
-            elapsedTimeText = String.format("%02d:%02d:%02d", hours, minutes, seconds)
+            val elapsed = (System.currentTimeMillis() - shiftStartTime).coerceAtLeast(0)
+            progress = (elapsed.toFloat() / totalShiftDuration).coerceIn(0f, 1f)
+            val h = elapsed / 3600000; val m = (elapsed / 60000) % 60; val s = (elapsed / 1000) % 60
+            elapsedTimeText = String.format("%02d:%02d:%02d", h, m, s)
             delay(1000)
         }
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Время на смене", color = CorporateColors.TextSecondary, fontSize = 13.sp)
-            Text(elapsedTimeText, color = CorporateColors.TextPrimary, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+    Column(
+        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            .background(StardustGlassBg)
+            .drawBehind { drawRoundRect(color = CorporateColors.CardBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
+            .padding(16.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Timer, null, tint = CorporateColors.AccentGreen, modifier = Modifier.size(14.dp))
+                Text("Время на смене", color = CorporateColors.TextSecondary, fontSize = 12.sp)
+            }
+            Text(elapsedTimeText, color = CorporateColors.AccentGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
         }
-        AnimatedProgressBar(
-            progress = progress,
-            modifier = Modifier.fillMaxWidth(),
-            fillColor = CorporateColors.AccentGreen,
-            trackColor = CorporateColors.CardSurface,
-            cornerRadius = 3.dp
-        )
+        Spacer(Modifier.height(10.dp))
+        AnimatedProgressBar(progress = progress, modifier = Modifier.fillMaxWidth(), fillColor = CorporateColors.AccentGreen, trackColor = StardustItemBg, cornerRadius = 3.dp)
+        Spacer(Modifier.height(6.dp))
+        Text("${(progress * 100).toInt()}% от 12 часов", color = CorporateColors.TextSecondary, fontSize = 11.sp)
     }
 }
+
+// =================================================================================
+// КАРТОЧКИ СТАТИСТИКИ
+// =================================================================================
 
 @Composable
 fun TodayStatsCard(scansToday: Int, sessionsToday: Int, modifier: Modifier = Modifier) {
-    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
-        Box(modifier = Modifier.fillMaxWidth().border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp)).padding(20.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                TodayStatItem(value = scansToday, label = "СКАНИРОВАНИЙ", color = CorporateColors.TextPrimary)
-                Box(modifier = Modifier.width(1.dp).height(40.dp).background(CorporateColors.CardBorder))
-                TodayStatItem(value = sessionsToday, label = "ПАРТИЙ", color = CorporateColors.AccentPurple)
-            }
-        }
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        TodayStatChip(value = scansToday, label = "СКАНОВ", icon = Icons.Outlined.QrCodeScanner, color = CorporateColors.AccentPurple, modifier = Modifier.weight(1f))
+        TodayStatChip(value = sessionsToday, label = "ПАРТИЙ", icon = Icons.Outlined.Inventory2, color = Color(0xFF06B6D4), modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun TodayStatItem(value: Int, label: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        AnimatedCounter(count = value, style = MaterialTheme.typography.headlineMedium.copy(color = color, fontWeight = FontWeight.Bold))
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = CorporateColors.TextSecondary, fontSize = 11.sp, letterSpacing = 1.sp)
+private fun TodayStatChip(value: Int, label: String, icon: ImageVector, color: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(18.dp))
+            .background(StardustGlassBg)
+            .drawBehind { drawRoundRect(color = CorporateColors.CardBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
+            .padding(16.dp)
+    ) {
+        Box(modifier = Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = color, modifier = Modifier.size(17.dp))
+        }
+        Spacer(Modifier.height(10.dp))
+        AnimatedCounter(count = value, style = MaterialTheme.typography.headlineSmall.copy(color = CorporateColors.TextPrimary, fontWeight = FontWeight.Bold))
+        Text(label, color = CorporateColors.TextSecondary, fontSize = 10.sp, letterSpacing = 1.sp)
     }
 }
 
@@ -840,19 +700,26 @@ fun RecordCard(record: Int, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun CorporateStatCard(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, iconColor: Color, value: String, label: String, subLabel: String) {
-    Card(modifier = modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
-        Column(modifier = Modifier.fillMaxWidth().border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp)).padding(16.dp), horizontalAlignment = Alignment.Start) {
-            Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(iconColor.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.height(12.dp))
-            Text(value, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = CorporateColors.TextPrimary)
-            Text(label, color = CorporateColors.TextSecondary, fontSize = 12.sp)
-            Text(subLabel, color = CorporateColors.TextSecondary.copy(alpha = 0.5f), fontSize = 10.sp)
+private fun CorporateStatCard(modifier: Modifier, icon: ImageVector, iconColor: Color, value: String, label: String, subLabel: String) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(18.dp))
+            .background(StardustGlassBg)
+            .drawBehind { drawRoundRect(color = CorporateColors.CardBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
+            .padding(16.dp)
+    ) {
+        Box(modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(iconColor.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
         }
+        Spacer(Modifier.height(12.dp))
+        Text(value, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = CorporateColors.TextPrimary)
+        Text(label, color = CorporateColors.TextSecondary, fontSize = 12.sp)
+        Text(subLabel, color = CorporateColors.TextSecondary.copy(alpha = 0.5f), fontSize = 10.sp)
     }
 }
+
+// =================================================================================
+// ГРАФИК НЕДЕЛИ
+// =================================================================================
 
 @Composable
 fun WeeklyChartCard(weeklyScans: List<ChartDataPoint>) {
@@ -860,34 +727,74 @@ fun WeeklyChartCard(weeklyScans: List<ChartDataPoint>) {
     val maxVal = weeklyScans.maxOfOrNull { it.count }?.takeIf { it > 0 } ?: 1
     val todayIndex = weeklyScans.size - 1
     val animProgress = remember { Animatable(0f) }
-    LaunchedEffect(weeklyScans) { animProgress.snapTo(0f); animProgress.animateTo(1f, tween(800, easing = FastOutSlowInEasing)) }
+    LaunchedEffect(weeklyScans) { animProgress.snapTo(0f); animProgress.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
     val progress by animProgress.asState()
 
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
-        Column(modifier = Modifier.border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp)).padding(20.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.BarChart, null, tint = CorporateColors.AccentPurple, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Активность за неделю", color = CorporateColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                }
-                Text("${weeklyScans.sumOf { it.count }}", color = CorporateColors.TextSecondary, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(StardustGlassBg)
+            .drawBehind { drawRoundRect(color = CorporateColors.CardBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
+            .padding(18.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Outlined.BarChart, null, tint = CorporateColors.AccentPurple, modifier = Modifier.size(18.dp))
+                Text("Активность за неделю", color = CorporateColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             }
-            Spacer(Modifier.height(24.dp))
-            Row(modifier = Modifier.fillMaxWidth().height(120.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                weeklyScans.forEachIndexed { index, point ->
-                    val isToday  = index == todayIndex
-                    val fraction = (point.count.toFloat() / maxVal) * progress
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom, modifier = Modifier.weight(1f)) {
-                        if (point.count > 0) {
-                            Text(if (point.count >= 1000) "${point.count / 1000}k" else point.count.toString(), color = if (isToday) CorporateColors.TextPrimary else CorporateColors.TextSecondary, fontSize = 10.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium)
-                            Spacer(Modifier.height(6.dp))
-                        }
-                        Box(modifier = Modifier.width(12.dp).height(80.dp).clip(RoundedCornerShape(50)).background(CorporateColors.Background)) {
-                            Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(fraction.coerceAtLeast(0.05f)).clip(RoundedCornerShape(50)).background(if (isToday) CorporateColors.AccentPurple else CorporateColors.CardBorder).align(Alignment.BottomCenter))
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text(point.day.take(2), color = if (isToday) CorporateColors.AccentPurple else CorporateColors.TextSecondary, fontSize = 11.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium)
+            Text("${weeklyScans.sumOf { it.count }}", color = CorporateColors.TextSecondary, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(20.dp))
+        Row(modifier = Modifier.fillMaxWidth().height(110.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+            weeklyScans.forEachIndexed { index, point ->
+                val isToday  = index == todayIndex
+                val fraction = (point.count.toFloat() / maxVal) * progress
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom, modifier = Modifier.weight(1f)) {
+                    if (point.count > 0) {
+                        Text(if (point.count >= 1000) "${point.count / 1000}k" else point.count.toString(), color = if (isToday) CorporateColors.TextPrimary else CorporateColors.TextSecondary, fontSize = 9.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal)
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    Box(modifier = Modifier.width(10.dp).height(76.dp).clip(RoundedCornerShape(50.dp)).background(Color.Transparent)) {
+                        Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(fraction.coerceAtLeast(0.04f))
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(if (isToday) CorporateColors.AccentPurple else CorporateColors.CardBorder)
+                            .align(Alignment.BottomCenter))
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(point.day.take(2), color = if (isToday) CorporateColors.AccentPurple else CorporateColors.TextSecondary, fontSize = 10.sp, fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+    }
+}
+
+// =================================================================================
+// КОМПОНЕНТ ТЕХНИКА
+// =================================================================================
+
+@Composable
+fun TechnicFieldStatsCard(stats: FieldRepairStats, isLoading: Boolean) {
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(StardustGlassBg)
+            .drawBehind { drawRoundRect(color = CorporateColors.CardBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
+            .padding(18.dp)
+    ) {
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                DotsLoader(color = CorporateColors.AccentPurple)
+            }
+        } else {
+            Text("Полевой ремонт сегодня", color = CorporateColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(14.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                listOf(
+                    Triple(stats.doneToday.toString(), "Завершено", Color(0xFF22C55E)),
+                    Triple((stats.totalToday - stats.doneToday).toString(), "Осталось", CorporateColors.AccentAmber),
+                    Triple(stats.totalToday.toString(), "Всего", CorporateColors.AccentPurple)
+                ).forEach { (value, label, color) ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(value, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = color)
+                        Text(label, fontSize = 12.sp, color = CorporateColors.TextSecondary)
                     }
                 }
             }
@@ -895,177 +802,205 @@ fun WeeklyChartCard(weeklyScans: List<ChartDataPoint>) {
     }
 }
 
+// =================================================================================
+// ВСПОМОГАТЕЛЬНЫЕ КОМПОНЕНТЫ
+// =================================================================================
+
 @Composable
-fun StatListItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String, iconTint: Color) {
-    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(CorporateColors.Background), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = iconTint, modifier = Modifier.size(20.dp))
+fun StatListItem(icon: ImageVector, label: String, value: String, iconTint: Color) {
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(iconTint.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = iconTint, modifier = Modifier.size(18.dp))
         }
-        Spacer(Modifier.width(16.dp))
-        Text(label, color = CorporateColors.TextPrimary, fontSize = 15.sp, modifier = Modifier.weight(1f))
-        Text(value, color = CorporateColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(14.dp))
+        Text(label, color = CorporateColors.TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(value, color = CorporateColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
-fun AnimatedCounter(count: Int, modifier: Modifier = Modifier, style: androidx.compose.ui.text.TextStyle = LocalTextStyle.current) {
-    val animatedCount by animateIntAsState(targetValue = count, animationSpec = tween(1000, easing = FastOutSlowInEasing), label = "counter")
+private fun StatDivider() {
+    HorizontalDivider(color = CorporateColors.CardBorder, modifier = Modifier.padding(horizontal = 16.dp))
+}
+
+@Composable
+fun AnimatedCounter(count: Int, modifier: Modifier = Modifier, style: TextStyle = LocalTextStyle.current) {
+    val animatedCount by animateIntAsState(count, tween(1000, easing = FastOutSlowInEasing), label = "counter")
     Text(animatedCount.toString(), modifier = modifier, style = style)
 }
 
-@Composable
-private fun EndShiftDialog(showDialog: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            containerColor = CorporateColors.CardSurface,
-            titleContentColor = CorporateColors.TextPrimary,
-            textContentColor = CorporateColors.TextSecondary,
-            title = { Text("Завершение смены", fontWeight = FontWeight.Bold) },
-            text = { Text("Статистика работы будет сохранена. Вы уверены?") },
-            confirmButton = { TextButton(onClick = onConfirm) { Text("Завершить", color = CorporateColors.AccentRed, fontWeight = FontWeight.Bold) } },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = CorporateColors.TextSecondary) } }
-        )
-    }
-}
+// =================================================================================
+// ШТОРКА ИСТОРИИ СМЕН
+// =================================================================================
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LogoutDialog(showDialog: Boolean, isShiftActive: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            containerColor = CorporateColors.CardSurface,
-            titleContentColor = CorporateColors.TextPrimary,
-            textContentColor = CorporateColors.TextSecondary,
-            title = { Text("Выход из аккаунта", fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    if (isShiftActive) Text("У вас есть активная смена! Она будет завершена автоматически.", color = CorporateColors.AccentAmber, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 8.dp))
-                    Text("Продолжить выход из корпоративной системы?")
+fun ShiftHistoryBottomSheet(shifts: List<com.example.qrscannerapp.features.shift.domain.model.Shift>, onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = Color.Transparent, dragHandle = { BottomSheetDefaults.DragHandle(color = CorporateColors.CardBorder) }) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+            Text("Журнал работы", color = CorporateColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
+            if (shifts.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) { Text("История смен пока пуста", color = CorporateColors.TextSecondary) }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxHeight(0.8f)) {
+                    items(shifts) { ShiftHistoryCard(shift = it) }
                 }
-            },
-            confirmButton = { Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentRed)) { Text("Выйти", color = Color.White) } },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = CorporateColors.TextSecondary) } }
-        )
+            }
+        }
     }
 }
 
 @Composable
-private fun LoginFormComponent(authManager: AuthManager, loginErrorKey: Int = 0) {
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager.current
-    val passwordFocusRequester = remember { FocusRequester() }
-
-    var shakeTrigger by remember { mutableStateOf(false) }
-    LaunchedEffect(loginErrorKey) {
-        if (loginErrorKey > 0) shakeTrigger = !shakeTrigger
+fun ShiftHistoryCard(shift: com.example.qrscannerapp.features.shift.domain.model.Shift) {
+    val dateFormat = remember { java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale("ru")) }
+    val timeFormat = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale("ru")) }
+    val dateStr     = dateFormat.format(java.util.Date(shift.startTime))
+    val startStr    = timeFormat.format(java.util.Date(shift.startTime))
+    val endStr      = shift.endTime?.let { timeFormat.format(java.util.Date(it)) } ?: "..."
+    val h = shift.durationMinutes / 60; val m = shift.durationMinutes % 60
+    val durStr      = if (h > 0) "${h}ч ${m}м" else "${m}м"
+    val (statusColor, statusIcon, statusText) = when {
+        shift.isActive -> Triple(CorporateColors.AccentGreen, Icons.Default.PlayCircle, "В процессе")
+        shift.status == "COMPLETED" || shift.endReason == "manual" -> Triple(CorporateColors.AccentPurple, Icons.Default.CheckCircle, "Завершена")
+        shift.endReason == "auto_12h" -> Triple(CorporateColors.AccentAmber, Icons.Default.Warning, "Авто-закрытие")
+        shift.status == "FORCE_ENDED" || shift.endReason == "admin_force" -> Triple(CorporateColors.AccentRed, Icons.Default.GppBad, "Закрыто админом")
+        else -> Triple(CorporateColors.TextSecondary, Icons.Default.Info, "Завершена")
     }
-    val shakeModifier = Modifier.shake(trigger = shakeTrigger)
-
-    Card(modifier = Modifier.fillMaxWidth().then(shakeModifier), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)) {
-        Column(modifier = Modifier.border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(24.dp)).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Outlined.Lock, null, tint = CorporateColors.AccentPurple, modifier = Modifier.size(48.dp))
-            Spacer(Modifier.height(16.dp))
-            Text("Вход в систему", fontSize = 22.sp, color = CorporateColors.TextPrimary, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(32.dp))
-            OutlinedTextField(
-                value = username, onValueChange = { username = it },
-                modifier = Modifier.fillMaxWidth(), label = { Text("Логин") }, singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                keyboardActions = KeyboardActions(onNext = { passwordFocusRequester.requestFocus() }),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CorporateColors.AccentPurple, unfocusedBorderColor = CorporateColors.CardBorder, focusedLabelColor = CorporateColors.AccentPurple, unfocusedLabelColor = CorporateColors.TextSecondary, focusedTextColor = CorporateColors.TextPrimary, unfocusedTextColor = CorporateColors.TextPrimary, focusedContainerColor = CorporateColors.Background, unfocusedContainerColor = CorporateColors.Background)
-            )
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value = password, onValueChange = { password = it },
-                modifier = Modifier.fillMaxWidth().focusRequester(passwordFocusRequester),
-                label = { Text("Пароль") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = CorporateColors.AccentPurple, unfocusedBorderColor = CorporateColors.CardBorder, focusedLabelColor = CorporateColors.AccentPurple, unfocusedLabelColor = CorporateColors.TextSecondary, focusedTextColor = CorporateColors.TextPrimary, unfocusedTextColor = CorporateColors.TextPrimary, focusedContainerColor = CorporateColors.Background, unfocusedContainerColor = CorporateColors.Background)
-            )
-            Spacer(Modifier.height(32.dp))
-            Button(
-                onClick = { focusManager.clearFocus(); scope.launch { authManager.login(username.trim(), password.trim()) } },
-                enabled = username.isNotBlank() && password.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = CorporateColors.AccentPurple, disabledContainerColor = CorporateColors.CardBorder)
-            ) { Text("Войти", fontWeight = FontWeight.SemiBold, fontSize = 16.sp) }
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            .background(StardustGlassBg)
+            .drawBehind { drawRoundRect(color = CorporateColors.CardBorder, cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
+            .padding(14.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("$dateStr · $startStr – $endStr", color = CorporateColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(statusColor.copy(alpha = 0.12f)).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Icon(statusIcon, null, tint = statusColor, modifier = Modifier.size(10.dp))
+                    Text(statusText, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        HorizontalDivider(color = CorporateColors.CardBorder)
+        Spacer(Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf(
+                Triple(Icons.Outlined.QrCodeScanner, "${shift.totalScanCount}", "скан."),
+                Triple(Icons.Outlined.Inventory2, "${shift.sessionsCreated}", "парт."),
+                Triple(Icons.Outlined.Schedule, durStr, "")
+            ).forEach { (icon, value, unit) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, null, tint = CorporateColors.TextSecondary, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text(value, color = CorporateColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    if (unit.isNotBlank()) Text(" $unit", color = CorporateColors.TextSecondary, fontSize = 11.sp)
+                }
+            }
         }
     }
 }
 
 // =================================================================================
-// КОМПОНЕНТ ДЛЯ ТЕХНИКА
+// ДИАЛОГИ
 // =================================================================================
+
 @Composable
-fun TechnicFieldStatsCard(
-    stats: FieldRepairStats,
-    isLoading: Boolean
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = CorporateColors.CardSurface)
-    ) {
+private fun AccountConfirmDialog(title: String, message: String, confirmText: String, accentColor: Color, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    val scale by animateFloatAsState(if (visible) 1f else 0.90f, spring(0.75f, 400f), label = "s")
+    val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(220), label = "a")
+    fun handleDismiss() { visible = false; onDismiss() }
+
+    Dialog(onDismissRequest = { handleDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, CorporateColors.CardBorder, RoundedCornerShape(20.dp))
-                .padding(20.dp)
+            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f * alpha))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { handleDismiss() },
+            contentAlignment = Alignment.Center
         ) {
-            if (isLoading) {
-                Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                    DotsLoader(color = CorporateColors.AccentPurple)
-                }
-            } else {
-                Column {
-                    Text(
-                        "Полевой ремонт сегодня",
-                        color = CorporateColors.TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                stats.doneToday.toString(),
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CorporateColors.AccentGreen
-                            )
-                            Text("Завершено", fontSize = 12.sp, color = CorporateColors.TextSecondary)
+            Box(
+                modifier = Modifier.fillMaxWidth(0.86f).wrapContentHeight()
+                    .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFF1C1830), Color(0xFF12102A)), Offset(0f,0f), Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)))
+                    .drawBehind { drawRect(color = accentColor.copy(alpha = 0.45f), topLeft = Offset(size.width * 0.15f, 0f), size = androidx.compose.ui.geometry.Size(size.width * 0.7f, 1.5.dp.toPx())) }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
+            ) {
+                Column(modifier = Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(accentColor.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                        Icon(if (accentColor == CorporateColors.AccentRed) Icons.Default.Warning else Icons.Default.Info, null, tint = accentColor, modifier = Modifier.size(24.dp))
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(title, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 17.sp, textAlign = TextAlign.Center)
+                        Text(message, color = StardustTextSecondary, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 18.sp)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(modifier = Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(14.dp)).background(StardustGlassBg).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { handleDismiss() }, contentAlignment = Alignment.Center) {
+                            Text("Отмена", color = StardustTextSecondary, fontWeight = FontWeight.SemiBold)
                         }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                (stats.totalToday - stats.doneToday).toString(),
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CorporateColors.AccentAmber
-                            )
-                            Text("Осталось", fontSize = 12.sp, color = CorporateColors.TextSecondary)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                stats.totalToday.toString(),
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CorporateColors.AccentPurple
-                            )
-                            Text("Всего", fontSize = 12.sp, color = CorporateColors.TextSecondary)
+                        Box(modifier = Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(14.dp)).background(accentColor).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onConfirm() }, contentAlignment = Alignment.Center) {
+                            Text(confirmText, color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// =================================================================================
+// ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ
+// =================================================================================
+
+@Composable
+fun ForceUpdateDialog(message: String, updateState: UpdateState, onUpdate: () -> Unit, onExit: () -> Unit) {
+    Dialog(onDismissRequest = { }, properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF1C1830), Color(0xFF12102A)), Offset(0f,0f), Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)))
+                .drawBehind { drawRect(color = CorporateColors.AccentAmber.copy(alpha = 0.5f), topLeft = Offset(size.width * 0.15f, 0f), size = androidx.compose.ui.geometry.Size(size.width * 0.7f, 1.5.dp.toPx())) }
+                .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(modifier = Modifier.size(60.dp).clip(CircleShape).background(CorporateColors.AccentAmber.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.SystemUpdate, null, tint = CorporateColors.AccentAmber, modifier = Modifier.size(28.dp))
+            }
+            Text("Требуется обновление", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = StardustTextPrimary, textAlign = TextAlign.Center)
+            Text(message, fontSize = 13.sp, color = StardustTextSecondary, textAlign = TextAlign.Center, lineHeight = 18.sp)
+
+            when (updateState) {
+                is UpdateState.Downloading -> {
+                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LinearProgressIndicator(progress = { updateState.progress / 100f }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)), color = CorporateColors.AccentPurple, trackColor = StardustGlassBg)
+                        Text("Загрузка ${updateState.progress}%", color = StardustTextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+                else -> {
+                    val isChecking = updateState is UpdateState.Checking
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(14.dp))
+                            .background(Brush.linearGradient(listOf(CorporateColors.AccentPurple, CorporateColors.AccentPurple.copy(alpha = 0.7f))))
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !isChecking) { onUpdate() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isChecking) CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color.White, strokeWidth = 2.5.dp)
+                        else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Download, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Text("Обновить приложение", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp)).background(CorporateColors.AccentRed.copy(alpha = 0.08f))
+                    .drawBehind { drawRoundRect(color = CorporateColors.AccentRed.copy(alpha = 0.25f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx()), style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx())) }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onExit() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Выйти из приложения", color = CorporateColors.AccentRed, fontWeight = FontWeight.Medium)
             }
         }
     }

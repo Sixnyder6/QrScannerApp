@@ -32,6 +32,9 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.DialogAnimation
 import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
+import com.example.qrscannerapp.common.ui.NavTransitionType
+import com.example.qrscannerapp.common.ui.SpyderConfig
+import com.example.qrscannerapp.common.ui.SpyderPerformanceProfile
 import com.example.qrscannerapp.R
 import com.example.qrscannerapp.StardustItemBg
 import com.example.qrscannerapp.StardustTextPrimary
@@ -827,6 +830,8 @@ private fun SpyderSettingsTab(
 ) {
     var mounted by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(20); mounted = true }
+    val animConfig: SpyderConfig by viewModel.animConfig.collectAsState()
+    val renderConfig: SpyderConfig by viewModel.renderConfig.collectAsState()
 
     Column(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -911,6 +916,18 @@ private fun SpyderSettingsTab(
         }
 
         StaggerCard(6, mounted) {
+            Text("АНИМАЦИЯ ПЕРЕХОДОВ", color = SpyderGreen.copy(0.5f), fontSize = 9.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+        }
+        StaggerCard(7, mounted) {
+            AnimationControlsSection(
+                config       = animConfig,
+                renderConfig = renderConfig,
+                onUpdate     = { viewModel.updateAnimConfig(it) }
+            )
+        }
+
+        StaggerCard(8, mounted) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -923,6 +940,234 @@ private fun SpyderSettingsTab(
                     color = SpyderGreen.copy(0.65f), fontSize = 11.sp)
             }
         }
+    }
+}
+
+// =============================================================================
+// СЕКЦИЯ АНИМАЦИИ ПЕРЕХОДОВ
+// =============================================================================
+
+@Composable
+private fun AnimationControlsSection(
+    config: SpyderConfig,
+    renderConfig: SpyderConfig,
+    onUpdate: (SpyderConfig) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(SpyderCard)
+            .border(0.5.dp, SpyderBorder, RoundedCornerShape(12.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // ── Тип перехода ──
+        Text("Тип перехода экранов", color = StardustTextPrimary, fontSize = 13.sp,
+            fontWeight = FontWeight.Medium)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            NavTransitionType.entries.chunked(3).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    row.forEach { type ->
+                        val selected = config.navTransition == type
+                        val (label, subtitle) = when (type) {
+                            NavTransitionType.ZOOM    -> "ZOOM"    to "macOS"
+                            NavTransitionType.SLIDE   -> "SLIDE"   to "iOS"
+                            NavTransitionType.FADE    -> "FADE"    to "soft"
+                            NavTransitionType.RISE    -> "RISE"    to "modal"
+                            NavTransitionType.ELASTIC -> "ELASTIC" to "spring"
+                            NavTransitionType.PUSH    -> "PUSH"    to "android"
+                        }
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (selected) SpyderGreen.copy(0.15f) else SpyderBg)
+                                .border(
+                                    1.dp,
+                                    if (selected) SpyderGreen.copy(0.7f) else SpyderBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { onUpdate(config.copy(navTransition = type)) }
+                                .padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) SpyderGreen else StardustTextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = subtitle,
+                                color = if (selected) SpyderGreen.copy(0.6f) else StardustTextSecondary.copy(0.5f),
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Задержка появления экрана ──
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Задержка появления", color = StardustTextPrimary, fontSize = 13.sp,
+                modifier = Modifier.weight(1f))
+            Text("${config.screenEntranceDelay} мс", color = SpyderGreen, fontSize = 12.sp,
+                fontWeight = FontWeight.Bold)
+        }
+        Slider(
+            value = config.screenEntranceDelay.toFloat(),
+            onValueChange = { onUpdate(config.copy(screenEntranceDelay = it.toLong())) },
+            valueRange = 0f..200f,
+            steps = 7,
+            colors = SliderDefaults.colors(
+                thumbColor = SpyderGreen,
+                activeTrackColor = SpyderGreen.copy(0.7f),
+                inactiveTrackColor = SpyderBorder
+            )
+        )
+
+        // ── Масштаб нажатия ──
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Масштаб нажатия", color = StardustTextPrimary, fontSize = 13.sp,
+                modifier = Modifier.weight(1f))
+            Text("${(config.pressScale * 100).toInt()}%", color = SpyderGreen, fontSize = 12.sp,
+                fontWeight = FontWeight.Bold)
+        }
+        Slider(
+            value = config.pressScale,
+            onValueChange = { onUpdate(config.copy(pressScale = it)) },
+            valueRange = 0.80f..1.00f,
+            steps = 9,
+            colors = SliderDefaults.colors(
+                thumbColor = SpyderGreen,
+                activeTrackColor = SpyderGreen.copy(0.7f),
+                inactiveTrackColor = SpyderBorder
+            )
+        )
+
+        // ── Яркость нажатия ──
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Яркость нажатия", color = StardustTextPrimary, fontSize = 13.sp,
+                modifier = Modifier.weight(1f))
+            Text("${(config.pressBrightness * 100).toInt()}%", color = SpyderGreen, fontSize = 12.sp,
+                fontWeight = FontWeight.Bold)
+        }
+        Slider(
+            value = config.pressBrightness,
+            onValueChange = { onUpdate(config.copy(pressBrightness = it)) },
+            valueRange = 0.60f..1.00f,
+            steps = 7,
+            colors = SliderDefaults.colors(
+                thumbColor = SpyderGreen,
+                activeTrackColor = SpyderGreen.copy(0.7f),
+                inactiveTrackColor = SpyderBorder
+            )
+        )
+
+        // ── Упрощённая анимация ──
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(config.copy(reducedMotion = !config.reducedMotion)) }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Упрощённая анимация", color = StardustTextPrimary, fontSize = 13.sp)
+                Text("Убирает bounce и задержку рендеринга", color = StardustTextSecondary,
+                    fontSize = 11.sp)
+            }
+            Switch(
+                checked = config.reducedMotion,
+                onCheckedChange = { onUpdate(config.copy(reducedMotion = it)) },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = SpyderBg,
+                    checkedTrackColor = SpyderGreen,
+                    uncheckedThumbColor = StardustTextSecondary,
+                    uncheckedTrackColor = StardustItemBg
+                )
+            )
+        }
+
+        // ── Декоративные анимации ──
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onUpdate(config.copy(decorativeEnabled = !config.decorativeEnabled)) }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Декоративные эффекты", color = StardustTextPrimary, fontSize = 13.sp)
+                Text("Конфетти, glow, ripple, beam сканера", color = StardustTextSecondary,
+                    fontSize = 11.sp)
+            }
+            Switch(
+                checked = config.decorativeEnabled,
+                onCheckedChange = { onUpdate(config.copy(decorativeEnabled = it)) },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = SpyderBg,
+                    checkedTrackColor = SpyderGreen,
+                    uncheckedThumbColor = StardustTextSecondary,
+                    uncheckedTrackColor = StardustItemBg
+                )
+            )
+        }
+
+        // ── Runtime лимиты (read-only, что движок применяет сейчас) ──
+        val throttleColor = when (renderConfig.throttleLevel) {
+            0 -> SpyderGreen
+            1 -> Color(0xFFFFD600)
+            2 -> Color(0xFFFF6D00)
+            else -> Color(0xFFFF1744)
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(SpyderBg)
+                .border(0.5.dp, throttleColor.copy(0.3f), RoundedCornerShape(8.dp))
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text("RUNTIME · ДВИЖОК СЕЙЧАС", color = throttleColor.copy(0.6f), fontSize = 8.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                TierStatusChip("THROTTLE", "LVL ${renderConfig.throttleLevel}", throttleColor)
+                TierStatusChip("CONTENT", "${renderConfig.maxContentAnimations} max", SpyderGreen.copy(0.8f))
+                TierStatusChip("DECORE", if (renderConfig.decorativeEnabled) "${renderConfig.maxDecorativeAnimations} max" else "OFF", Color(0xFF9E9E9E))
+                TierStatusChip("SHADER", "${renderConfig.shaderTickIntervalMs}ms", SpyderGreen.copy(0.6f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TierStatusChip(label: String, value: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = color.copy(0.55f), fontSize = 7.sp, letterSpacing = 0.8.sp,
+            fontWeight = FontWeight.Bold)
+        Text(value, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 

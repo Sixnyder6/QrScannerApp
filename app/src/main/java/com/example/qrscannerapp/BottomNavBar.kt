@@ -7,11 +7,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material.icons.outlined.GridView
@@ -75,57 +76,59 @@ fun BottomNavBar(
     onTabSelected: (BottomTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .background(BarBg)
-            // Верхний разделитель — единственный декор
-            .drawBehind {
-                drawLine(
-                    color       = DividerColor,
-                    start       = Offset(0f, 0f),
-                    end         = Offset(size.width, 0f),
-                    strokeWidth = 0.5f
-                )
-            }
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            tabs.forEach { item ->
-                val isActive = currentTab == item.tab
-                val color = if (isActive) ActiveColor else InactiveColor
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .pointerInput(item.tab) {
-                            detectTapGestures(onTap = { onTabSelected(item.tab) })
-                        }
-                        .padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Icon(
-                        imageVector        = item.icon,
-                        contentDescription = item.label,
-                        tint               = color,
-                        modifier           = Modifier.size(24.dp)
-                    )
-                    Text(
-                        text       = item.label,
-                        color      = color,
-                        fontSize   = 10.sp,
-                        fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal
+                .drawBehind {
+                    drawLine(
+                        color       = DividerColor,
+                        start       = Offset(0f, 0f),
+                        end         = Offset(size.width, 0f),
+                        strokeWidth = 0.5f
                     )
                 }
-            }
-        }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                tabs.forEach { item ->
+                    val isActive = currentTab == item.tab
+                    val color = if (isActive) ActiveColor else InactiveColor
 
-        // Отступ под system navigation bar
-        Spacer(Modifier.navigationBarsPadding())
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .pointerInput(item.tab) {
+                                detectTapGestures(onTap = { onTabSelected(item.tab) })
+                            }
+                            .padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector        = item.icon,
+                            contentDescription = item.label,
+                            tint               = color,
+                            modifier           = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text       = item.label,
+                            color      = color,
+                            fontSize   = 10.sp,
+                            fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
+        }
     }
 }

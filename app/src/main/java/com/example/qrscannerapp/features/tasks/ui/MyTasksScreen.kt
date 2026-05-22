@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.common.ui.AppBackground
+import com.example.qrscannerapp.common.ui.ScreenShell
 import com.example.qrscannerapp.features.tasks.domain.model.Task
 import com.example.qrscannerapp.features.tasks.domain.model.TaskPriority
 import com.example.qrscannerapp.features.tasks.domain.model.TaskStatus
@@ -78,6 +79,7 @@ fun MyTasksScreen(
         viewModel.clearError()
     }
 
+    ScreenShell {
     AppBackground {
         Scaffold(
             containerColor = Color.Transparent,
@@ -143,6 +145,7 @@ fun MyTasksScreen(
             )
         }
     }
+    } // ScreenShell
 }
 
 @OptIn(ExperimentalFoundationApi::class)

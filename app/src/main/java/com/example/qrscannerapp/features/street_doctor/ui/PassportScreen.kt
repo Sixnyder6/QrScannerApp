@@ -35,7 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
-import com.example.qrscannerapp.features.chat.data.CloudinaryUploader
+import com.example.qrscannerapp.common.upload.CloudinaryUploader
+import com.example.qrscannerapp.common.upload.UploadFolder
 import com.example.qrscannerapp.features.street_doctor.domain.model.RepairJob
 import com.example.qrscannerapp.features.street_doctor.domain.model.ScooterFieldStatus
 import com.example.qrscannerapp.features.street_doctor.domain.model.StreetScooter
@@ -415,7 +416,7 @@ fun PassportScreen(
                             isUploading = true
                             try {
                                 val uploadedUrls = photoUris.mapNotNull { uri ->
-                                    cloudinaryUploader.uploadImage(context, uri)
+                                    cloudinaryUploader.uploadImage(context, uri, UploadFolder.REPAIR)
                                 }
 
                                 if (photoUris.isNotEmpty() && uploadedUrls.isEmpty()) {

@@ -8,7 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.qrscannerapp.AuthManager
 import com.example.qrscannerapp.FcmSender
 import com.example.qrscannerapp.UserRole
-import com.example.qrscannerapp.features.chat.data.CloudinaryUploader
+import com.example.qrscannerapp.common.upload.CloudinaryUploader
+import com.example.qrscannerapp.common.upload.UploadFolder
 import com.example.qrscannerapp.features.chat.domain.model.ChatMessage
 import com.example.qrscannerapp.features.chat.domain.model.ChatRoom
 import com.example.qrscannerapp.features.chat.domain.model.ChatRoomInfo
@@ -470,7 +471,7 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(isUploadingImage = true) }
         viewModelScope.launch {
             try {
-                val imageUrl = cloudinaryUploader.uploadImage(context, uri)
+                val imageUrl = cloudinaryUploader.uploadImage(context, uri, UploadFolder.CHAT)
                 if (imageUrl == null) { _uiState.update { it.copy(isUploadingImage = false) }; return@launch }
                 val thumbnailUrl = cloudinaryUploader.getThumbnailUrl(imageUrl)
                 val expiresAt = if (_uiState.value.isAutoDeleteEnabled)

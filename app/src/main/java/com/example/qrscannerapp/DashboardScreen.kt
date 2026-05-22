@@ -7,6 +7,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,8 +20,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -29,6 +35,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.common.ui.AnimatedDialogWrapper
 import com.example.qrscannerapp.common.ui.AppBackground
@@ -39,7 +47,6 @@ import com.example.qrscannerapp.features.tasks.domain.model.TaskPriority
 import com.example.qrscannerapp.features.tasks.domain.model.TaskStatus
 import java.text.SimpleDateFormat
 import java.util.*
-
 private fun getAppVersionName(context: android.content.Context): String {
     return try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -840,46 +847,538 @@ private fun TaskSheetInfoRow(label: String, content: @Composable RowScope.() -> 
 fun SectionTitle(title: String, modifier: Modifier = Modifier) {
     Text(title, style = MaterialTheme.typography.titleMedium, color = StardustTextSecondary, modifier = modifier.padding(bottom = 12.dp))
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddEditEmployeeDialog(
-    initialName: String = "", initialUsername: String = "",
-    initialRole: UserRole = UserRole.MOVER, initialWarehouseId: String = "bestuzhevskaya_10",
-    isEditMode: Boolean = false, onDismiss: () -> Unit,
+    initialName: String = "",
+    initialUsername: String = "",
+    initialRole: UserRole = UserRole.MOVER,
+    initialWarehouseId: String = "bestuzhevskaya_10",
+    isEditMode: Boolean = false,
+    onDismiss: () -> Unit,
     onConfirm: (name: String, username: String, password: String, role: UserRole, warehouseId: String) -> Unit
 ) {
-    var name by remember { mutableStateOf(initialName) }
-    var username by remember { mutableStateOf(initialUsername) }
-    var password by remember { mutableStateOf("") }
-    val roles = UserRole.getSelectableRoles()
-    var selectedRole by remember { mutableStateOf(initialRole) }
-    var isRoleExpanded by remember { mutableStateOf(false) }
-    val warehouses = listOf("bestuzhevskaya_10" to "Бестужевская 10", "sklad_2" to "Склад 2", "sklad_3" to "Склад 3", "sklad_4" to "Склад 4")
+    var name        by remember { mutableStateOf(initialName) }
+    var username    by remember { mutableStateOf(initialUsername) }
+    var password    by remember { mutableStateOf("") }
+    var showPass    by remember { mutableStateOf(false) }
+    var selectedRole        by remember { mutableStateOf(initialRole) }
+    var isRoleExpanded      by remember { mutableStateOf(false) }
     var selectedWarehouseId by remember { mutableStateOf(initialWarehouseId) }
     var isWarehouseExpanded by remember { mutableStateOf(false) }
-    val selectedWarehouseName = warehouses.find { it.first == selectedWarehouseId }?.second ?: "Неизвестный склад"
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (isEditMode) "Редактировать сотрудника" else "Новый сотрудник", fontWeight = FontWeight.Bold, color = StardustTextPrimary) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Имя и Фамилия") }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg))
-                OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text(if (isEditMode) "Новый Логин (можно пусто)" else "Логин") }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg))
-                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text(if (isEditMode) "Новый Пароль (можно пусто)" else "Пароль") }, singleLine = true, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg))
-                ExposedDropdownMenuBox(expanded = isWarehouseExpanded, onExpandedChange = { isWarehouseExpanded = !isWarehouseExpanded }, modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(value = selectedWarehouseName, onValueChange = {}, readOnly = true, label = { Text("Склад") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isWarehouseExpanded) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg), modifier = Modifier.menuAnchor().fillMaxWidth())
-                    ExposedDropdownMenu(expanded = isWarehouseExpanded, onDismissRequest = { isWarehouseExpanded = false }, modifier = Modifier.background(StardustGlassBg)) { warehouses.forEach { (id, wName) -> DropdownMenuItem(text = { Text(wName, color = StardustTextPrimary) }, onClick = { selectedWarehouseId = id; isWarehouseExpanded = false }) } }
-                }
-                ExposedDropdownMenuBox(expanded = isRoleExpanded, onExpandedChange = { isRoleExpanded = !isRoleExpanded }, modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(value = selectedRole.displayName, onValueChange = {}, readOnly = true, label = { Text("Роль") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isRoleExpanded) }, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = StardustTextPrimary, unfocusedTextColor = StardustTextPrimary, focusedLabelColor = StardustPrimary, unfocusedLabelColor = StardustTextSecondary, focusedBorderColor = StardustPrimary, unfocusedBorderColor = StardustItemBg), modifier = Modifier.menuAnchor().fillMaxWidth())
-                    ExposedDropdownMenu(expanded = isRoleExpanded, onDismissRequest = { isRoleExpanded = false }, modifier = Modifier.background(StardustGlassBg)) { roles.forEach { role -> DropdownMenuItem(text = { Text(role.displayName, color = StardustTextPrimary) }, onClick = { selectedRole = role; isRoleExpanded = false }) } }
+    val roles = UserRole.getSelectableRoles()
+    val warehouses = listOf(
+        "bestuzhevskaya_10" to "Бестужевская 10",
+        "sklad_2"           to "Склад 2",
+        "sklad_3"           to "Склад 3",
+        "sklad_4"           to "Склад 4"
+    )
+    val selectedWarehouseName = warehouses.find { it.first == selectedWarehouseId }?.second ?: "—"
+
+    val canConfirm = if (isEditMode) name.isNotBlank()
+    else name.isNotBlank() && username.isNotBlank() && password.isNotBlank()
+
+    // ── Вход с анимацией ────────────────────────────────────────────────
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
+    val sheetScale by animateFloatAsState(
+        targetValue   = if (visible) 1f else 0.88f,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 400f),
+        label         = "dialog_scale"
+    )
+    val sheetAlpha by animateFloatAsState(
+        targetValue   = if (visible) 1f else 0f,
+        animationSpec = tween(220),
+        label         = "dialog_alpha"
+    )
+
+    fun handleDismiss() {
+        visible = false
+        onDismiss()
+    }
+
+    Dialog(
+        onDismissRequest = { handleDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.55f * sheetAlpha))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication        = null
+                ) { handleDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .wrapContentHeight()
+                    .graphicsLayer { scaleX = sheetScale; scaleY = sheetScale; alpha = sheetAlpha }
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFF1C1830), Color(0xFF12102A)),
+                            start  = Offset(0f, 0f),
+                            end    = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+                        )
+                    )
+                    .drawBehind {
+                        // тонкая линия сверху
+                        drawRect(
+                            color     = StardustPrimary.copy(alpha = 0.5f),
+                            topLeft   = Offset(size.width * 0.15f, 0f),
+                            size      = androidx.compose.ui.geometry.Size(size.width * 0.7f, 1.5.dp.toPx())
+                        )
+                    }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication        = null
+                    ) { /* блок закрытия */ }
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+
+                    // ── Хэндл ───────────────────────────────────────
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(36.dp).height(4.dp)
+                                .clip(CircleShape)
+                                .background(StardustTextSecondary.copy(alpha = 0.25f))
+                        )
+                    }
+
+                    // ── Заголовок ────────────────────────────────────
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 22.dp, vertical = 16.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(StardustPrimary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    if (isEditMode) Icons.Default.Edit else Icons.Default.PersonAdd,
+                                    null,
+                                    tint     = StardustPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                if (isEditMode) "Редактировать" else "Новый сотрудник",
+                                color      = StardustTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize   = 18.sp
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(StardustTextSecondary.copy(alpha = 0.1f))
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication        = null
+                                ) { handleDismiss() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Close, null, tint = StardustTextSecondary, modifier = Modifier.size(14.dp))
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color    = StardustTextSecondary.copy(alpha = 0.07f),
+                        modifier = Modifier.padding(horizontal = 22.dp)
+                    )
+
+                    // ── Поля ─────────────────────────────────────────
+                    Column(
+                        modifier              = Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
+                        verticalArrangement   = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Имя и Фамилия
+                        DialogField(
+                            value       = name,
+                            onChange    = { name = it },
+                            placeholder = "Имя и Фамилия",
+                            icon        = Icons.Default.Person
+                        )
+
+                        // Логин
+                        DialogField(
+                            value       = username,
+                            onChange    = { username = it },
+                            placeholder = if (isEditMode) "Новый логин (необязательно)" else "Логин",
+                            icon        = Icons.Default.AlternateEmail
+                        )
+
+                        // Пароль
+                        DialogField(
+                            value       = password,
+                            onChange    = { password = it },
+                            placeholder = if (isEditMode) "Новый пароль (необязательно)" else "Пароль",
+                            icon        = Icons.Default.Lock,
+                            isPassword  = true,
+                            showPassword = showPass,
+                            onTogglePassword = { showPass = !showPass }
+                        )
+
+                        // Склад
+                        DialogDropdown(
+                            label        = "Склад",
+                            value        = selectedWarehouseName,
+                            icon         = Icons.Default.Warehouse,
+                            expanded     = isWarehouseExpanded,
+                            onToggle     = { isWarehouseExpanded = !isWarehouseExpanded },
+                            onDismiss    = { isWarehouseExpanded = false }
+                        ) {
+                            warehouses.forEach { (id, wName) ->
+                                DropdownItem(
+                                    label     = wName,
+                                    selected  = selectedWarehouseId == id,
+                                    onClick   = { selectedWarehouseId = id; isWarehouseExpanded = false }
+                                )
+                            }
+                        }
+
+                        // Роль
+                        DialogDropdown(
+                            label     = "Роль",
+                            value     = selectedRole.displayName,
+                            icon      = Icons.Default.Badge,
+                            expanded  = isRoleExpanded,
+                            onToggle  = { isRoleExpanded = !isRoleExpanded },
+                            onDismiss = { isRoleExpanded = false }
+                        ) {
+                            roles.forEach { role ->
+                                DropdownItem(
+                                    label    = role.displayName,
+                                    selected = selectedRole == role,
+                                    onClick  = { selectedRole = role; isRoleExpanded = false }
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color    = StardustTextSecondary.copy(alpha = 0.07f),
+                        modifier = Modifier.padding(horizontal = 22.dp)
+                    )
+
+                    // ── Кнопки ────────────────────────────────────────
+                    Row(
+                        modifier              = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 22.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Отмена
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(StardustGlassBg)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication        = null
+                                ) { handleDismiss() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "Отмена",
+                                color      = StardustTextSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize   = 15.sp
+                            )
+                        }
+
+                        // Подтвердить
+                        val confirmAlpha by animateFloatAsState(
+                            targetValue   = if (canConfirm) 1f else 0.4f,
+                            animationSpec = tween(200),
+                            label         = "confirm_alpha"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1.6f)
+                                .height(50.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            StardustPrimary.copy(alpha = confirmAlpha),
+                                            StardustPrimary.copy(alpha = confirmAlpha * 0.75f)
+                                        )
+                                    )
+                                )
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication        = null,
+                                    enabled           = canConfirm
+                                ) {
+                                    if (canConfirm)
+                                        onConfirm(name, username, password, selectedRole, selectedWarehouseId)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment     = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    if (isEditMode) Icons.Default.Check else Icons.Default.PersonAdd,
+                                    null,
+                                    tint     = Color.White.copy(alpha = confirmAlpha),
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Text(
+                                    if (isEditMode) "Сохранить" else "Создать",
+                                    color      = Color.White.copy(alpha = confirmAlpha),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize   = 15.sp
+                                )
+                            }
+                        }
+                    }
                 }
             }
-        },
-        confirmButton = { Button(onClick = { if (isEditMode) { if (name.isNotBlank()) onConfirm(name, username, password, selectedRole, selectedWarehouseId) } else { if (name.isNotBlank() && username.isNotBlank() && password.isNotBlank()) onConfirm(name, username, password, selectedRole, selectedWarehouseId) } }, colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)) { Text(if (isEditMode) "Сохранить" else "Создать") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена", color = StardustTextSecondary) } },
-        containerColor = StardustModalBg, textContentColor = StardustTextPrimary, titleContentColor = StardustTextPrimary
+        }
+    }
+}
+
+// ============================================================================================
+// ПОЛЕ ВВОДА — iOS стиль
+// ============================================================================================
+
+@Composable
+private fun DialogField(
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String,
+    icon: ImageVector,
+    isPassword: Boolean = false,
+    showPassword: Boolean = false,
+    onTogglePassword: (() -> Unit)? = null
+) {
+    var focused by remember { mutableStateOf(false) }
+
+    val borderColor by animateColorAsState(
+        targetValue   = if (focused) StardustPrimary.copy(alpha = 0.7f) else Color.Transparent,
+        animationSpec = tween(200),
+        label         = "field_border"
     )
+    val iconColor by animateColorAsState(
+        targetValue   = if (focused) StardustPrimary else StardustTextSecondary.copy(alpha = 0.4f),
+        animationSpec = tween(200),
+        label         = "icon_color"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(StardustGlassBg)
+            .drawBehind {
+                if (focused) {
+                    drawRoundRect(
+                        color        = borderColor,
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx()),
+                        style        = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
+                    )
+                }
+            }
+    ) {
+        Row(
+            modifier          = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, tint = iconColor, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(10.dp))
+            androidx.compose.foundation.text.BasicTextField(
+                value         = value,
+                onValueChange = onChange,
+                singleLine    = true,
+                modifier      = Modifier
+                    .weight(1f)
+                    .onFocusChanged { focused = it.isFocused },
+                textStyle     = androidx.compose.ui.text.TextStyle(
+                    color    = StardustTextPrimary,
+                    fontSize = 15.sp
+                ),
+                visualTransformation = if (isPassword && !showPassword)
+                    androidx.compose.ui.text.input.PasswordVisualTransformation()
+                else
+                    androidx.compose.ui.text.input.VisualTransformation.None,
+                cursorBrush   = Brush.verticalGradient(listOf(StardustPrimary, StardustPrimary)),
+                decorationBox = { inner ->
+                    Box {
+                        if (value.isEmpty()) {
+                            Text(
+                                placeholder,
+                                color    = StardustTextSecondary.copy(alpha = 0.4f),
+                                fontSize = 15.sp
+                            )
+                        }
+                        inner()
+                    }
+                }
+            )
+            if (isPassword && onTogglePassword != null) {
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication        = null,
+                            onClick           = onTogglePassword
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        null,
+                        tint     = StardustTextSecondary.copy(alpha = 0.5f),
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================================
+// ДРОПДАУН — iOS стиль
+// ============================================================================================
+
+@Composable
+private fun DialogDropdown(
+    label: String,
+    value: String,
+    icon: ImageVector,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val arrowRotation by animateFloatAsState(
+        targetValue   = if (expanded) 180f else 0f,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 500f),
+        label         = "arrow"
+    )
+
+    Column {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(StardustGlassBg)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication        = null,
+                    onClick           = onToggle
+                )
+        ) {
+            Row(
+                modifier          = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    icon, null,
+                    tint     = if (expanded) StardustPrimary else StardustTextSecondary.copy(alpha = 0.4f),
+                    modifier = Modifier.size(17.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(label, color = StardustTextSecondary.copy(alpha = 0.5f), fontSize = 10.sp)
+                    Text(value, color = StardustTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Icon(
+                    Icons.Default.KeyboardArrowDown, null,
+                    tint     = StardustTextSecondary.copy(alpha = 0.5f),
+                    modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = arrowRotation }
+                )
+            }
+        }
+
+        // Раскрывающийся список
+        AnimatedVisibility(
+            visible = expanded,
+            enter   = fadeIn(tween(150)) + expandVertically(
+                animationSpec = spring(dampingRatio = 0.75f, stiffness = 400f)
+            ),
+            exit    = fadeOut(tween(100)) + shrinkVertically(tween(150))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF1A1830))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DropdownItem(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val bgAlpha by animateFloatAsState(
+        targetValue   = if (selected) 1f else 0f,
+        animationSpec = tween(150),
+        label         = "item_bg"
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(StardustPrimary.copy(alpha = bgAlpha * 0.12f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication        = null,
+                onClick           = onClick
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            label,
+            color      = if (selected) StardustPrimary else StardustTextPrimary,
+            fontSize   = 14.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+        )
+        if (selected) {
+            Icon(
+                Icons.Default.Check, null,
+                tint     = StardustPrimary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
 }

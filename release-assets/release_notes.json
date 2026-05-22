@@ -1,7 +1,7 @@
 {
-  "apkSize": "21.2 MB",
+  "apkSize": "61.2 MB",
   "minRequiredVersionCode": 45,
-  "minRequiredVersionName": "1.4.5",
+  "minRequiredVersionName": "1.5.0",
   "releaseItems": [
     {
       "type": "new",
@@ -13,11 +13,11 @@
     },
     {
       "type": "new",
-      "text": "Переработано меню,добавлено нижнее меню, Добавлен экспорт PDF"
+      "text": "Переработано всплывающие окна"
     },
     {
       "type": "beta",
-      "text": "Добавлен двишатель производетельности, за счет ресурсов самого приложения"
+      "text": "-"
     }
   ]
 }

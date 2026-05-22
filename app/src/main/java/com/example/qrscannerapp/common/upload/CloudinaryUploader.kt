@@ -1,4 +1,4 @@
-package com.example.qrscannerapp.features.chat.data
+package com.example.qrscannerapp.common.upload
 
 import android.content.Context
 import android.net.Uri
@@ -10,14 +10,21 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+
+enum class UploadFolder(val path: String) {
+    CHAT("qrscanner_chat"),
+    AVATAR("qrscanner_avatars"),
+    PARTS("qrscanner_parts"),
+    DELIVERY("qrscanner_delivery"),
+    VEHICLE("qrscanner_vehicles"),
+    REPAIR("qrscanner_repair")
+}
 
 @Singleton
 class CloudinaryUploader @Inject constructor() {
@@ -33,21 +40,13 @@ class CloudinaryUploader @Inject constructor() {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    /**
-     * Загружает фото по Uri и возвращает публичный URL или null при ошибке.
-     * Автоматически сжимает до 1200px и конвертирует в WebP для экономии трафика.
-     */
-    suspend fun uploadImage(context: Context, uri: Uri): String? {
+    suspend fun uploadImage(context: Context, uri: Uri, folder: UploadFolder = UploadFolder.CHAT): String? {
         return withContext(Dispatchers.IO) {
             try {
-                // Копируем Uri во временный файл
                 val tempFile = uriToTempFile(context, uri) ?: return@withContext null
 
                 val timestamp = (System.currentTimeMillis() / 1000).toString()
-                val folder = "qrscanner_chat"
-
-                // Подпись для authenticated upload
-                val signature = generateSignature(timestamp, folder)
+                val signature = generateSignature(timestamp, folder.path)
 
                 val requestBody = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
@@ -58,9 +57,7 @@ class CloudinaryUploader @Inject constructor() {
                     .addFormDataPart("api_key", apiKey)
                     .addFormDataPart("timestamp", timestamp)
                     .addFormDataPart("signature", signature)
-                    .addFormDataPart("folder", folder)
-                    // Автоматическая оптимизация — качество и формат подбираются Cloudinary
-                    // Трансформации применяем через URL после загрузки — не включаем в запрос
+                    .addFormDataPart("folder", folder.path)
                     .build()
 
                 val request = Request.Builder()
@@ -71,60 +68,43 @@ class CloudinaryUploader @Inject constructor() {
                 val response = client.newCall(request).execute()
                 val body = response.body?.string()
 
-                tempFile.delete() // Чистим временный файл
+                tempFile.delete()
 
                 if (response.isSuccessful && body != null) {
-                    val json = JSONObject(body)
-                    // Возвращаем secure_url — HTTPS ссылка на фото
+                    val json = org.json.JSONObject(body)
                     json.optString("secure_url").takeIf { it.isNotBlank() }
                 } else {
-                    Log.e("Cloudinary", "Upload failed: ${response.code} — $body")
+                    Log.e("CloudinaryUploader", "Upload failed: ${response.code} — $body")
                     null
                 }
             } catch (e: Exception) {
-                Log.e("Cloudinary", "Upload exception", e)
+                Log.e("CloudinaryUploader", "Upload exception", e)
                 null
             }
         }
     }
 
-    /**
-     * Генерирует подпись для authenticated upload.
-     * SHA-1 от строки параметров + apiSecret.
-     */
+    fun getThumbnailUrl(originalUrl: String): String {
+        return originalUrl.replace("/upload/", "/upload/w_400,c_limit,q_auto/")
+    }
+
     private fun generateSignature(timestamp: String, folder: String): String {
-        // Параметры строго в алфавитном порядке — только те что передаются в запросе
         val toSign = "folder=$folder&timestamp=$timestamp$apiSecret"
         val digest = MessageDigest.getInstance("SHA-1")
         val bytes = digest.digest(toSign.toByteArray(Charsets.UTF_8))
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    /**
-     * Копирует контент из Uri во временный файл.
-     * Нужно потому что OkHttp не умеет читать Uri напрямую.
-     */
     private fun uriToTempFile(context: Context, uri: Uri): File? {
         return try {
             val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-            val tempFile = File.createTempFile("chat_img_", ".jpg", context.cacheDir)
-            FileOutputStream(tempFile).use { output ->
-                inputStream.copyTo(output)
-            }
+            val tempFile = File.createTempFile("upload_", ".jpg", context.cacheDir)
+            FileOutputStream(tempFile).use { output -> inputStream.copyTo(output) }
             inputStream.close()
             tempFile
         } catch (e: Exception) {
-            Log.e("Cloudinary", "uriToTempFile failed", e)
+            Log.e("CloudinaryUploader", "uriToTempFile failed", e)
             null
         }
-    }
-
-    /**
-     * Возвращает thumbnail URL для превью в чате (400px).
-     * Просто добавляем трансформацию в URL — Cloudinary делает всё на лету.
-     */
-    fun getThumbnailUrl(originalUrl: String): String {
-        // Вставляем трансформацию перед /upload/
-        return originalUrl.replace("/upload/", "/upload/w_400,c_limit,q_auto/")
     }
 }

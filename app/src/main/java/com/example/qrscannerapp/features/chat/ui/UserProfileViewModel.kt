@@ -6,7 +6,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.qrscannerapp.AuthManager
-import com.example.qrscannerapp.features.chat.data.CloudinaryUploader
+import com.example.qrscannerapp.common.upload.CloudinaryUploader
+import com.example.qrscannerapp.common.upload.UploadFolder
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -92,7 +93,7 @@ class UserProfileViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val imageUrl = cloudinaryUploader.uploadImage(context, uri)
+                val imageUrl = cloudinaryUploader.uploadImage(context, uri, UploadFolder.AVATAR)
                 if (imageUrl == null) {
                     _uiState.update { it.copy(isUploadingAvatar = false, avatarUploadError = "Не удалось загрузить фото") }
                     return@launch

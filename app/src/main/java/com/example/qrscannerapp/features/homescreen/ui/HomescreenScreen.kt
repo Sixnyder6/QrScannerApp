@@ -60,6 +60,7 @@ import com.example.qrscannerapp.features.homescreen.ui.widgets.TasksWidget
 import com.example.qrscannerapp.features.homescreen.ui.widgets.TeamOnlineWidget
 import com.example.qrscannerapp.features.homescreen.ui.widgets.TodayStatsWidget
 import com.example.qrscannerapp.features.homescreen.ui.widgets.WeatherWidget
+import com.example.qrscannerapp.common.ui.ScreenShell
 import com.example.qrscannerapp.features.homescreen.ui.widgets.ProvideShimmerPhase
 import com.example.qrscannerapp.features.tasks.ui.viewmodel.MyTasksViewModel
 import dev.chrisbanes.haze.hazeSource
@@ -160,11 +161,14 @@ fun HomescreenScreen(
         }
     }
 
+    ScreenShell(
+        delayMs  = 200L,
+        skeleton = { Box(modifier = Modifier.fillMaxSize().background(HomescreenBg)) }
+    ) {
     ProvideShimmerPhase {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(HomescreenBg)
     ) {
         // ── ФОН: dot grid + vignette ──────────────────────────────────────────
         Box(
@@ -323,5 +327,6 @@ fun HomescreenScreen(
         }
     }
     } // ProvideShimmerPhase
+    } // ScreenShell
 
 }

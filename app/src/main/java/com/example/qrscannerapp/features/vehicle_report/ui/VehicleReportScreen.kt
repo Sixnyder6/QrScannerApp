@@ -39,6 +39,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 // ^-- КОНЕЦ ИЗМЕНЕНИЯ 1 из 2 --^
 import com.example.qrscannerapp.*
 import com.example.qrscannerapp.common.ui.AppBackground
+import com.example.qrscannerapp.common.ui.ScreenShell
 
 private data class StatInfo(
     val title: String,
@@ -85,6 +86,7 @@ fun VehicleReportScreen(
         )
     }
 
+    ScreenShell {
     AppBackground {
         Column(
             modifier = Modifier
@@ -139,6 +141,7 @@ fun VehicleReportScreen(
             }
         }
     }
+    } // ScreenShell
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

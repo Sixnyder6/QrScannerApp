@@ -3,6 +3,8 @@ package com.example.qrscannerapp.features.team.ui
 import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -16,7 +18,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -24,6 +31,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.qrscannerapp.*
 import com.example.qrscannerapp.common.ui.AppBackground
@@ -71,16 +80,311 @@ private data class DeviceTelemetry(
     val freeStorage: String = "",
     val deviceUptime: String = "",
     val deviceInfo: String = "",
-    val activeDeviceId: String = "", // [НОВОЕ] Добавлено поле
+    val activeDeviceId: String = "",
     val appVersion: String = "",
     val lastSeen: Long = 0L,
     val telemetryUpdatedAt: Long = 0L,
-    // GPS
     val locationLat: Double? = null,
     val locationLng: Double? = null,
     val locationTimestamp: Long = 0L,
     val isLoaded: Boolean = false
 )
+
+// ============================================================================================
+// WIDGET CARD — универсальная обёртка с раскрытием в модал
+// ============================================================================================
+
+@Composable
+private fun WidgetCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    previewContent: @Composable () -> Unit = {},
+    expandedContent: @Composable () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    // Анимации для карточки-виджета
+    val cardScale by animateFloatAsState(
+        targetValue = if (expanded) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 500f),
+        label = "card_scale"
+    )
+    val cardAlpha by animateFloatAsState(
+        targetValue = if (expanded) 0.7f else 1f,
+        animationSpec = tween(200),
+        label = "card_alpha"
+    )
+
+    // Виджет
+    Card(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = cardScale
+                scaleY = cardScale
+                alpha = cardAlpha
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { expanded = true },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            StardustGlassBg.copy(alpha = 0.95f),
+                            StardustGlassBg.copy(alpha = 0.85f)
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+                    )
+                )
+                .drawBehind {
+                    // Левая цветная полоска
+                    drawRect(
+                        color = accentColor,
+                        topLeft = Offset(0f, size.height * 0.2f),
+                        size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height * 0.6f)
+                    )
+                }
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(accentColor.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                icon, null,
+                                tint = accentColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                title,
+                                color = StardustTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            if (subtitle.isNotBlank()) {
+                                Text(
+                                    subtitle,
+                                    color = StardustTextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                    Icon(
+                        Icons.Default.KeyboardArrowRight,
+                        null,
+                        tint = accentColor.copy(alpha = 0.6f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                previewContent()
+            }
+        }
+    }
+
+    // Модальное раскрытие
+    if (expanded) {
+        ExpandedWidgetModal(
+            icon = icon,
+            title = title,
+            accentColor = accentColor,
+            onDismiss = { expanded = false },
+            content = expandedContent
+        )
+    }
+}
+
+// ============================================================================================
+// EXPANDED MODAL — iOS-стиль раскрытие
+// ============================================================================================
+
+@Composable
+private fun ExpandedWidgetModal(
+    icon: ImageVector,
+    title: String,
+    accentColor: Color,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
+    val backdropAlpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(300),
+        label = "backdrop"
+    )
+    val sheetOffsetY by animateFloatAsState(
+        targetValue = if (visible) 0f else 1f,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f),
+        label = "sheet_y"
+    )
+    val sheetScale by animateFloatAsState(
+        targetValue = if (visible) 1f else 0.88f,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f),
+        label = "sheet_scale"
+    )
+
+    fun handleDismiss() {
+        visible = false
+    }
+
+    // Следим за завершением анимации закрытия
+    val sheetOffsetYState by rememberUpdatedState(sheetOffsetY)
+    LaunchedEffect(visible) {
+        if (!visible) {
+            kotlinx.coroutines.delay(350)
+            onDismiss()
+        }
+    }
+
+    Dialog(
+        onDismissRequest = { handleDismiss() },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.6f * backdropAlpha))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { handleDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .wrapContentHeight()
+                    .graphicsLayer {
+                        scaleX = sheetScale
+                        scaleY = sheetScale
+                        translationY = (1f - (1f - sheetOffsetY)) * 200f
+                        alpha = 1f - sheetOffsetY * 0.8f
+                    }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { /* блокируем закрытие при клике внутрь */ }
+                    .shadow(32.dp, RoundedCornerShape(28.dp))
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFF1C1830),
+                                Color(0xFF12102A)
+                            ),
+                            start = Offset(0f, 0f),
+                            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+                        )
+                    )
+                    .drawBehind {
+                        // Тонкая цветная граница сверху
+                        drawRect(
+                            color = accentColor.copy(alpha = 0.6f),
+                            topLeft = Offset(size.width * 0.1f, 0f),
+                            size = androidx.compose.ui.geometry.Size(size.width * 0.8f, 1.5.dp.toPx())
+                        )
+                    }
+            ) {
+                Column {
+                    // Хэндл
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(40.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(StardustTextSecondary.copy(alpha = 0.3f))
+                        )
+                    }
+
+                    // Заголовок модала
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(accentColor.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(icon, null, tint = accentColor, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                title,
+                                color = StardustTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = { handleDismiss() },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(StardustTextSecondary.copy(alpha = 0.1f))
+                        ) {
+                            Icon(
+                                Icons.Default.Close, null,
+                                tint = StardustTextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color = StardustTextSecondary.copy(alpha = 0.08f),
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+
+                    // Контент
+                    Box(modifier = Modifier.padding(20.dp)) {
+                        content()
+                    }
+                }
+            }
+        }
+    }
+}
 
 // ============================================================================================
 // SCREEN
@@ -104,23 +408,16 @@ fun EmployeeDetailScreen(
     var telemetry by remember { mutableStateOf(DeviceTelemetry()) }
     var employeeShiftStartTime by remember { mutableStateOf(0L) }
 
-    // ── Realtime listeners: internal_users (lastSeen) + device_telemetry (телеметрия) ──
     DisposableEffect(userId) {
         val db = Firebase.firestore
         var currentLastSeen = 0L
-        var hasTelemetryDoc = false
 
-        // Listener 1: device_telemetry — основной источник телеметрийных полей
         val telemetryReg: ListenerRegistration = db
             .collection("device_telemetry")
             .document(userId)
             .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e("EmployeeDetail", "device_telemetry snapshot error", error)
-                    return@addSnapshotListener
-                }
+                if (error != null) { Log.e("EmployeeDetail", "device_telemetry error", error); return@addSnapshotListener }
                 if (snapshot != null && snapshot.exists()) {
-                    hasTelemetryDoc = true
                     telemetry = DeviceTelemetry(
                         batteryLevel = snapshot.getLong("lastBatteryLevel")?.toInt() ?: 0,
                         isCharging = snapshot.getBoolean("isCharging") ?: false,
@@ -142,18 +439,13 @@ fun EmployeeDetailScreen(
                         isLoaded = true
                     )
                 }
-                // Если документа нет — internal_users listener заполнит через fallback
             }
 
-        // Listener 2: internal_users — только lastSeen
         val internalReg: ListenerRegistration = db
             .collection("internal_users")
             .document(userId)
             .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e("EmployeeDetail", "internal_users snapshot error", error)
-                    return@addSnapshotListener
-                }
+                if (error != null) { Log.e("EmployeeDetail", "internal_users error", error); return@addSnapshotListener }
                 if (snapshot != null && snapshot.exists()) {
                     currentLastSeen = snapshot.getLong("lastSeen") ?: 0L
                     employeeShiftStartTime = snapshot.getLong("shiftStartTime") ?: 0L
@@ -161,14 +453,9 @@ fun EmployeeDetailScreen(
                 }
             }
 
-        onDispose {
-            telemetryReg.remove()
-            internalReg.remove()
-            Log.d("EmployeeDetail", "Both listeners removed for $userId")
-        }
+        onDispose { telemetryReg.remove(); internalReg.remove() }
     }
 
-    // ── Разовая загрузка статистики сканов ───────────────────────────────
     LaunchedEffect(userId) {
         val db = Firebase.firestore
         try {
@@ -231,16 +518,34 @@ fun EmployeeDetailScreen(
             containerColor = Color.Transparent,
             topBar = {
                 TopAppBar(
-                    title = { Text("Профиль") },
+                    windowInsets = WindowInsets(0),
+                    title = {
+                        Text(
+                            "Профиль",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(StardustTextSecondary.copy(alpha = 0.1f))
+                                .clickable { onBack() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack, "Назад",
+                                tint = StardustTextPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Black.copy(alpha = 0.3f),
-                        titleContentColor = StardustTextPrimary,
-                        navigationIconContentColor = StardustTextPrimary
+                        containerColor = Color.Transparent,
+                        titleContentColor = StardustTextPrimary
                     )
                 )
             }
@@ -252,10 +557,10 @@ fun EmployeeDetailScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(innerPadding),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // ШАПКА
+                    // ── ШАПКА ──
                     item {
                         val profile = profileState.userProfile
                         ProfileHeader(
@@ -264,106 +569,312 @@ fun EmployeeDetailScreen(
                             roleColor = roleColor,
                             isShiftActive = profile.isShiftActive
                         )
+                        Spacer(Modifier.height(8.dp))
                     }
 
-                    // МЕТРИКИ ЗА СЕГОДНЯ
+                    // ── МЕТРИКИ СЕГОДНЯ — виджет ──
                     item {
-                        SectionLabel("Сегодня")
                         val shiftDuration = if (profileState.userProfile.isShiftActive && employeeShiftStartTime > 0L)
                             TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - employeeShiftStartTime)
-                        else
-                            activitySummary.shiftDurationMinutes
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            MetricCard("Сканов", activitySummary.scansToday.toString(), Icons.Default.QrCodeScanner, Modifier.weight(1f))
-                            MetricCard("Партий", activitySummary.batchesToday.toString(), Icons.Default.Inventory, Modifier.weight(1f))
-                            MetricCard("Скан/час", activitySummary.scanRatePerHour.toString(), Icons.Default.Speed, Modifier.weight(1f))
-                            MetricCard("На смене", formatShiftDuration(shiftDuration), Icons.Default.Timer, Modifier.weight(1f))
+                        else activitySummary.shiftDurationMinutes
+
+                        WidgetCard(
+                            icon = Icons.Default.Today,
+                            title = "Сегодня",
+                            subtitle = "${activitySummary.scansToday} сканов · ${activitySummary.batchesToday} партий",
+                            accentColor = StardustPrimary,
+                            previewContent = {
+                                Spacer(Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly
+                                ) {
+                                    MiniMetric("Сканов", activitySummary.scansToday.toString(), Icons.Default.QrCodeScanner, StardustPrimary)
+                                    MiniMetric("Партий", activitySummary.batchesToday.toString(), Icons.Default.Inventory, Color(0xFF4CAF50))
+                                    MiniMetric("Скан/час", activitySummary.scanRatePerHour.toString(), Icons.Default.Speed, Color(0xFFFFCA28))
+                                    MiniMetric("Смена", formatShiftDuration(shiftDuration), Icons.Default.Timer, Color(0xFFFF7043))
+                                }
+                            }
+                        ) {
+                            // Expanded content
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    MetricCard("Сканов", activitySummary.scansToday.toString(), Icons.Default.QrCodeScanner, Modifier.weight(1f))
+                                    MetricCard("Партий", activitySummary.batchesToday.toString(), Icons.Default.Inventory, Modifier.weight(1f))
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    MetricCard("Скан/час", activitySummary.scanRatePerHour.toString(), Icons.Default.Speed, Modifier.weight(1f))
+                                    MetricCard("На смене", formatShiftDuration(shiftDuration), Icons.Default.Timer, Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
 
-                    // ГРАФИК ЗА НЕДЕЛЮ
+                    // ── АКТИВНОСТЬ ЗА НЕДЕЛЮ — виджет ──
                     if (activitySummary.weeklyScans.size == 7) {
                         item {
-                            SectionLabel("Активность за неделю")
-                            WeeklyChart(scans = activitySummary.weeklyScans)
+                            WidgetCard(
+                                icon = Icons.Default.BarChart,
+                                title = "Активность за неделю",
+                                subtitle = "${activitySummary.weeklyScans.sum()} сканов за 7 дней",
+                                accentColor = Color(0xFF4CAF50),
+                                previewContent = {
+                                    Spacer(Modifier.height(10.dp))
+                                    MiniWeekChart(scans = activitySummary.weeklyScans)
+                                }
+                            ) {
+                                WeeklyChart(scans = activitySummary.weeklyScans)
+                            }
                         }
                     }
 
-                    // СТАТИСТИКА ОПЕРАЦИЙ
+                    // ── СТАТИСТИКА ОПЕРАЦИЙ — виджет ──
                     item {
-                        InteractionStatsCard(
-                            stats = profileState.interactionStats,
-                            isLoading = profileState.isStatsLoading
-                        )
+                        WidgetCard(
+                            icon = Icons.Default.Analytics,
+                            title = "Активность операций",
+                            subtitle = "Статистика взаимодействий",
+                            accentColor = Color(0xFFAB47BC)
+                        ) {
+                            InteractionStatsCard(
+                                stats = profileState.interactionStats,
+                                isLoading = profileState.isStatsLoading
+                            )
+                        }
                     }
 
-                    // ПРОИЗВОДИТЕЛЬНОСТЬ
+                    // ── ПРОИЗВОДИТЕЛЬНОСТЬ — виджет ──
                     item {
-                        DevicePerformanceCard(details = profileState.performanceDetails)
+                        WidgetCard(
+                            icon = Icons.Default.Speed,
+                            title = "Производительность",
+                            subtitle = "Характеристики устройства",
+                            accentColor = Color(0xFFFFCA28)
+                        ) {
+                            DevicePerformanceCard(details = profileState.performanceDetails)
+                        }
                     }
 
-                    // УСТРОЙСТВО + GPS — только для администраторов
+                    // ── УСТРОЙСТВО + GPS — только для администраторов ──
                     if (isAdmin && telemetry.isLoaded) {
                         item {
-                            SectionLabel("Устройство")
-                            LiveDeviceCard(telemetry = telemetry)
+                            val now = System.currentTimeMillis()
+                            val isOnline = telemetry.lastSeen > 0L && (now - telemetry.lastSeen) < 3 * 60 * 1000L
+                            val statusText = if (isOnline) "Онлайн" else {
+                                val mins = TimeUnit.MILLISECONDS.toMinutes(now - telemetry.lastSeen)
+                                when {
+                                    mins < 60 -> "$mins мин. назад"
+                                    mins < 1440 -> "${mins / 60} ч. назад"
+                                    else -> "${mins / 1440} дн. назад"
+                                }
+                            }
+
+                            val displayDevice = remember(telemetry.activeDeviceId, telemetry.deviceInfo) {
+                                if (telemetry.activeDeviceId.isNotBlank() && telemetry.activeDeviceId.contains("_")) {
+                                    telemetry.activeDeviceId.split("_").dropLast(1).joinToString(" ")
+                                } else if (telemetry.activeDeviceId.isNotBlank()) {
+                                    telemetry.activeDeviceId
+                                } else {
+                                    telemetry.deviceInfo
+                                }
+                            }
+
+                            WidgetCard(
+                                icon = Icons.Default.PhoneAndroid,
+                                title = "Устройство",
+                                subtitle = statusText,
+                                accentColor = if (isOnline) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                                previewContent = {
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        // Статус-точка
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            val infiniteTransition = rememberInfiniteTransition(label = "pulse2")
+                                            val pulseAlpha by infiniteTransition.animateFloat(
+                                                1f, if (isOnline) 0.3f else 1f,
+                                                infiniteRepeatable(tween(900), RepeatMode.Reverse), "p2"
+                                            )
+                                            Box(modifier = Modifier.size(8.dp).clip(CircleShape)
+                                                .background((if (isOnline) Color(0xFF4CAF50) else Color(0xFFFF5252)).copy(alpha = pulseAlpha)))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                if (isOnline) "Онлайн" else "Оффлайн",
+                                                color = if (isOnline) Color(0xFF4CAF50) else Color(0xFFFF5252),
+                                                fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                        // Батарея
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Default.BatteryStd, null,
+                                                tint = when {
+                                                    telemetry.batteryLevel > 50 -> Color(0xFF4CAF50)
+                                                    telemetry.batteryLevel > 20 -> Color(0xFFFFCA28)
+                                                    else -> Color(0xFFFF5252)
+                                                },
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                "${telemetry.batteryLevel}%",
+                                                color = StardustTextPrimary,
+                                                fontSize = 12.sp, fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        if (telemetry.appVersion.isNotBlank()) {
+                                            Text(
+                                                "v${telemetry.appVersion}",
+                                                color = StardustTextSecondary,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            ) {
+                                LiveDeviceCardContent(telemetry = telemetry)
+                            }
                         }
 
+                        // GPS виджет
                         val hasLocation = telemetry.locationLat != null && telemetry.locationLng != null
                         val locationFresh = hasLocation &&
                                 (System.currentTimeMillis() - telemetry.locationTimestamp) < 15 * 60 * 1000L
 
                         if (locationFresh) {
                             item {
-                                SectionLabel("Местоположение")
-                                LocationCard(
-                                    lat = telemetry.locationLat!!,
-                                    lng = telemetry.locationLng!!,
-                                    locationTimestamp = telemetry.locationTimestamp,
-                                    roleColor = roleColor,
-                                    employeeName = profileState.userProfile.name.takeIf { it != "Загрузка..." } ?: userName
+                                val minutesAgo = TimeUnit.MILLISECONDS.toMinutes(
+                                    System.currentTimeMillis() - telemetry.locationTimestamp
+                                )
+                                val timeText = when {
+                                    minutesAgo < 1 -> "только что"
+                                    minutesAgo < 60 -> "$minutesAgo мин. назад"
+                                    else -> "${minutesAgo / 60} ч. назад"
+                                }
+                                WidgetCard(
+                                    icon = Icons.Default.LocationOn,
+                                    title = "Местоположение",
+                                    subtitle = timeText,
+                                    accentColor = roleColor
+                                ) {
+                                    LocationCardContent(
+                                        lat = telemetry.locationLat!!,
+                                        lng = telemetry.locationLng!!,
+                                        locationTimestamp = telemetry.locationTimestamp,
+                                        roleColor = roleColor,
+                                        employeeName = profileState.userProfile.name.takeIf { it != "Загрузка..." } ?: userName
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ── ПУЛЬТ АДМИНА — виджет ──
+                    if (isAdmin) {
+                        item {
+                            WidgetCard(
+                                icon = Icons.Default.AdminPanelSettings,
+                                title = "Управление доступом",
+                                subtitle = if (profileState.userProfile.isShiftActive) "Смена активна" else "Смена завершена",
+                                accentColor = Color(0xFFEC407A)
+                            ) {
+                                AdminControlCard(
+                                    profile = profileState.userProfile,
+                                    onForceEndShift = { profileViewModel.forceEndShift() },
+                                    onSetWorkAccess = { isAllowed -> profileViewModel.setWorkAccess(isAllowed) }
                                 )
                             }
                         }
                     }
 
-                    // ПУЛЬТ АДМИНА — только для администраторов
-                    if (isAdmin) {
-                        item {
-                            AdminControlCard(
-                                profile = profileState.userProfile,
-                                onForceEndShift = { profileViewModel.forceEndShift() },
-                                onSetWorkAccess = { isAllowed -> profileViewModel.setWorkAccess(isAllowed) }
-                            )
-                        }
-                    }
-
-                    // ДЕЙСТВИЯ
+                    // ── КНОПКИ ДЕЙСТВИЙ ──
                     item {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(
-                                onClick = onWriteDm,
-                                modifier = Modifier.weight(1f).height(50.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Кнопка "Написать" — главная
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(54.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(
+                                                StardustPrimary,
+                                                StardustPrimary.copy(red = StardustPrimary.red * 0.8f)
+                                            )
+                                        )
+                                    )
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { onWriteDm() },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.Chat, null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Написать", fontWeight = FontWeight.Bold)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Chat, null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "Написать",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                }
                             }
-                            OutlinedButton(
-                                onClick = onEdit,
-                                modifier = Modifier.weight(1f).height(50.dp),
-                                shape = RoundedCornerShape(12.dp)
+
+                            // Кнопка "Редактировать" — вторичная
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(54.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(StardustGlassBg)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { onEdit() },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Edit, null, tint = StardustTextSecondary, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Редактировать", color = StardustTextSecondary)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.Edit, null,
+                                        tint = StardustTextSecondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        "Редактировать",
+                                        color = StardustTextSecondary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 15.sp
+                                    )
+                                }
                             }
                         }
+                        Spacer(Modifier.height(32.dp))
                     }
-
-                    item { Spacer(modifier = Modifier.height(24.dp)) }
                 }
             }
         }
@@ -371,147 +882,63 @@ fun EmployeeDetailScreen(
 }
 
 // ============================================================================================
-// КАРТА С ПОЗИЦИЕЙ СОТРУДНИКА
+// МИНИ-ПРЕВЬЮ ВИДЖЕТОВ
 // ============================================================================================
 
 @Composable
-private fun LocationCard(
-    lat: Double,
-    lng: Double,
-    locationTimestamp: Long,
-    roleColor: Color,
-    employeeName: String
-) {
-    val context = LocalContext.current
-    val minutesAgo = TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - locationTimestamp)
-    val timeText = when {
-        minutesAgo < 1 -> "только что"
-        minutesAgo < 60 -> "$minutesAgo мин. назад"
-        else -> "${minutesAgo / 60} ч. назад"
+private fun MiniMetric(label: String, value: String, icon: ImageVector, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.height(2.dp))
+        Text(value, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text(label, color = StardustTextSecondary, fontSize = 9.sp)
     }
+}
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
+@Composable
+private fun MiniWeekChart(scans: List<Int>) {
+    val maxScans = scans.maxOrNull()?.takeIf { it > 0 } ?: 1
+    Row(
+        modifier = Modifier.fillMaxWidth().height(32.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.Bottom
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+        scans.forEachIndexed { index, count ->
+            val fraction = count.toFloat() / maxScans
+            val isToday = index == 6
+            Box(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                contentAlignment = Alignment.BottomCenter
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = roleColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        "Последняя позиция",
-                        color = StardustTextPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
+                Box(
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight()
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(StardustPrimary.copy(alpha = 0.08f))
+                )
+                if (fraction > 0f) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().fillMaxHeight(fraction)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(
+                                if (isToday) StardustPrimary
+                                else Color(0xFF4CAF50).copy(alpha = 0.7f)
+                            )
                     )
                 }
-                Text(timeText, color = StardustTextSecondary, fontSize = 12.sp)
-            }
-
-            AndroidView(
-                factory = { ctx ->
-                    MapView(ctx).apply {
-                        onCreate(null)
-                        onResume()
-                        getMapAsync { map ->
-                            setupMap(map, lat, lng, roleColor, employeeName)
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
-            )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    "%.5f, %.5f".format(lat, lng),
-                    color = StardustTextSecondary,
-                    fontSize = 11.sp
-                )
             }
         }
     }
 }
 
-private fun setupMap(map: GoogleMap, lat: Double, lng: Double, roleColor: Color, name: String) {
-    val position = LatLng(lat, lng)
-    try {
-        map.setMapStyle(
-            MapStyleOptions("""
-                [{"elementType":"geometry","stylers":[{"color":"#1d2c4d"}]},
-                 {"elementType":"labels.text.fill","stylers":[{"color":"#8ec3b9"}]},
-                 {"elementType":"labels.text.stroke","stylers":[{"color":"#1a3646"}]},
-                 {"featureType":"road","elementType":"geometry","stylers":[{"color":"#304a7d"}]},
-                 {"featureType":"water","elementType":"geometry","stylers":[{"color":"#0e1626"}]}]
-            """.trimIndent())
-        )
-    } catch (_: Exception) {}
-
-    map.uiSettings.apply {
-        isScrollGesturesEnabled = false
-        isZoomGesturesEnabled = false
-        isRotateGesturesEnabled = false
-        isTiltGesturesEnabled = false
-        isMapToolbarEnabled = false
-        isZoomControlsEnabled = false
-    }
-
-    map.addCircle(
-        CircleOptions()
-            .center(position)
-            .radius(50.0)
-            .fillColor(android.graphics.Color.argb(40,
-                (roleColor.red * 255).toInt(),
-                (roleColor.green * 255).toInt(),
-                (roleColor.blue * 255).toInt()
-            ))
-            .strokeColor(android.graphics.Color.argb(120,
-                (roleColor.red * 255).toInt(),
-                (roleColor.green * 255).toInt(),
-                (roleColor.blue * 255).toInt()
-            ))
-            .strokeWidth(2f)
-    )
-
-    map.addMarker(
-        MarkerOptions()
-            .position(position)
-            .title(name)
-            .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE))
-    )
-
-    map.moveCamera(CameraUpdateFactory.newLatLngZoom(position, 15f))
-}
-
 // ============================================================================================
-// КАРТОЧКА УСТРОЙСТВА (realtime)
+// КОНТЕНТ ДЛЯ EXPANDED МОДАЛОВ
 // ============================================================================================
 
 @Composable
-private fun LiveDeviceCard(telemetry: DeviceTelemetry) {
+private fun LiveDeviceCardContent(telemetry: DeviceTelemetry) {
     val now = System.currentTimeMillis()
     val isOnline = telemetry.lastSeen > 0L && (now - telemetry.lastSeen) < 3 * 60 * 1000L
 
-    // [НОВОЕ] Логика очистки имени устройства
     val displayDevice = remember(telemetry.activeDeviceId, telemetry.deviceInfo) {
         if (telemetry.activeDeviceId.isNotBlank() && telemetry.activeDeviceId.contains("_")) {
             telemetry.activeDeviceId.split("_").dropLast(1).joinToString(" ")
@@ -522,142 +949,159 @@ private fun LiveDeviceCard(telemetry: DeviceTelemetry) {
         }
     }
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Онлайн-статус
-            if (telemetry.lastSeen > 0L) {
-                val minutesAgo = TimeUnit.MILLISECONDS.toMinutes(now - telemetry.lastSeen)
-                val pingText = when {
-                    minutesAgo < 1 -> "только что"
-                    minutesAgo < 60 -> "$minutesAgo мин. назад"
-                    minutesAgo < 1440 -> "${minutesAgo / 60} ч. назад"
-                    else -> "${minutesAgo / 1440} дн. назад"
-                }
-                val pingColor = when {
-                    isOnline -> StardustSuccess
-                    minutesAgo < 30 -> StardustWarning
-                    else -> StardustError
-                }
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                    val pulseAlpha by infiniteTransition.animateFloat(
-                        initialValue = 1f, targetValue = if (isOnline) 0.3f else 1f,
-                        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-                        label = "pulse_alpha"
-                    )
-                    Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(pingColor.copy(alpha = pulseAlpha)))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        if (isOnline) "Онлайн" else "Оффлайн",
-                        color = pingColor, fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp, modifier = Modifier.weight(1f)
-                    )
-                    Text(pingText, color = StardustTextSecondary, fontSize = 12.sp)
-                }
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (telemetry.lastSeen > 0L) {
+            val minutesAgo = TimeUnit.MILLISECONDS.toMinutes(now - telemetry.lastSeen)
+            val pingText = when {
+                minutesAgo < 1 -> "только что"
+                minutesAgo < 60 -> "$minutesAgo мин. назад"
+                minutesAgo < 1440 -> "${minutesAgo / 60} ч. назад"
+                else -> "${minutesAgo / 1440} дн. назад"
             }
-
-            if (telemetry.appVersion.isNotBlank()) {
-                DeviceRow("Версия", "v${telemetry.appVersion}", Icons.Default.PhoneAndroid, StardustSuccess)
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
+            val pingColor = when {
+                isOnline -> Color(0xFF4CAF50)
+                minutesAgo < 30 -> Color(0xFFFFCA28)
+                else -> Color(0xFFFF5252)
             }
-
-            // [ИЗМЕНЕНО] Используем чистое название iPhone
-            if (displayDevice.isNotBlank() && displayDevice != "Created by Admin") {
-                DeviceRow("Устройство", displayDevice, Icons.Default.Smartphone)
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                val pulseAlpha by infiniteTransition.animateFloat(
+                    1f, if (isOnline) 0.3f else 1f,
+                    infiniteRepeatable(tween(900), RepeatMode.Reverse), "pulse_alpha"
+                )
+                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(pingColor.copy(alpha = pulseAlpha)))
+                Spacer(Modifier.width(8.dp))
+                Text(if (isOnline) "Онлайн" else "Оффлайн", color = pingColor, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text(pingText, color = StardustTextSecondary, fontSize = 12.sp)
             }
-
-            val batteryColor = when {
-                telemetry.isCharging -> StardustSuccess
-                telemetry.batteryLevel > 50 -> StardustSuccess
-                telemetry.batteryLevel > 20 -> StardustWarning
-                else -> StardustError
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+        }
+        if (telemetry.appVersion.isNotBlank()) {
+            DeviceRow("Версия", "v${telemetry.appVersion}", Icons.Default.PhoneAndroid, Color(0xFF4CAF50))
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+        }
+        if (displayDevice.isNotBlank() && displayDevice != "Created by Admin") {
+            DeviceRow("Устройство", displayDevice, Icons.Default.Smartphone)
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+        }
+        val batteryColor = when {
+            telemetry.isCharging -> Color(0xFF4CAF50)
+            telemetry.batteryLevel > 50 -> Color(0xFF4CAF50)
+            telemetry.batteryLevel > 20 -> Color(0xFFFFCA28)
+            else -> Color(0xFFFF5252)
+        }
+        DeviceRow("Батарея", "${telemetry.batteryLevel}%${if (telemetry.isCharging) " (зарядка)" else ""}", Icons.Default.BatteryStd, batteryColor)
+        if (telemetry.batteryHealth.isNotBlank() && telemetry.batteryHealth != "N/A") {
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+            DeviceRow("Здоровье батареи", telemetry.batteryHealth, Icons.Default.Thermostat)
+        }
+        HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+        DeviceRow("Энергосбережение", if (telemetry.isPowerSaveMode) "Включено" else "Выключено", Icons.Default.EnergySavingsLeaf,
+            if (telemetry.isPowerSaveMode) Color(0xFFFFCA28) else StardustTextPrimary)
+        HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+        val netIcon = when {
+            telemetry.networkState.contains("WiFi") -> Icons.Default.Wifi
+            telemetry.networkState.contains("Cellular") -> Icons.Default.SignalCellularAlt
+            else -> Icons.Default.WifiOff
+        }
+        DeviceRow("Сеть", telemetry.networkState, netIcon, if (telemetry.networkState == "Offline") Color(0xFFFF5252) else StardustTextPrimary)
+        if (telemetry.networkPing.isNotBlank() && telemetry.networkPing != "N/A") {
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+            DeviceRow("Пинг", telemetry.networkPing, Icons.Default.Speed)
+        }
+        if (telemetry.freeRam.isNotBlank() && telemetry.freeRam != "N/A") {
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+            DeviceRow("RAM (свободно)", telemetry.freeRam, Icons.Default.Memory)
+        }
+        if (telemetry.freeStorage.isNotBlank() && telemetry.freeStorage != "N/A") {
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+            DeviceRow("Память (свободно)", telemetry.freeStorage, Icons.Default.Storage)
+        }
+        if (telemetry.deviceUptime.isNotBlank() && telemetry.deviceUptime != "N/A") {
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+            DeviceRow("Uptime", telemetry.deviceUptime, Icons.Default.Update)
+        }
+        if (telemetry.telemetryUpdatedAt > 0L) {
+            HorizontalDivider(color = StardustTextSecondary.copy(alpha = 0.1f))
+            val minsSinceUpdate = TimeUnit.MILLISECONDS.toMinutes(now - telemetry.telemetryUpdatedAt)
+            val updatedText = when {
+                minsSinceUpdate < 1 -> "только что"
+                minsSinceUpdate < 60 -> "$minsSinceUpdate мин. назад"
+                minsSinceUpdate < 1440 -> "${minsSinceUpdate / 60} ч. назад"
+                else -> "${minsSinceUpdate / 1440} дн. назад"
             }
-            DeviceRow(
-                "Батарея",
-                "${telemetry.batteryLevel}%${if (telemetry.isCharging) " (зарядка)" else ""}",
-                Icons.Default.BatteryStd, batteryColor
-            )
-
-            if (telemetry.batteryHealth.isNotBlank() && telemetry.batteryHealth != "N/A") {
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
-                DeviceRow("Здоровье батареи", telemetry.batteryHealth, Icons.Default.Thermostat)
+            val freshColor = when {
+                minsSinceUpdate < 5 -> Color(0xFF4CAF50)
+                minsSinceUpdate < 15 -> Color(0xFFFFCA28)
+                else -> Color(0xFFFF5252)
             }
-
-            HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
-            DeviceRow(
-                "Энергосбережение",
-                if (telemetry.isPowerSaveMode) "Включено" else "Выключено",
-                Icons.Default.EnergySavingsLeaf,
-                if (telemetry.isPowerSaveMode) StardustWarning else StardustTextPrimary
-            )
-
-            HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
-            val netIcon = when {
-                telemetry.networkState.contains("WiFi") -> Icons.Default.Wifi
-                telemetry.networkState.contains("Cellular") -> Icons.Default.SignalCellularAlt
-                else -> Icons.Default.WifiOff
-            }
-            DeviceRow(
-                "Сеть", telemetry.networkState, netIcon,
-                if (telemetry.networkState == "Offline") StardustError else StardustTextPrimary
-            )
-
-            if (telemetry.networkPing.isNotBlank() && telemetry.networkPing != "N/A") {
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
-                DeviceRow("Пинг", telemetry.networkPing, Icons.Default.Speed)
-            }
-
-            if (telemetry.freeRam.isNotBlank() && telemetry.freeRam != "N/A") {
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
-                DeviceRow("RAM (свободно)", telemetry.freeRam, Icons.Default.Memory)
-            }
-
-            if (telemetry.freeStorage.isNotBlank() && telemetry.freeStorage != "N/A") {
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
-                DeviceRow("Память (свободно)", telemetry.freeStorage, Icons.Default.Storage)
-            }
-
-            if (telemetry.deviceUptime.isNotBlank() && telemetry.deviceUptime != "N/A") {
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
-                DeviceRow("Uptime", telemetry.deviceUptime, Icons.Default.Update)
-            }
-
-            if (telemetry.telemetryUpdatedAt > 0L) {
-                HorizontalDivider(color = StardustItemBg.copy(alpha = 0.5f))
-                val minsSinceUpdate = TimeUnit.MILLISECONDS.toMinutes(now - telemetry.telemetryUpdatedAt)
-                val updatedText = when {
-                    minsSinceUpdate < 1 -> "только что"
-                    minsSinceUpdate < 60 -> "$minsSinceUpdate мин. назад"
-                    minsSinceUpdate < 1440 -> "${minsSinceUpdate / 60} ч. назад"
-                    else -> "${minsSinceUpdate / 1440} дн. назад"
-                }
-                val freshColor = when {
-                    minsSinceUpdate < 5 -> StardustSuccess
-                    minsSinceUpdate < 15 -> StardustWarning
-                    else -> StardustError
-                }
-                DeviceRow("Данные обновлены", updatedText, Icons.Default.Sync, freshColor)
-            }
+            DeviceRow("Данные обновлены", updatedText, Icons.Default.Sync, freshColor)
         }
     }
 }
 
 @Composable
-private fun DeviceRow(label: String, value: String, icon: ImageVector, valueColor: Color = StardustTextPrimary) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = StardustTextSecondary.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(10.dp))
-        Text(label, color = StardustTextSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+private fun LocationCardContent(
+    lat: Double,
+    lng: Double,
+    locationTimestamp: Long,
+    roleColor: Color,
+    employeeName: String
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        AndroidView(
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    onCreate(null)
+                    onResume()
+                    getMapAsync { map -> setupMap(map, lat, lng, roleColor, employeeName) }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp)
+                .clip(RoundedCornerShape(16.dp))
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.LocationOn, null, tint = roleColor, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("%.5f, %.5f".format(lat, lng), color = StardustTextSecondary, fontSize = 11.sp)
+        }
     }
+}
+
+// ============================================================================================
+// КАРТА
+// ============================================================================================
+
+private fun setupMap(map: GoogleMap, lat: Double, lng: Double, roleColor: Color, name: String) {
+    val position = LatLng(lat, lng)
+    try {
+        map.setMapStyle(MapStyleOptions("""
+            [{"elementType":"geometry","stylers":[{"color":"#1d2c4d"}]},
+             {"elementType":"labels.text.fill","stylers":[{"color":"#8ec3b9"}]},
+             {"elementType":"labels.text.stroke","stylers":[{"color":"#1a3646"}]},
+             {"featureType":"road","elementType":"geometry","stylers":[{"color":"#304a7d"}]},
+             {"featureType":"water","elementType":"geometry","stylers":[{"color":"#0e1626"}]}]
+        """.trimIndent()))
+    } catch (_: Exception) {}
+
+    map.uiSettings.apply {
+        isScrollGesturesEnabled = false; isZoomGesturesEnabled = false
+        isRotateGesturesEnabled = false; isTiltGesturesEnabled = false
+        isMapToolbarEnabled = false; isZoomControlsEnabled = false
+    }
+    map.addCircle(CircleOptions().center(position).radius(50.0)
+        .fillColor(android.graphics.Color.argb(40, (roleColor.red*255).toInt(), (roleColor.green*255).toInt(), (roleColor.blue*255).toInt()))
+        .strokeColor(android.graphics.Color.argb(120, (roleColor.red*255).toInt(), (roleColor.green*255).toInt(), (roleColor.blue*255).toInt()))
+        .strokeWidth(2f))
+    map.addMarker(MarkerOptions().position(position).title(name)
+        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)))
+    map.moveCamera(CameraUpdateFactory.newLatLngZoom(position, 15f))
 }
 
 // ============================================================================================
@@ -666,64 +1110,117 @@ private fun DeviceRow(label: String, value: String, icon: ImageVector, valueColo
 
 @Composable
 private fun ProfileHeader(name: String, role: String, roleColor: Color, isShiftActive: Boolean) {
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(modifier = Modifier.size(80.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        roleColor.copy(alpha = 0.15f),
+                        roleColor.copy(alpha = 0.05f)
+                    )
+                )
+            )
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(modifier = Modifier.size(88.dp)) {
             val initials = name.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercase() }.joinToString("")
             Box(
-                modifier = Modifier.size(80.dp).clip(CircleShape).background(roleColor.copy(alpha = 0.15f)),
+                modifier = Modifier
+                    .size(88.dp)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(roleColor.copy(alpha = 0.3f), roleColor.copy(alpha = 0.08f))
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(initials, color = roleColor, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+                Text(initials, color = roleColor, fontWeight = FontWeight.Bold, fontSize = 32.sp)
             }
             Box(
-                modifier = Modifier.align(Alignment.BottomEnd).size(20.dp)
-                    .clip(CircleShape).background(StardustSolidBg)
-                    .padding(3.dp).clip(CircleShape)
-                    .background(if (isShiftActive) Color(0xFF4CAF50) else Color.Gray)
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF0D0D1A))
+                    .padding(3.dp)
+                    .clip(CircleShape)
+                    .background(if (isShiftActive) Color(0xFF4CAF50) else Color(0xFF555566))
             )
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(name, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Spacer(modifier = Modifier.height(6.dp))
-        Surface(color = roleColor.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
-            Text(
-                role, color = roleColor,
-                fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-            )
-        }
-        if (isShiftActive) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text("Сейчас на смене", color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(14.dp))
+        Text(name, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                color = roleColor.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    role, color = roleColor,
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                )
+            }
+            if (isShiftActive) {
+                Surface(
+                    color = Color(0xFF4CAF50).copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier.size(6.dp).clip(CircleShape)
+                                .background(Color(0xFF4CAF50))
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text("На смене", color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
     }
 }
 
 // ============================================================================================
-// МЕТРИКА
+// МЕТРИКА (для expanded)
 // ============================================================================================
 
 @Composable
 private fun MetricCard(label: String, value: String, icon: ImageVector, modifier: Modifier = Modifier) {
-    Card(modifier = modifier, shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = StardustGlassBg)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, null, tint = StardustPrimary.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(value, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text(label, color = StardustTextSecondary, fontSize = 10.sp)
+    Box(
+        modifier = modifier
+            .height(90.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(StardustTextSecondary.copy(alpha = 0.07f))
+            .padding(12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, null, tint = StardustPrimary.copy(alpha = 0.8f), modifier = Modifier.size(22.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(value, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Text(label, color = StardustTextSecondary, fontSize = 11.sp)
         }
     }
 }
 
 // ============================================================================================
-// ГРАФИК НЕДЕЛИ
+// ГРАФИК НЕДЕЛИ (для expanded)
 // ============================================================================================
 
 @Composable
 private fun WeeklyChart(scans: List<Int>) {
     if (scans.size < 7) return
     val maxScans = scans.maxOrNull()?.takeIf { it > 0 } ?: 1
-    // dayIndex=0 — 6 дней назад, dayIndex=6 — сегодня
     val dayNames = remember {
         val dayMap = mapOf(
             Calendar.MONDAY to "Пн", Calendar.TUESDAY to "Вт", Calendar.WEDNESDAY to "Ср",
@@ -741,29 +1238,26 @@ private fun WeeklyChart(scans: List<Int>) {
     val progress by animProgress.asState()
     val peakIndex = scans.indexOf(scans.max())
 
-    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = StardustGlassBg)) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            val weekTotal = scans.sum()
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Всего за неделю", color = StardustTextSecondary, fontSize = 12.sp)
-                Text("$weekTotal сканов", color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth().height(100.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
-                scans.forEachIndexed { index, count ->
-                    val fraction = (count.toFloat() / maxScans) * progress
-                    Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                        if (count > 0) { Text(count.toString(), color = StardustTextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Medium); Spacer(modifier = Modifier.height(2.dp)) }
-                        Box(modifier = Modifier.fillMaxWidth().height(70.dp), contentAlignment = Alignment.BottomCenter) {
-                            Box(modifier = Modifier.fillMaxWidth().fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(StardustPrimary.copy(alpha = 0.1f)))
-                            if (fraction > 0f) {
-                                Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(fraction).clip(RoundedCornerShape(4.dp))
-                                    .background(if (index == peakIndex) StardustPrimary else StardustPrimary.copy(alpha = 0.6f)))
-                            }
+    Column {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Всего за неделю", color = StardustTextSecondary, fontSize = 12.sp)
+            Text("${scans.sum()} сканов", color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(modifier = Modifier.fillMaxWidth().height(100.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
+            scans.forEachIndexed { index, count ->
+                val fraction = (count.toFloat() / maxScans) * progress
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
+                    if (count > 0) { Text(count.toString(), color = StardustTextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Medium); Spacer(Modifier.height(2.dp)) }
+                    Box(modifier = Modifier.fillMaxWidth().height(70.dp), contentAlignment = Alignment.BottomCenter) {
+                        Box(modifier = Modifier.fillMaxWidth().fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(StardustPrimary.copy(alpha = 0.1f)))
+                        if (fraction > 0f) {
+                            Box(modifier = Modifier.fillMaxWidth().fillMaxHeight(fraction).clip(RoundedCornerShape(4.dp))
+                                .background(if (index == peakIndex) StardustPrimary else Color(0xFF4CAF50).copy(alpha = 0.7f)))
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(dayNames[index], color = StardustTextSecondary, fontSize = 10.sp, textAlign = TextAlign.Center)
                     }
+                    Spacer(Modifier.height(4.dp))
+                    Text(dayNames[index], color = StardustTextSecondary, fontSize = 10.sp, textAlign = TextAlign.Center)
                 }
             }
         }
@@ -771,14 +1265,22 @@ private fun WeeklyChart(scans: List<Int>) {
 }
 
 // ============================================================================================
-// УТИЛИТЫ
+// DEVICE ROW
 // ============================================================================================
 
 @Composable
-private fun SectionLabel(text: String) {
-    Text(text.uppercase(), color = StardustTextSecondary.copy(alpha = 0.6f), fontSize = 11.sp,
-        fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.padding(bottom = 4.dp))
+private fun DeviceRow(label: String, value: String, icon: ImageVector, valueColor: Color = StardustTextPrimary) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = StardustTextSecondary.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(label, color = StardustTextSecondary, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
 }
+
+// ============================================================================================
+// УТИЛИТЫ
+// ============================================================================================
 
 private fun formatShiftDuration(minutes: Long): String {
     return if (minutes <= 0) "—"

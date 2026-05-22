@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.qrscannerapp.DialogAnimation
 import com.example.qrscannerapp.SettingsManager
+import com.example.qrscannerapp.common.ui.Spyder3000Engine
+import com.example.qrscannerapp.common.ui.SpyderConfig
+import com.example.qrscannerapp.common.ui.SpyderPerformanceProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.view.Choreographer
 import kotlin.coroutines.resume
@@ -146,6 +149,15 @@ class SpyderSettingsViewModel @Inject constructor(
                 frameTimeMs = _uiState.value.currentFrameTime
             )
         }
+    }
+
+    val animConfig: StateFlow<SpyderConfig> = spyderEngine.userConfig
+
+    // renderConfig — что движок реально применяет (userConfig + тепловые поправки)
+    val renderConfig: StateFlow<SpyderConfig> = spyderEngine.renderConfig
+
+    fun updateAnimConfig(config: SpyderConfig) {
+        spyderEngine.updateUserConfig(config)
     }
 
     fun setPerformanceProfile(profile: SpyderPerformanceProfile) {

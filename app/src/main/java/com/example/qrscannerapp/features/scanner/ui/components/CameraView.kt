@@ -14,9 +14,6 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -29,8 +26,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -48,7 +43,6 @@ import com.example.qrscannerapp.StardustSuccess
 import com.example.qrscannerapp.StardustTextPrimary
 import com.example.qrscannerapp.StardustTextSecondary
 import com.example.qrscannerapp.StardustWarning
-import com.example.qrscannerapp.common.ui.ScannerBeam
 import com.example.qrscannerapp.common.ui.SuccessBurst
 import com.example.qrscannerapp.core.model.ScanEvent
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
@@ -57,7 +51,6 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -87,24 +80,9 @@ fun CameraView(
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     DisposableEffect(Unit) { onDispose { cameraExecutor.shutdown() } }
 
-    var borderColorTarget by remember { mutableStateOf(Color.White.copy(alpha = 0.8f)) }
-    var scaleTarget by remember { mutableStateOf(1f) }
-    val targetBorderColor = if (isSearchMode) StardustWarning else borderColorTarget
-
-    val borderColor by animateColorAsState(targetValue = targetBorderColor, animationSpec = tween(400), label = "BorderColor")
-    val scale by animateFloatAsState(targetValue = scaleTarget, animationSpec = tween(200), label = "BorderScale")
-
     LaunchedEffect(Unit) {
         scanEventFlow.collect { event ->
-            launch {
-                val (color, newScale) = when (event) {
-                    ScanEvent.Success -> { successBurstTrigger = !successBurstTrigger; StardustSuccess to 1.05f }
-                    ScanEvent.Duplicate -> StardustError to 1.05f
-                }
-                borderColorTarget = color; scaleTarget = newScale
-                delay(250)
-                borderColorTarget = Color.White.copy(alpha = 0.8f); scaleTarget = 1f
-            }
+            if (event == ScanEvent.Success) successBurstTrigger = !successBurstTrigger
         }
     }
 
@@ -132,6 +110,7 @@ fun CameraView(
             AndroidView(
                 factory = { ctx ->
                     val previewView = PreviewView(ctx)
+                    previewView.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                     previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
                     val scaleGestureDetector = ScaleGestureDetector(ctx,
                         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -193,18 +172,8 @@ fun CameraView(
                 }
             }
 
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
-
             Box(
-                modifier = Modifier.size(240.dp).align(Alignment.Center).scale(scale)
-                    .border(3.dp, borderColor, RoundedCornerShape(24.dp))
-                    .clip(RoundedCornerShape(24.dp))
-            ) {
-                ScannerBeam(modifier = Modifier.fillMaxSize(), color = StardustPrimary, isActive = !isSearchMode)
-            }
-
-            Box(
-                modifier = Modifier.size(240.dp).align(Alignment.Center),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 SuccessBurst(trigger = successBurstTrigger, modifier = Modifier.size(240.dp), color = StardustSuccess)
