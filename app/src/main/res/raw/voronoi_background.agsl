@@ -7,11 +7,14 @@ uniform float3 glowColor;
 uniform float pulseStrength;
 
 half2 hash2(float2 p) {
-    p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
-    return fract(sin(p) * 43758.5453);
+    return fract(sin(float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)))) * 43758.5453);
 }
+
 half voronoi(float2 x, float time, float breathingPhase) {
-    float2 n = floor(x); float2 f = fract(x); float m = 8.0;
+    float2 n = floor(x);
+    float2 f = fract(x);
+    float m = 8.0;
+
     for(int j = -1; j <= 1; j++) {
         for(int i = -1; i <= 1; i++) {
             float2 g = float2(float(i), float(j));
@@ -19,27 +22,38 @@ half voronoi(float2 x, float time, float breathingPhase) {
             float2 offset = 0.5 + 0.5 * sin(time + 6.2831 * o);
             float2 r = g + offset - f;
             float d = length(r);
-            d *= 1.0 - (0.2 * breathingPhase);
+            d *= 1.0 - 0.2 * breathingPhase;
             if(d < m) m = d;
         }
     }
     return half(m);
 }
+
 half4 main(float2 fragCoord) {
     float2 uv = fragCoord.xy / iResolution.xy;
     float2 p = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
+
     float breath = sin(iTime * breathRate) * 0.5 + 0.5;
-    p *= 1.0 - (0.05 * breath);
-    half v1 = voronoi(p * cellDensity, iTime * 0.2, breath);
-    half v2 = voronoi((p * cellDensity * 2.0) + 5.0, iTime * 0.3, breath);
-    half organicPattern = smoothstep(0.0, 1.2, v1 * v1 + v2 * 0.5);
+    p *= 1.0 - 0.05 * breath;
+
+    // Один слой Voronoi (было два)
+    half v1 = voronoi(p * cellDensity, iTime * 0.25, breath);
+
+    // Органический паттерн — clamp вместо smoothstep
+    half organicPattern = clamp(v1 * v1 * 1.2, 0.0, 1.0);
+
+    // Свечение — x³ через умножение
     half light = 1.0 - organicPattern;
-    light = pow(light, 3.0);
-    light *= 1.0 + (pulseStrength * breath);
-    float3 col = tissueColor;
-    col = mix(col, glowColor, light);
-    col += glowColor * 0.2 * smoothstep(0.0, 0.5, light) * (1.0 - light);
-    float vig = 1.0 - length(uv - 0.5) * 0.8;
+    light = light * light * light;
+    light *= 1.0 + pulseStrength * breath;
+
+    // Цвет
+    float3 col = mix(tissueColor, glowColor, clamp(light, 0.0, 1.0));
+    col += glowColor * 0.15 * clamp(light * (1.0 - light) * 2.0, 0.0, 1.0);
+
+    // Виньет
+    float vig = 1.0 - length(uv - 0.5) * 0.75;
     col *= vig;
+
     return half4(col, 1.0);
 }

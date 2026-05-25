@@ -13,27 +13,23 @@ half hash(float2 p) {
     return fract(p.x * p.y * (p.x + p.y));
 }
 
-half noise(float2 x) {
-    float2 i = floor(x);
-    float2 f = fract(x);
-    float a = hash(i);
-    float b = hash(i + float2(1.0, 0.0));
-    float c = hash(i + float2(0.0, 1.0));
-    float d = hash(i + float2(1.0, 1.0));
-    float2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-// 3 октавы вместо 5 — экономия 40% на каждом вызове
+// 2 октавы, noise встроен
 half fbm(float2 p) {
-    half v = 0.0;
-    half a = 0.5;
     float2 shift = float2(100.0, 60.0);
     mat2 rot = mat2(cos(0.4), sin(0.4), -sin(0.4), cos(0.4));
-    v += a * noise(p); p = rot * p * 2.0 + shift; a *= 0.5;
-    v += a * noise(p); p = rot * p * 2.0 - shift; a *= 0.5;
-    v += a * noise(p);
-    return v;
+
+    float2 i = floor(p); float2 f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    half n1 = mix(mix(hash(i), hash(i + float2(1.0, 0.0)), u.x),
+                  mix(hash(i + float2(0.0, 1.0)), hash(i + float2(1.0, 1.0)), u.x), u.y);
+
+    p = rot * p * 2.0 + shift;
+    i = floor(p); f = fract(p);
+    u = f * f * (3.0 - 2.0 * f);
+    half n2 = mix(mix(hash(i), hash(i + float2(1.0, 0.0)), u.x),
+                  mix(hash(i + float2(0.0, 1.0)), hash(i + float2(1.0, 1.0)), u.x), u.y);
+
+    return 0.55 * n1 + 0.3 * n2;
 }
 
 half4 main(float2 fragCoord) {
@@ -41,24 +37,23 @@ half4 main(float2 fragCoord) {
     float2 p = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
     float t = iTime * flowSpeed;
 
-    // 4 fbm вместо 9 (убран gradient normal map — 4 вызова)
+    // 3 fbm вместо 4
     float horizontalFolds = fbm(float2(p.x * 3.5 + 0.2 * t, p.y * 1.8 + 0.05 * t));
     float verticalDrape   = fbm(float2(p.x * 1.2 + 0.1 * t, p.y * 2.5 - 0.35 * t));
 
-    // Один warp float вместо float2 из двух отдельных fbm
-    float warp = fbm(p * 1.5 + float2(0.08 * t, -0.12 * t) + horizontalFolds * 0.3);
-    float microDetail = fbm(p * 2.8 + warp * complexity);
+    float foldDepth = horizontalFolds * 0.45 + verticalDrape * 0.45;
 
-    float foldDepth = horizontalFolds * 0.4 + verticalDrape * 0.45 + microDetail * 0.15;
+    // Блики — clamp вместо smoothstep, x³ через умножение
+    float hilight = clamp((foldDepth - 0.25) / 0.65, 0.0, 1.0);
+    hilight = hilight * hilight * hilight * 0.7;
 
-    // Блики по высоте складки — без gradient/normal map
-    half hilight = pow(smoothstep(0.3, 0.9, foldDepth), 3.0) * 0.75;
-
-    float3 col = mix(deepFoldColor, silkBaseColor, smoothstep(0.0, 0.55, foldDepth));
+    // Цвет — clamp вместо smoothstep
+    float3 col = mix(deepFoldColor, silkBaseColor, clamp(foldDepth / 0.55, 0.0, 1.0));
     col = mix(col, highlightColor, hilight);
-    col += silkBaseColor * 0.08 * (1.0 - foldDepth);
+    col += silkBaseColor * 0.07 * (1.0 - clamp(foldDepth, 0.0, 1.0));
 
-    float vig = 1.0 - length(uv - 0.5) * 0.4;
+    // Виньет
+    float vig = 1.0 - length(uv - 0.5) * 0.38;
     col *= vig * brightness;
 
     return half4(col, 1.0);

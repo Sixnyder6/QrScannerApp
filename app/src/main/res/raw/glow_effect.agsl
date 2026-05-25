@@ -1,28 +1,24 @@
 uniform float2 iResolution;
-uniform float  iTime;
-uniform float  u_alpha;   // 0..0.22, spring-driven from CPU
+uniform float iTime;
+uniform float u_alpha;
 uniform float3 u_color;
 
 half4 main(float2 fragCoord) {
     float2 uv = fragCoord / iResolution;
-    float2 center = float2(0.5, 0.5);
+    float2 p = uv - float2(0.5, 0.5);
 
-    // Correct for non-square sizes so glow stays circular
-    float aspect = iResolution.x / iResolution.y;
-    float2 p = uv - center;
-    p.x *= aspect;
-    float dist = length(p);
+    // Коррекция аспекта одним умножением
+    float dist = length(float2(p.x * (iResolution.x / iResolution.y), p.y));
 
-    // Two-layer radial bloom: tight core + wide soft halo
-    float r = 0.28;
-    float core  = exp(-dist * dist / (r * r * 0.12));
-    float bloom = exp(-dist * dist / (r * r * 0.55));
+    // Константы заранее посчитаны: r=0.28, r²=0.0784
+    // core: exp(-dist² / 0.0094)  →  exp(-dist² * 106.38)
+    // bloom: exp(-dist² / 0.043) →  exp(-dist² * 23.26)
+    float d2 = dist * dist;
+    float core  = exp(-d2 * 106.38);
+    float bloom = exp(-d2 * 23.26);
 
-    // Subtle GPU-side breathing — CPU controls on/off via u_alpha
     float breath = 1.0 + 0.07 * sin(iTime * 1.5);
-    float intensity = (core * 0.65 + bloom * 0.35) * breath;
+    float intensity = (core * 0.65 + bloom * 0.35) * breath * u_alpha;
 
-    // Premultiplied RGBA output
-    float a = intensity * u_alpha;
-    return half4(half3(u_color) * a, a);
+    return half4(half3(u_color) * intensity, intensity);
 }

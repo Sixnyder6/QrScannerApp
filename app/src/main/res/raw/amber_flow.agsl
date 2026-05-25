@@ -7,40 +7,36 @@ uniform float3 midColor;
 uniform float3 glowColor;
 uniform float brightness;
 
+// --- Хеш-функция (оставил как было, она лёгкая) ---
 half hash(float2 p) {
     p = fract(p * 0.3183099 + float2(0.1, 0.7));
     p *= 23.0;
     return fract(p.x * p.y * (p.x + p.y));
 }
 
-half noise(float2 x) {
-    float2 i = floor(x);
-    float2 f = fract(x);
-    float a = hash(i);
-    float b = hash(i + float2(1.0, 0.0));
-    float c = hash(i + float2(0.0, 1.0));
-    float d = hash(i + float2(1.0, 1.0));
-    float2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-// 3 октавы вместо 4 — экономия 25% на каждом вызове
+// --- 2 октавы вместо 3 ---
 half fbm(float2 p) {
     half v = 0.0;
-    half a = 0.55;
+    half a = 0.6;
     float2 shift = float2(70.0, 30.0);
     mat2 rot = mat2(cos(0.6), sin(0.6), -sin(0.6), cos(0.6));
-    v += a * noise(p); p = rot * p * 2.2 + shift; a *= 0.5;
-    v += a * noise(p); p = rot * p * 2.2 - shift; a *= 0.5;
-    v += a * noise(p);
-    return v;
-}
 
-half ridgeNoise(float2 p) {
-    half n = fbm(p);
-    n = abs(n - 0.5) * 2.0;
-    n = 1.0 - n;
-    return n * n;
+    // Октава 1
+    float2 i = floor(p); float2 f = fract(p);
+    float2 u = f * f * (3.0 - 2.0 * f);
+    half n1 = mix(mix(hash(i), hash(i + float2(1.0, 0.0)), u.x),
+                  mix(hash(i + float2(0.0, 1.0)), hash(i + float2(1.0, 1.0)), u.x), u.y);
+    v += a * n1;
+
+    // Октава 2
+    p = rot * p * 2.2 + shift; a *= 0.5;
+    i = floor(p); f = fract(p);
+    u = f * f * (3.0 - 2.0 * f);
+    half n2 = mix(mix(hash(i), hash(i + float2(1.0, 0.0)), u.x),
+                  mix(hash(i + float2(0.0, 1.0)), hash(i + float2(1.0, 1.0)), u.x), u.y);
+    v += a * n2;
+
+    return v;
 }
 
 half4 main(float2 fragCoord) {
@@ -48,27 +44,35 @@ half4 main(float2 fragCoord) {
     float2 p = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
     float t = iTime * flowSpeed;
 
+    // --- Один уровень domain warp (было два) ---
     float2 q = float2(
         fbm(p + float2(0.2 * t, 0.1 * t)),
-        fbm(p + float2(-0.1 * t, 0.25 * t))
-    );
-    float2 r = float2(
-        fbm(p + complexity * q + float2(0.35 * t, 0.15 * t) + float2(5.1, 2.7)),
-        fbm(p + complexity * q + float2(0.15 * t, 0.3 * t) - float2(2.3, 6.8))
+        fbm(p + float2(-0.1 * t, 0.25 * t) + float2(5.1, 2.7))
     );
 
-    float f = fbm(p + complexity * 1.6 * r);
-    float ridges = ridgeNoise(p * 2.5 + r * 0.7 + 0.1 * t);
+    // --- Основной шум от warped координат ---
+    float f = fbm(p + complexity * 1.8 * q);
 
-    float3 col = mix(baseColor, midColor, smoothstep(0.0, 0.5, f));
-    float ridgeMask = smoothstep(0.3, 0.7, f);
-    col = mix(col, glowColor, ridges * ridgeMask * 0.7);
+    // --- Ridges из того же fbm, не отдельный fbm ---
+    float ridges = 1.0 - abs(f - 0.5) * 2.0;
+    ridges = ridges * ridges;  // x² вместо pow
 
-    float hotspots = smoothstep(0.7, 0.85, f);
-    col = mix(col, glowColor * 1.5, hotspots * 0.6);
-    col += glowColor * 0.12 * smoothstep(0.5, 0.75, f) * (1.0 - f);
+    // --- Цвет: линейный mix вместо smoothstep ---
+    float3 col = mix(baseColor, midColor, clamp(f * 1.6, 0.0, 1.0));
 
-    float vig = 1.0 - length(uv - 0.5) * 0.55;
+    // Прожилки из ridges
+    float ridgeMask = clamp(f * 2.0 - 0.2, 0.0, 1.0);
+    col = mix(col, glowColor, ridges * ridgeMask * 0.65);
+
+    // Горячие точки — clamp вместо smoothstep
+    float hotspots = clamp((f - 0.55) * 3.0, 0.0, 1.0);
+    col = mix(col, glowColor * 1.4, hotspots * 0.5);
+
+    // Лёгкое свечение на переходах
+    col += glowColor * 0.1 * clamp((f - 0.4) * 2.0, 0.0, 1.0) * (1.0 - clamp(f * 1.5, 0.0, 1.0));
+
+    // Виньет
+    float vig = 1.0 - length(uv - 0.5) * 0.5;
     col *= vig * brightness;
 
     return half4(col, 1.0);
