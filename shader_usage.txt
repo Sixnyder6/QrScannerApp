@@ -1,0 +1,90 @@
+﻿
+app\src\main\java\com\example\qrscannerapp\AccountScreen.kt:53:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\AccountScreen.kt:119:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\AccountScreen.kt:140:    } // AppBackground
+app\src\main\java\com\example\qrscannerapp\AdminRepairLogScreen.kt:32:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\AdminRepairLogScreen.kt:63:    // Архитектура уже корректна. AppBackground является корневым элементом.
+app\src\main\java\com\example\qrscannerapp\AdminRepairLogScreen.kt:64:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\DashboardScreen.kt:42:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\DashboardScreen.kt:112:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\HistoryScreen.kt:37:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\HistoryScreen.kt:50:    // V-- НАЧАЛО ИЗМЕНЕНИЙ: ИНТЕГРАЦИЯ APPBACKGROUND --V
+app\src\main\java\com\example\qrscannerapp\HistoryScreen.kt:51:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\HistoryScreen.kt:149:        AppBackground {
+app\src\main\java\com\example\qrscannerapp\LoadingScreen.kt:30:import com.example.qrscannerapp.common.ui.AppBackground // V-- НОВЫЙ ИМПОРТ --V
+app\src\main\java\com\example\qrscannerapp\LoadingScreen.kt:34:    // V-- НАЧАЛО ИЗМЕНЕНИЙ: ИНТЕГРАЦИЯ APPBACKGROUND --V
+app\src\main\java\com\example\qrscannerapp\LoadingScreen.kt:37:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\LoadingScreen.kt:38:        // Добавляем Box для центрирования контента, так как AppBackground отвечает только за ф
+он.
+app\src\main\java\com\example\qrscannerapp\MainApp.kt:31:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\MainApp.kt:307:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\common\ui\AlertsManager.kt:24: * Добавь в MainApp.kt внутри AppBackground { Box { ... } } рядом с
+app\src\main\java\com\example\qrscannerapp\common\ui\AppBackground.kt:34:private const val TAG = "AppBackground"
+app\src\main\java\com\example\qrscannerapp\common\ui\AppBackground.kt:299:fun AppBackground(
+app\src\main\java\com\example\qrscannerapp\common\ui\AppBackground.kt:325:    // Передаём frameCount через callback, который будет вызываться из ShaderBackgro
+undWithQuality
+app\src\main\java\com\example\qrscannerapp\common\ui\AppBackground.kt:327:        ShaderBackgroundWithQualityAndFps(
+app\src\main\java\com\example\qrscannerapp\common\ui\AppBackground.kt:351:private fun ShaderBackgroundWithQualityAndFps(
+app\src\main\java\com\example\qrscannerapp\common\ui\AppBackgroundViewModel.kt:1:// Файл: common/ui/AppBackgroundViewModel.kt
+app\src\main\java\com\example\qrscannerapp\common\ui\AppBackgroundViewModel.kt:11: * Специализированная ViewModel-прослойка для AppBackground.
+app\src\main\java\com\example\qrscannerapp\common\ui\AppBackgroundViewModel.kt:16:class AppBackgroundViewModel @Inject constructor(
+app\src\main\java\com\example\qrscannerapp\common\ui\Spyder3000Engine.kt:19:// Живёт в common/ui рядом с TransitionEngine и AppBackground.
+app\src\main\java\com\example\qrscannerapp\features\delivery\ui\DeliveryScreens.kt:51:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\delivery\ui\DeliveryScreens.kt:69:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\delivery\ui\DeliveryScreens.kt:230:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\delivery\ui\DeliveryScreens.kt:424:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\ElectricianMainScreen.kt:22:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\ElectricianMainScreen.kt:55:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\ElectricianProfileScreen.kt:40:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\ElectricianProfileScreen.kt:51:    // Архитектура уже корректна. AppBackground является кор
+невым элементом,
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\ElectricianProfileScreen.kt:53:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\repair\ElectricianHistoryScreen.kt:32:import com.example.qrscannerapp.common.ui.AppBackgrou
+nd
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\repair\ElectricianHistoryScreen.kt:46:    // Архитектура уже корректна. AppBackground являе
+тся корневым элементом.
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\repair\ElectricianHistoryScreen.kt:47:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\electrician\ui\repair\RepairScreen.kt:489:    // V-- АРХИТЕКТУРНОЕ ИЗМЕНЕНИЕ: AppBackground здесь не нужен
+, так как он предоставляется
+app\src\main\java\com\example\qrscannerapp\features\homescreen\ui\widgets\Shaderwidgetbackground.kt:16: * Использует тот же AGSL-код что и AppBackground (nebu
+la_background),
+app\src\main\java\com\example\qrscannerapp\features\inventory\ui\distribution\PalletDistributionScreen.kt:64:import com.example.qrscannerapp.common.ui.AppBack
+ground
+app\src\main\java\com\example\qrscannerapp\features\inventory\ui\distribution\PalletDistributionScreen.kt:167:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\inventory\ui\storage\StorageScreen.kt:96:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\inventory\ui\storage\StorageScreen.kt:218:        AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\profile\ui\EmployeeProfileScreen.kt:26:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\profile\ui\EmployeeProfileScreen.kt:65:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\street_doctor\ui\StreetDoctorHost.kt:45:        com.example.qrscannerapp.common.ui.AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\street_doctor\ui\StreetDoctorHost.kt:71:        com.example.qrscannerapp.common.ui.AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\street_doctor\ui\StreetDoctorHost.kt:105:        com.example.qrscannerapp.common.ui.AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\street_doctor\ui\StreetDoctorHost.kt:186:        com.example.qrscannerapp.common.ui.AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\tasks\ui\MyTasksScreen.kt:34:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\tasks\ui\MyTasksScreen.kt:83:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\tasks\ui\MyTasksScreen.kt:671:        AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\tasks\ui\MyTasksScreen.kt:689:        AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\tasks\ui\MyTasksScreen.kt:700:        AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\tasks\ui\creation\TaskCreationScreen.kt:29:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\tasks\ui\creation\TaskCreationScreen.kt:65:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\team\ui\EmployeeDetailScreen.kt:38:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\team\ui\EmployeeDetailScreen.kt:516:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\team\ui\TeamScreen.kt:38:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\team\ui\TeamScreen.kt:154:        AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportAnalyticsScreen.kt:25:import com.example.qrscannerapp.common.ui.AppBackgrou
+nd
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportAnalyticsScreen.kt:33:    // V-- НАЧАЛО ИЗМЕНЕНИЙ: ИНТЕГРАЦИЯ APPBACKGROUND
+ --V
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportAnalyticsScreen.kt:34:    // 1. AppBackground вызывается без модификаторов,
+ чтобы он занял весь экран.
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportAnalyticsScreen.kt:35:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportAnalyticsScreen.kt:107:    // Preview теперь использует AppBackground прави
+льно: отступы применяются к контенту внутри.
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportAnalyticsScreen.kt:108:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportHistoryScreen.kt:33:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportHistoryScreen.kt:131:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportHistoryScreen.kt:339:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportScreen.kt:41:import com.example.qrscannerapp.common.ui.AppBackground
+app\src\main\java\com\example\qrscannerapp\features\vehicle_report\ui\VehicleReportScreen.kt:90:    AppBackground {
+app\src\main\java\com\example\qrscannerapp\ui\theme\Theme.kt:31:    background = Color(0xFF0A0A0F),       // Почти чёрный, как AppBackground
+
+

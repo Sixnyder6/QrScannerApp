@@ -29,6 +29,15 @@ class ShiftRepository @Inject constructor(
 
     private val workManager = WorkManager.getInstance(context)
 
+    // ── Memory cache для истории смен (чтобы не дёргать Firestore каждый раз) ──
+    private var cachedShifts: MutableMap<String, List<Shift>> = mutableMapOf() // userId -> shifts
+    private var cachedShiftTimes: MutableMap<String, Long> = mutableMapOf()    // userId -> last fetch time
+    private val cacheTtlMs = 30_000L // 30 секунд
+
+    // ── Cache для activeShiftId ──
+    private var cachedActiveShiftIds: MutableMap<String, String?> = mutableMapOf()
+    private var cachedActiveShiftIdTimes: MutableMap<String, Long> = mutableMapOf()
+
     // ============================================================================================
     // НАЧАЛО СМЕНЫ
     // ============================================================================================
@@ -72,6 +81,9 @@ class ShiftRepository @Inject constructor(
 
             // 3. Ставим таймер автозавершения через WorkManager
             scheduleAutoEnd(newShiftId, userId)
+
+            // 4. Инвалидируем кеш (изменился статус)
+            invalidateCache()
 
             Log.d(TAG, "Shift started successfully! ID: $newShiftId")
             Result.success(Unit)
@@ -148,6 +160,9 @@ class ShiftRepository @Inject constructor(
                 // Только если завершаем свою смену
                 authManager.endShiftLocally()
             }
+
+            // 5. Инвалидируем кеш (изменился статус)
+            invalidateCache()
 
             Log.d(TAG, "Shift ended: $activeShiftId (reason: $reason, duration: ${durationMinutes}min)")
             Result.success(Unit)
@@ -254,13 +269,23 @@ class ShiftRepository @Inject constructor(
     // ============================================================================================
 
     private suspend fun findActiveShiftId(userId: String): String? {
+        // Проверяем memory cache
+        val now = System.currentTimeMillis()
+        val lastFetch = cachedActiveShiftIdTimes[userId] ?: 0L
+        if (cachedActiveShiftIds.containsKey(userId) && (now - lastFetch) < cacheTtlMs) {
+            return cachedActiveShiftIds[userId]
+        }
+
         return try {
             val userDoc = firestore.collection("internal_users")
                 .document(userId).get().await()
-            userDoc.getString("activeShiftId")
+            val result = userDoc.getString("activeShiftId")
+            cachedActiveShiftIds[userId] = result
+            cachedActiveShiftIdTimes[userId] = System.currentTimeMillis()
+            result
         } catch (e: Exception) {
             Log.e(TAG, "Error finding active shift for $userId", e)
-            null
+            cachedActiveShiftIds[userId] // возвращаем старый кеш если есть
         }
     }
 
@@ -277,8 +302,16 @@ class ShiftRepository @Inject constructor(
 
     /**
      * Получает историю последних смен пользователя.
+     * Использует memory cache (30s TTL) чтобы не дёргать Firestore при частых запросах.
      */
     suspend fun getUserShifts(userId: String, limitCount: Long = 30): Result<List<Shift>> {
+        // Проверяем memory cache
+        val now = System.currentTimeMillis()
+        val lastFetch = cachedShiftTimes[userId] ?: 0L
+        if (cachedShifts.containsKey(userId) && (now - lastFetch) < cacheTtlMs) {
+            return Result.success(cachedShifts[userId]!!)
+        }
+
         return try {
             val snapshot = firestore.collection("shifts")
                 .whereEqualTo("userId", userId)
@@ -288,10 +321,22 @@ class ShiftRepository @Inject constructor(
                 .await()
 
             val shifts = snapshot.toObjects(Shift::class.java)
+            cachedShifts[userId] = shifts
+            cachedShiftTimes[userId] = System.currentTimeMillis()
             Result.success(shifts)
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching shifts for user: $userId", e)
+            // Возвращаем кеш если он есть, иначе ошибку
+            cachedShifts[userId]?.let { return Result.success(it) }
             Result.failure(e)
         }
+    }
+
+    // ── Инвалидация кеша после изменений ──
+    private fun invalidateCache() {
+        cachedShifts.clear()
+        cachedShiftTimes.clear()
+        cachedActiveShiftIds.clear()
+        cachedActiveShiftIdTimes.clear()
     }
 }

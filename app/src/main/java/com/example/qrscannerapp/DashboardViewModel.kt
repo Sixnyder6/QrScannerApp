@@ -106,7 +106,10 @@ class DashboardViewModel @Inject constructor(
     private val tag = "DashboardViewModel"
     private var employeesListener: ListenerRegistration? = null
     private var fieldRepairListener: ListenerRegistration? = null
-    private var tasksListener: ListenerRegistration? = null // ✅ ДОБАВЛЕНО
+    private var tasksListener: ListenerRegistration? = null
+    // ── Snapshot listeners для activity_log и ремонтов (вместо get()) ──
+    private var activityTodayListener: ListenerRegistration? = null
+    private var repairsTodayListener: ListenerRegistration? = null
     private var migrationTriggered = false
     private var cleanupTriggered = false
 
@@ -118,6 +121,15 @@ class DashboardViewModel @Inject constructor(
 
     private var previousEmployeeStatuses = mapOf<String, String>()
 
+    // ── Кеш для activity данных (чтобы не делать get() каждый раз) ──
+    private var cachedActiveEmployees: List<EmployeeActivity> = emptyList()
+    private var cachedRepairsCount = 0
+    private var cachedRepairElectricians: List<EmployeeActivity> = emptyList()
+    private var cachedHourlyActivity: List<HourlyActivityPoint> = emptyList()
+    private var cachedYesterdayScans = 0
+    private var cachedYesterdayActivity: List<HourlyActivityPoint> = emptyList()
+    private var cachedWeekActivity: List<HourlyActivityPoint> = emptyList()
+
     private var activityLoadJob: Job? = null
     private val activityDebounceMs = 15_000L
     private var lastActivityLoadTime = 0L
@@ -126,6 +138,133 @@ class DashboardViewModel @Inject constructor(
         subscribeToEmployeeUpdates()
         subscribeToActiveTasks()
         subscribeToFieldRepair()
+        subscribeToActivityLog()   // ✅ новый listener вместо get()
+        subscribeToRepairLog()     // ✅ новый listener вместо get()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // НОВЫЙ LISTENER: activity_log — realtime вместо get()
+    // ═══════════════════════════════════════════════════════════════════════════
+    private fun subscribeToActivityLog() {
+        val startOfToday = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        activityTodayListener = db.collection("activity_log")
+            .whereGreaterThanOrEqualTo("timestamp", startOfToday)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(tag, "Activity log listener error", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
+
+                val allEmployees = _uiState.value.allEmployees
+
+                // ── Активные сотрудники сегодня ──
+                val groupedByEmployee = snapshot.documents.groupBy { it.getString("creatorId") }
+                cachedActiveEmployees = groupedByEmployee.mapNotNull { (userId, userLogs) ->
+                    if (userId == null) return@mapNotNull null
+                    val totalScans = userLogs.sumOf { it.getLong("itemCount")?.toInt() ?: 0 }
+                    val logCount = userLogs.size
+                    val name = userLogs.firstNotNullOfOrNull { it.getString("creatorName") } ?: "Неизвестный"
+                    val employeeInfo = allEmployees.find { it.id == userId }
+                    val statusStr = if (employeeInfo?.isOnline == true) "online" else "offline"
+                    EmployeeActivity(id = userId, name = name, totalScans = totalScans, logCount = logCount, status = statusStr)
+                }.sortedByDescending { it.totalScans }
+
+                // ── Почасовая активность сегодня ──
+                val hourlyCounts = IntArray(24)
+                snapshot.documents.forEach { doc ->
+                    val timestamp = doc.getLong("timestamp") ?: return@forEach
+                    val itemCount = doc.getLong("itemCount")?.toInt() ?: 0
+                    val c = Calendar.getInstance().apply { timeInMillis = timestamp }
+                    hourlyCounts[c.get(Calendar.HOUR_OF_DAY)] += itemCount
+                }
+                val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+                cachedHourlyActivity = (6..maxOf(currentHour, 6)).map { hour ->
+                    HourlyActivityPoint(hour = hour, scans = hourlyCounts[hour])
+                }
+
+                refreshDashboardFromCache()
+            }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // НОВЫЙ LISTENER: battery_repair_log — realtime вместо get()
+    // ═══════════════════════════════════════════════════════════════════════════
+    private fun subscribeToRepairLog() {
+        val startOfToday = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        repairsTodayListener = db.collection("battery_repair_log")
+            .whereGreaterThanOrEqualTo("timestamp", startOfToday)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(tag, "Repair log listener error", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
+
+                val allEmployees = _uiState.value.allEmployees
+                var totalRepairs = 0
+                val validDocs = snapshot.documents.mapNotNull { doc ->
+                    try {
+                        val repairs = (doc.get("repairs") as? List<*>)?.size ?: 0
+                        totalRepairs += repairs
+                        doc
+                    } catch (e: Exception) { Log.w(tag, "Skipping malformed repair doc ${doc.id}: ${e.message}"); null }
+                }
+                val groupedByElectrician = validDocs.groupBy { it.getString("electricianId") }
+                cachedRepairElectricians = groupedByElectrician.mapNotNull { (userId, userLogs) ->
+                    if (userId == null) return@mapNotNull null
+                    val repairsCount = userLogs.sumOf { try { (it.get("repairs") as? List<*>)?.size ?: 0 } catch (_: Exception) { 0 } }
+                    val name = userLogs.firstNotNullOfOrNull { it.getString("electricianName") } ?: "Неизвестный"
+                    val employeeInfo = allEmployees.find { it.id == userId }
+                    val statusStr = if (employeeInfo?.isOnline == true) "online" else "offline"
+                    EmployeeActivity(id = userId, name = name, totalScans = repairsCount, logCount = userLogs.size, status = statusStr)
+                }.sortedByDescending { it.totalScans }
+                cachedRepairsCount = totalRepairs
+
+                refreshDashboardFromCache()
+            }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Обновляет UI из кеша (без get() запросов к Firestore)
+    // ═══════════════════════════════════════════════════════════════════════════
+    private fun refreshDashboardFromCache() {
+        val allEmployees = _uiState.value.allEmployees
+        val onShiftDetails = allEmployees
+            .filter { it.isOnline }
+            .map { employee ->
+                val activity = cachedActiveEmployees.find { it.id == employee.id }
+                EmployeeActivity(
+                    id = employee.id,
+                    name = employee.displayName,
+                    totalScans = activity?.totalScans ?: 0,
+                    logCount = activity?.logCount ?: 0,
+                    status = "online"
+                )
+            }
+            .sortedByDescending { it.totalScans }
+
+        _uiState.update {
+            it.copy(
+                isLoading = false,
+                scansToday = cachedActiveEmployees.sumOf { e -> e.totalScans },
+                logEntriesToday = cachedActiveEmployees.sumOf { e -> e.logCount },
+                repairsToday = cachedRepairsCount,
+                activeElectricians = cachedRepairElectricians,
+                employeeActivities = cachedActiveEmployees,
+                scansYesterday = cachedYesterdayScans,
+                hourlyActivity = cachedHourlyActivity,
+                employeesOnShiftDetails = onShiftDetails
+            )
+        }
     }
 
     // ── Подписка на полевой ремонт ────────────────────────────────────────────
@@ -440,7 +579,7 @@ class DashboardViewModel @Inject constructor(
                         employeesOnShift = onShiftCount
                     )
                 }
-                loadActivityDataDebounced()
+                // Данные активности обновляются через subscribeToActivityLog() и subscribeToRepairLog()
 
                 if (!migrationTriggered) {
                     migrationTriggered = true
@@ -712,6 +851,8 @@ class DashboardViewModel @Inject constructor(
         activityLoadJob?.cancel()
         employeesListener?.remove()
         fieldRepairListener?.remove()
-        tasksListener?.remove() // ✅ ДОБАВЛЕНО
+        tasksListener?.remove()
+        activityTodayListener?.remove()
+        repairsTodayListener?.remove()
     }
 }

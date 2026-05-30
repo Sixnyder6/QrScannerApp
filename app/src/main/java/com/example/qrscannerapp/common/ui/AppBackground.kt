@@ -3,6 +3,7 @@ package com.example.qrscannerapp.common.ui
 import android.app.ActivityManager
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -27,6 +28,10 @@ import com.example.qrscannerapp.AppTheme
 import com.example.qrscannerapp.R
 import com.example.qrscannerapp.SettingsManager
 import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.sin
+
+private const val TAG = "AppBackground"
 
 // =================================================================================
 // ТЕМЫ
@@ -186,36 +191,95 @@ fun AppTheme.toShaderTheme(): ShaderBackgroundTheme = when (this) {
 }
 
 // =================================================================================
-// FPS-BASED QUALITY SELECTOR — единая точка принятия решения
-// Переключение только при стабильном изменении >2 секунд, никакой осцилляции
+// QUALITY LEVELS
 // =================================================================================
 
-private class FpsStabilizer {
+private enum class BackgroundQuality {
+    SHADER_60FPS,   // шейдер 60fps — полное качество
+    SHADER_30FPS,   // шейдер 30fps — уменьшенная частота
+    SHADER_15FPS,   // шейдер 15fps — минимум для плавности
+    LEGACY          // только градиенты, шейдер не грузим
+}
+
+/**
+ * Проверяет, поддерживает ли устройство AGSL на GPU (hardware accelerated).
+ * На Android 14+ (API 34) — гарантированно GPU.
+ * На Android 13 (API 33) — зависит от вендора (Samsung GPU, Pixel GPU — да, остальные — CPU).
+ * На Android < 13 — нет AGSL.
+ */
+private fun isAgslGpuSupported(): Boolean {
+    return when {
+        Build.VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE -> true  // Android 14+
+        Build.VERSION.SDK_INT < VERSION_CODES.TIRAMISU -> false          // Android < 13
+        else -> {
+            // Android 13 — проверяем по производителю/модели GPU
+            val manufacturer = Build.MANUFACTURER.lowercase()
+            val model = Build.MODEL.lowercase()
+            // Известные проблемные вендоры на Android 13
+            val cpuOnlyVendors = listOf("xiaomi", "redmi", "huawei", "honor", "oppo", "vivo", "realme", "tecno", "infinix")
+            val isKnownBad = cpuOnlyVendors.any { manufacturer.contains(it) }
+            if (isKnownBad) {
+                Log.d(TAG, "GPU AGSL disabled: $manufacturer $model known CPU-only on API 33")
+                false
+            } else {
+                true // Pixel, Samsung, OnePlus, Sony обычно нормально
+            }
+        }
+    }
+}
+
+/**
+ * Определяет, является ли текущая тема "тяжёлой" для шейдера.
+ * Nebula, Aurora, Plasma — имеют fbm/noise, требуют больше GPU.
+ */
+private val heavyShaders = setOf(ShaderType.NEBULA, ShaderType.AURORA, ShaderType.PLASMA, ShaderType.VORONOI)
+
+// =================================================================================
+// FPS-BASED QUALITY SELECTOR
+// =================================================================================
+
+private class FpsStabilizer(
+    private val shaderType: ShaderType
+) {
     private var lastFps = 60f
     private var stableSince = 0L
     private var currentQuality = BackgroundQuality.SHADER_60FPS
 
-    fun update(fps: Float, isShaderApi33Available: Boolean): BackgroundQuality {
+    fun update(fps: Float, isGpuShader: Boolean): BackgroundQuality {
         val now = System.currentTimeMillis()
 
-        if (kotlin.math.abs(fps - lastFps) > 8f) {
+        // Адаптивный порог: для тяжёлых шейдеров выше терпимость
+        val deviationThreshold = if (shaderType in heavyShaders) 15f else 10f
+
+        if (abs(fps - lastFps) > deviationThreshold) {
             lastFps = fps
             stableSince = now
         }
 
         val stableDuration = now - stableSince
-        val stable = stableDuration > 2000L
+        val isStable = stableDuration > 2000L
+
+        if (!isStable) return currentQuality
+
+        // Если шейдер на CPU — сразу LEGACY, GPU не спасёт
+        if (!isGpuShader) {
+            if (currentQuality != BackgroundQuality.LEGACY) {
+                currentQuality = BackgroundQuality.LEGACY
+                Log.w(TAG, "AGSL on CPU detected, falling back to LEGACY")
+            }
+            return currentQuality
+        }
 
         val target = when {
-            !isShaderApi33Available -> BackgroundQuality.LEGACY
-            !stable -> currentQuality  // не дёргаемся пока не стабилизируется
             fps > 52f -> BackgroundQuality.SHADER_60FPS
-            fps > 38f -> BackgroundQuality.SHADER_30FPS
+            fps > 40f -> BackgroundQuality.SHADER_30FPS
+            fps > 30f -> BackgroundQuality.SHADER_15FPS
             else -> BackgroundQuality.LEGACY
         }
 
-        if (target != currentQuality && stable) {
+        if (target != currentQuality) {
             currentQuality = target
+            Log.d(TAG, "Quality changed to $currentQuality (fps=$fps, type=${shaderType})")
         }
         return currentQuality
     }
@@ -227,15 +291,8 @@ private class FpsStabilizer {
     }
 }
 
-private enum class BackgroundQuality {
-    SHADER_60FPS,   // шейдер тикает 60fps
-    SHADER_30FPS,   // шейдер тикает 30fps
-    SHADER_15FPS,   // шейдер тикает 15fps — минимум для плавности
-    LEGACY          // только градиенты, шейдер не грузим вообще
-}
-
 // =================================================================================
-// APP BACKGROUND — точка входа
+// APP BACKGROUND
 // =================================================================================
 
 @Composable
@@ -251,56 +308,31 @@ fun AppBackground(
     )
     val shaderTheme = currentTheme.toShaderTheme()
 
-    // Детект: низкая память, отключены анимации, или Android < 13
+    // ── Системные проверки ──
     val am = remember { context.getSystemService(ActivityManager::class.java) }
     val isLowRam = remember { am.isLowRamDevice }
     val animOff = remember {
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
     }
     val hasShaderApi = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    val isGpuShader = remember { isAgslGpuSupported() }
 
-    // Стабилизатор FPS — переключение качества без осцилляции
-    val stabilizer = remember { FpsStabilizer() }
+    // Стабилизатор — создаётся под конкретный тип шейдера
+    val stabilizer = remember(shaderTheme.shaderType) { FpsStabilizer(shaderTheme.shaderType) }
     var quality by remember { mutableStateOf(BackgroundQuality.SHADER_60FPS) }
 
-    // Если устройство слабое или анимации выключены — форсируем Legacy
-    val effectiveQuality = if (isLowRam || animOff || !hasShaderApi) {
-        BackgroundQuality.LEGACY
+    // FPS монитор — считаем кадры на том же drawWithCache, где рисуется шейдер
+    // Передаём frameCount через callback, который будет вызываться из ShaderBackgroundWithQuality
+    if (hasShaderApi && !isLowRam && !animOff && isGpuShader) {
+        ShaderBackgroundWithQualityAndFps(
+            shaderTheme = shaderTheme,
+            stabilizer = stabilizer,
+            onQualityChanged = { quality = it },
+            modifier = modifier,
+            content = content
+        )
     } else {
-        quality
-    }
-
-    // FPS монитор — лёгкий, только для стабилизатора, не для real-time метрик
-    if (hasShaderApi && !isLowRam && !animOff) {
-        var frameCount by remember { mutableIntStateOf(0) }
-        var lastCheck by remember { mutableLongStateOf(System.currentTimeMillis()) }
-
-        LaunchedEffect(Unit) {
-            while (true) {
-                delay(1000L)
-                val now = System.currentTimeMillis()
-                val elapsed = (now - lastCheck) / 1000f
-                val fps = frameCount / elapsed.coerceAtLeast(0.5f)
-                quality = stabilizer.update(fps, hasShaderApi)
-                frameCount = 0
-                lastCheck = now
-            }
-        }
-
-        // Считаем кадры через drawWithContent на Box-обёртке (не на шейдере)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithCache {
-                    onDrawBehind {
-                        frameCount++
-                    }
-                }
-        ) {
-            ShaderBackgroundWithQuality(modifier, shaderTheme, effectiveQuality, content)
-        }
-    } else {
-        // Без шейдеров — просто Legacy или Rive
+        // Без шейдеров — Legacy или Rive
         if (currentTheme == AppTheme.RIVE) {
             RiveBackground(modifier, content)
         } else {
@@ -310,138 +342,182 @@ fun AppBackground(
 }
 
 // =================================================================================
-// SHADER BACKGROUND — с выбором качества
+// SHADER BACKGROUND — с FPS мониторингом ВНУТРИ шейдерного draw
 // =================================================================================
 
 @SuppressLint("NewApi")
 @RequiresApi(VERSION_CODES.TIRAMISU)
 @Composable
-private fun ShaderBackgroundWithQuality(
+private fun ShaderBackgroundWithQualityAndFps(
+    shaderTheme: ShaderBackgroundTheme,
+    stabilizer: FpsStabilizer,
+    onQualityChanged: (BackgroundQuality) -> Unit,
     modifier: Modifier,
-    theme: ShaderBackgroundTheme,
-    quality: BackgroundQuality,
     content: @Composable BoxScope.() -> Unit
 ) {
+    // Lazy load шейдера
     val context = LocalContext.current
+    val shader = remember(shaderTheme.shaderResourceId, shaderTheme.shaderType) {
+        try {
+            context.resources.openRawResource(shaderTheme.shaderResourceId)
+                .bufferedReader().use { it.readText() }
+                .let { RuntimeShader(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load shader ${shaderTheme.shaderResourceId}", e)
+            null
+        }
+    }
 
-    // Не грузим шейдер вообще если качество Legacy
-    if (quality == BackgroundQuality.LEGACY) {
-        LegacyGradientBackground(modifier, theme.colors, content)
+    // Если шейдер не загрузился — fallback на Legacy
+    if (shader == null) {
+        LegacyGradientBackground(modifier, shaderTheme.colors, content)
         return
     }
 
-    // Lazy load шейдера — только если действительно нужен
-    val shader = remember(theme.shaderResourceId) {
-        context.resources.openRawResource(theme.shaderResourceId)
-            .bufferedReader().use { it.readText() }
-            .let { RuntimeShader(it) }
-    }
     val shaderBrush = remember(shader) { ShaderBrush(shader) }
 
-    // Частота тика зависит от качества
-    val tickIntervalMs = when (quality) {
-        BackgroundQuality.SHADER_60FPS -> 16L
-        BackgroundQuality.SHADER_30FPS -> 33L
-        BackgroundQuality.SHADER_15FPS -> 66L
-        else -> 66L
-    }
-
+    // ── Состояния ──
     var time by remember { mutableFloatStateOf(0f) }
-    val useEnginePulse = theme.shaderType == ShaderType.ENGINE
+    val useEnginePulse = shaderTheme.shaderType == ShaderType.ENGINE
     var pulsatingBrightness by remember { mutableFloatStateOf(0.375f) }
     var pulsatingRadius by remember { mutableFloatStateOf(0.20f) }
 
-    LaunchedEffect(tickIntervalMs) {
+    // ── FPS счётчик ──
+    var frameCount by remember { mutableIntStateOf(0) }
+    var lastCheck by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var localQuality by remember { mutableStateOf(BackgroundQuality.SHADER_60FPS) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000L)
+            val now = System.currentTimeMillis()
+            val elapsed = (now - lastCheck) / 1000f
+            val fps = frameCount / elapsed.coerceAtLeast(0.5f)
+            Log.d(TAG, "Shader FPS: $fps (frames: $frameCount in ${elapsed}s)")
+            val newQuality = stabilizer.update(fps, isGpuShader = true)
+            if (newQuality != localQuality) {
+                localQuality = newQuality
+                onQualityChanged(newQuality)
+            }
+            frameCount = 0
+            lastCheck = now
+        }
+    }
+
+    // Тик времени — адаптивная частота под качество
+    val actualTickMs = when (localQuality) {
+        BackgroundQuality.SHADER_60FPS -> 16L
+        BackgroundQuality.SHADER_30FPS -> 33L
+        BackgroundQuality.SHADER_15FPS -> 66L
+        BackgroundQuality.LEGACY -> 66L // fallback, но сюда не дойдём
+    }
+
+    LaunchedEffect(actualTickMs) {
         val startMs = System.currentTimeMillis()
         while (true) {
-            delay(tickIntervalMs)
+            delay(actualTickMs)
             val elapsed = (System.currentTimeMillis() - startMs) / 1000f
             time = elapsed
             if (useEnginePulse) {
-                pulsatingBrightness = 0.375f + 0.075f * kotlin.math.sin(elapsed * 0.7854f)
-                pulsatingRadius     = 0.20f  + 0.02f  * kotlin.math.sin(elapsed * 0.6283f)
+                pulsatingBrightness = 0.375f + 0.075f * sin(elapsed * 0.7854f)
+                pulsatingRadius = 0.20f + 0.02f * sin(elapsed * 0.6283f)
             }
         }
+    }
+
+    // Если качество упало до LEGACY — переключаемся на градиенты
+    if (localQuality == BackgroundQuality.LEGACY) {
+        LegacyGradientBackground(modifier, shaderTheme.colors, content)
+        return
     }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .drawWithCache {
-                // Статические юниформы — только при смене размера
+                // ═════════════════════════════════════════════════════
+                // Статические uniform'ы — только при смене размера
+                // ═════════════════════════════════════════════════════
                 shader.setFloatUniform("iResolution", size.width, size.height)
-                when (theme.shaderType) {
+                when (shaderTheme.shaderType) {
                     ShaderType.ENGINE -> {
                         shader.setFloatUniform("backgroundColor",
-                            theme.colors[0].red, theme.colors[0].green,
-                            theme.colors[0].blue, theme.colors[0].alpha)
+                            shaderTheme.colors[0].red, shaderTheme.colors[0].green,
+                            shaderTheme.colors[0].blue, shaderTheme.colors[0].alpha)
                         shader.setFloatUniform("midEnergyColor",
-                            theme.colors[1].red, theme.colors[1].green,
-                            theme.colors[1].blue, theme.colors[1].alpha)
+                            shaderTheme.colors[1].red, shaderTheme.colors[1].green,
+                            shaderTheme.colors[1].blue, shaderTheme.colors[1].alpha)
                         shader.setFloatUniform("coreEnergyColor",
-                            theme.colors[2].red, theme.colors[2].green,
-                            theme.colors[2].blue, theme.colors[2].alpha)
-                        shader.setFloatUniform("animationSpeed",   theme.animationSpeed)
-                        shader.setFloatUniform("piston1SpeedMult", theme.piston1SpeedMult)
-                        shader.setFloatUniform("piston2SpeedMult", theme.piston2SpeedMult)
-                        shader.setFloatUniform("rampMidPoint",     theme.rampMidPoint)
-                        shader.setFloatUniform("rampCorePoint",    theme.rampCorePoint)
+                            shaderTheme.colors[2].red, shaderTheme.colors[2].green,
+                            shaderTheme.colors[2].blue, shaderTheme.colors[2].alpha)
+                        shader.setFloatUniform("animationSpeed",   shaderTheme.animationSpeed)
+                        shader.setFloatUniform("piston1SpeedMult", shaderTheme.piston1SpeedMult)
+                        shader.setFloatUniform("piston2SpeedMult", shaderTheme.piston2SpeedMult)
+                        shader.setFloatUniform("rampMidPoint",     shaderTheme.rampMidPoint)
+                        shader.setFloatUniform("rampCorePoint",    shaderTheme.rampCorePoint)
                     }
                     ShaderType.NEBULA -> {
-                        shader.setFloatUniform("flowSpeed",   theme.animationSpeed)
-                        shader.setFloatUniform("complexity",  theme.complexity)
+                        shader.setFloatUniform("flowSpeed",   shaderTheme.animationSpeed)
+                        shader.setFloatUniform("complexity",  shaderTheme.complexity)
                         shader.setFloatUniform("nebulaColorA",
-                            theme.colors[0].red, theme.colors[0].green, theme.colors[0].blue)
+                            shaderTheme.colors[0].red, shaderTheme.colors[0].green, shaderTheme.colors[0].blue)
                         shader.setFloatUniform("nebulaColorB",
-                            theme.colors[2].red, theme.colors[2].green, theme.colors[2].blue)
-                        shader.setFloatUniform("density", theme.density)
+                            shaderTheme.colors[2].red, shaderTheme.colors[2].green, shaderTheme.colors[2].blue)
+                        shader.setFloatUniform("density", shaderTheme.density)
                     }
                     ShaderType.VORONOI -> {
-                        shader.setFloatUniform("breathRate",   theme.breathRate)
-                        shader.setFloatUniform("cellDensity",  theme.cellDensity)
+                        shader.setFloatUniform("breathRate",   shaderTheme.breathRate)
+                        shader.setFloatUniform("cellDensity",  shaderTheme.cellDensity)
                         shader.setFloatUniform("tissueColor",
-                            theme.colors[0].red, theme.colors[0].green, theme.colors[0].blue)
+                            shaderTheme.colors[0].red, shaderTheme.colors[0].green, shaderTheme.colors[0].blue)
                         shader.setFloatUniform("glowColor",
-                            theme.colors[2].red, theme.colors[2].green, theme.colors[2].blue)
-                        shader.setFloatUniform("pulseStrength", theme.pulseStrength)
+                            shaderTheme.colors[2].red, shaderTheme.colors[2].green, shaderTheme.colors[2].blue)
+                        shader.setFloatUniform("pulseStrength", shaderTheme.pulseStrength)
                     }
                     ShaderType.SILK_DRAPE -> {
-                        shader.setFloatUniform("flowSpeed",  theme.animationSpeed)
-                        shader.setFloatUniform("complexity", theme.complexity)
+                        shader.setFloatUniform("flowSpeed",  shaderTheme.animationSpeed)
+                        shader.setFloatUniform("complexity", shaderTheme.complexity)
                         shader.setFloatUniform("deepFoldColor",
-                            theme.colors[0].red, theme.colors[0].green, theme.colors[0].blue)
+                            shaderTheme.colors[0].red, shaderTheme.colors[0].green, shaderTheme.colors[0].blue)
                         shader.setFloatUniform("silkBaseColor",
-                            theme.colors[1].red, theme.colors[1].green, theme.colors[1].blue)
+                            shaderTheme.colors[1].red, shaderTheme.colors[1].green, shaderTheme.colors[1].blue)
                         shader.setFloatUniform("highlightColor",
-                            theme.colors[2].red, theme.colors[2].green, theme.colors[2].blue)
-                        shader.setFloatUniform("brightness", theme.brightness)
+                            shaderTheme.colors[2].red, shaderTheme.colors[2].green, shaderTheme.colors[2].blue)
+                        shader.setFloatUniform("brightness", shaderTheme.brightness)
                     }
                     ShaderType.AMBER_FLOW -> {
-                        shader.setFloatUniform("flowSpeed",  theme.animationSpeed)
-                        shader.setFloatUniform("complexity", theme.complexity)
+                        shader.setFloatUniform("flowSpeed",  shaderTheme.animationSpeed)
+                        shader.setFloatUniform("complexity", shaderTheme.complexity)
                         shader.setFloatUniform("baseColor",
-                            theme.colors[0].red, theme.colors[0].green, theme.colors[0].blue)
+                            shaderTheme.colors[0].red, shaderTheme.colors[0].green, shaderTheme.colors[0].blue)
                         shader.setFloatUniform("midColor",
-                            theme.colors[1].red, theme.colors[1].green, theme.colors[1].blue)
+                            shaderTheme.colors[1].red, shaderTheme.colors[1].green, shaderTheme.colors[1].blue)
                         shader.setFloatUniform("glowColor",
-                            theme.colors[2].red, theme.colors[2].green, theme.colors[2].blue)
-                        shader.setFloatUniform("brightness", theme.brightness)
+                            shaderTheme.colors[2].red, shaderTheme.colors[2].green, shaderTheme.colors[2].blue)
+                        shader.setFloatUniform("brightness", shaderTheme.brightness)
                     }
                     ShaderType.EMBER_GLOW,
                     ShaderType.AURORA,
                     ShaderType.PLASMA -> {
-                        shader.setFloatUniform("flowSpeed",   theme.animationSpeed)
-                        shader.setFloatUniform("complexity",  theme.complexity)
+                        shader.setFloatUniform("flowSpeed",   shaderTheme.animationSpeed)
+                        shader.setFloatUniform("complexity",  shaderTheme.complexity)
                         shader.setFloatUniform("layerColorA",
-                            theme.colors[0].red, theme.colors[0].green, theme.colors[0].blue)
+                            shaderTheme.colors[0].red, shaderTheme.colors[0].green, shaderTheme.colors[0].blue)
                         shader.setFloatUniform("layerColorB",
-                            theme.colors[1].red, theme.colors[1].green, theme.colors[1].blue)
+                            shaderTheme.colors[1].red, shaderTheme.colors[1].green, shaderTheme.colors[1].blue)
                         shader.setFloatUniform("layerColorC",
-                            theme.colors[2].red, theme.colors[2].green, theme.colors[2].blue)
-                        shader.setFloatUniform("brightness", theme.brightness)
+                            shaderTheme.colors[2].red, shaderTheme.colors[2].green, shaderTheme.colors[2].blue)
+                        shader.setFloatUniform("brightness", shaderTheme.brightness)
                     }
                 }
+
+                // ═════════════════════════════════════════════════════
+                // onDrawBehind — РИСУЕМ ШЕЙДЕР И СЧИТАЕМ КАДРЫ
+                // ═════════════════════════════════════════════════════
                 onDrawBehind {
+                    // ✅ СЧЁТЧИК КАДРОВ ПРЯМО ЗДЕСЬ — измеряет реальные кадры шейдера
+                    frameCount++
+
                     shader.setFloatUniform("iTime", time)
                     if (useEnginePulse) {
                         shader.setFloatUniform("energyBrightness", pulsatingBrightness)
@@ -480,7 +556,7 @@ private fun RiveBackground(
 }
 
 // =================================================================================
-// LEGACY BACKGROUND (Android < 13 или низкая производительность)
+// LEGACY BACKGROUND (Android < 13, низкая производительность, CPU шейдер)
 // =================================================================================
 
 @Composable
@@ -489,7 +565,6 @@ private fun LegacyGradientBackground(
     colors: List<Color>,
     content: @Composable BoxScope.() -> Unit
 ) {
-    // Используем rememberInfiniteTransition с ReducedMotion-aware параметрами
     val infiniteTransition = rememberInfiniteTransition(label = "legacy_bg")
 
     val progress1 by infiniteTransition.animateFloat(

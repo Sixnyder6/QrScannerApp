@@ -21,6 +21,10 @@ class InteractionRepository @Inject constructor(
     private val interactionDao: InteractionDao,
     private val firestore: FirebaseFirestore
 ) {
+    // ── Memory cache для getSbEmployees (сотрудники редко меняются) ──
+    private var cachedSbEmployees: List<SbEmployee>? = null
+    private var sbCacheTime = 0L
+    private val sbCacheTtlMs = 60_000L // 1 минута
     // Room history — kept for backward compat (old data)
     fun getSessionsHistory(): Flow<List<InteractionSession>> =
         interactionDao.getAllSessionsFlow().map { list -> list.map { it.toDomainModel() } }
@@ -55,17 +59,26 @@ class InteractionRepository @Inject constructor(
     }
 
     suspend fun getSbEmployees(): List<SbEmployee> {
+        // Используем memory cache: сотрудники редко меняются
+        val now = System.currentTimeMillis()
+        if (cachedSbEmployees != null && (now - sbCacheTime) < sbCacheTtlMs) {
+            return cachedSbEmployees!!
+        }
+
         return try {
-            firestore.collection("internal_users")
+            val result = firestore.collection("internal_users")
                 .whereEqualTo("role", "security")
                 .get().await()
                 .documents.mapNotNull { doc ->
                     val name = doc.getString("displayName")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                     SbEmployee(id = doc.id, displayName = name)
                 }
+            cachedSbEmployees = result
+            sbCacheTime = System.currentTimeMillis()
+            result
         } catch (e: Exception) {
             Log.e("InteractionRepo", "getSbEmployees", e)
-            emptyList()
+            cachedSbEmployees ?: emptyList() // возвращаем старый кеш если есть
         }
     }
 
