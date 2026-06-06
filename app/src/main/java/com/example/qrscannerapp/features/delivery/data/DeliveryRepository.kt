@@ -72,6 +72,7 @@ class DeliveryRepository @Inject constructor(
         return try {
             val snapshot = deliveriesCollection
                 .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(50)
                 .get()
                 .await()
             val logs = snapshot.toObjects(DeliveryLog::class.java)

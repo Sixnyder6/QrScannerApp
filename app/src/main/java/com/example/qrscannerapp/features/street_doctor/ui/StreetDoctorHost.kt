@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.qrscannerapp.features.street_doctor.domain.model.StreetScooter
 
@@ -143,7 +144,9 @@ fun StreetDoctorHost(
                             cart                = cart,
                             onAddToCart         = { item, qty -> warehouseVm.onAddToCart(item, qty) },
                             onRemoveFromCart    = { id -> warehouseVm.onRemoveFromCart(id) },
-                            onSubmitOrder       = { warehouseVm.onSubmitOrder(currentUserId, currentUserName, currentUserRole) },
+                            onUpdateCartItemQuantity = { id, qty -> warehouseVm.onUpdateCartItemQuantity(id, qty) },
+                            onClearCart         = { warehouseVm.onClearCart() },
+                            onSubmitOrder       = { warehouseVm.onConfirmTakeAll(currentUserName, currentUserId) },
                             onNavigateToAddItem = { },
                             onTakeItem          = { item, qty -> warehouseVm.onTakeItem(item, qty, currentUserName, currentUserId) },
                             isAdmin             = false,
@@ -151,30 +154,42 @@ fun StreetDoctorHost(
                             onNavigateBack      = { warehouseNav.popBackStack() }
                         )
                     }
+                    composable("warehouse_history") {
+                        val currentUserId = authState.value.userId ?: ""
+                        com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseHistoryScreen(
+                            navController = warehouseNav,
+                            userId = currentUserId
+                        )
+                    }
                 }
 
-                // Кнопка назад: popBackStack внутри склада, или выход в MAIN
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .statusBarsPadding()
-                        .padding(start = 8.dp, top = 8.dp)
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .clickable {
-                            if (!warehouseNav.popBackStack()) {
-                                currentScreen = StreetDoctorScreen.MAIN
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        "Назад",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
+                val navBackStackEntry by warehouseNav.currentBackStackEntryAsState()
+                val currentWarehouseRoute = navBackStackEntry?.destination?.route
+
+                if (currentWarehouseRoute == null || currentWarehouseRoute == "wh_dashboard") {
+                    // Кнопка назад: popBackStack внутри склада, или выход в MAIN
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .statusBarsPadding()
+                            .padding(start = 8.dp, top = 8.dp)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .clickable {
+                                if (!warehouseNav.popBackStack()) {
+                                    currentScreen = StreetDoctorScreen.MAIN
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            "Назад",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }

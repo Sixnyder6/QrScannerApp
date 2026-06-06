@@ -21,7 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,7 +34,6 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.qrscannerapp.AuthManager
-import com.example.qrscannerapp.getEmployeePhotoUrl
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
@@ -52,7 +50,7 @@ fun HomescreenUserCard(
 ) {
     val authState by authManager.authState.collectAsState()
     val userName  = authState.userName ?: "Пользователь"
-    val photoUrl  = remember(userName) { getEmployeePhotoUrl(userName) }
+    val photoUrl  = authState.photoUrl
     val statusLine = buildString {
         append(authState.role.displayName.lowercase())
         if (authState.isShiftActive) append(" · в смене")

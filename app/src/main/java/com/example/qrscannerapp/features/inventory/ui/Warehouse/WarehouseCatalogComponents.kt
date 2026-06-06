@@ -26,6 +26,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.example.qrscannerapp.features.scanner.ui.components.CameraView
+import com.example.qrscannerapp.core.model.ScanEvent
+import kotlinx.coroutines.flow.MutableSharedFlow
+import android.media.ToneGenerator
+import android.media.AudioManager
+import android.os.Vibrator
+import android.os.VibrationEffect
+import android.os.Build
+import android.content.Context
 import androidx.compose.material.icons.outlined.AddShoppingCart
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Delete
@@ -42,13 +56,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -74,8 +93,12 @@ import com.example.qrscannerapp.UserRole
 import com.example.qrscannerapp.features.inventory.data.OrderItem
 import com.example.qrscannerapp.features.inventory.data.WarehouseItem
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseViewModel
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalConfiguration
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 private const val GITHUB_IMAGE_BASE_URL = "https://raw.githubusercontent.com/Sixnyder6/QrScannerApp/master/images/"
 
@@ -164,6 +187,39 @@ fun DeleteItemDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = StardustError)
             ) {
                 Text("Удалить", color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена", color = StardustTextPrimary)
+            }
+        }
+    )
+}
+
+@Composable
+fun QuickTakeConfirmationDialog(
+    item: WarehouseItem,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = StardustModalBg,
+        titleContentColor = StardustTextPrimary,
+        textContentColor = StardustTextSecondary,
+        icon = { Icon(Icons.Rounded.ShoppingCart, contentDescription = null, tint = StardustPrimary) },
+        title = { Text("Подтвердите списание") },
+        text = { Text("Вы уверены, что хотите списать 1 ${item.unit} \"${item.shortName}\"?") },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirm()
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
+            ) {
+                Text("Списать 1", color = Color.Black)
             }
         },
         dismissButton = {
@@ -365,6 +421,7 @@ private fun WarehouseCatalogTopAppBar(
     onCloseSearchClicked: () -> Unit,
     onNavigateBack: () -> Unit,
     onUploadClicked: () -> Unit,
+    onScanClicked: () -> Unit,
     isAdmin: Boolean
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -390,7 +447,7 @@ private fun WarehouseCatalogTopAppBar(
                         singleLine = true,
                         decorationBox = { innerTextField ->
                             if (searchQuery.isEmpty()) {
-                                Text("Поиск...", color = StardustTextSecondary)
+                                  Text("Поиск...", color = StardustTextSecondary)
                             }
                             innerTextField()
                         }
@@ -427,6 +484,9 @@ private fun WarehouseCatalogTopAppBar(
                     }
                 } else {
                     Row {
+                        IconButton(onClick = onScanClicked) {
+                            Icon(Icons.Default.QrCodeScanner, contentDescription = "Сканировать деталь")
+                        }
                         IconButton(onClick = onSearchClicked) {
                             Icon(Icons.Default.Search, contentDescription = "Поиск по каталогу")
                         }
@@ -508,6 +568,161 @@ fun CategoryChip(
 }
 
 
+@Composable
+private fun ScannerViewfinder(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "vf")
+    val progress by transition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "scan_line"
+    )
+    Box(
+        modifier = modifier.drawBehind {
+            val cl = 36.dp.toPx()
+            val sw = 3.dp.toPx()
+            val r  = 10.dp.toPx()
+            val w  = size.width
+            val h  = size.height
+            val stroke = Stroke(width = sw, cap = StrokeCap.Round)
+            listOf(
+                Path().apply { moveTo(0f, cl); lineTo(0f, r); arcTo(Rect(0f, 0f, r*2, r*2), 180f, 90f, false); lineTo(cl, 0f) },
+                Path().apply { moveTo(w-cl, 0f); lineTo(w-r, 0f); arcTo(Rect(w-r*2, 0f, w, r*2), 270f, 90f, false); lineTo(w, cl) },
+                Path().apply { moveTo(0f, h-cl); lineTo(0f, h-r); arcTo(Rect(0f, h-r*2, r*2, h), 180f, -90f, false); lineTo(cl, h) },
+                Path().apply { moveTo(w-cl, h); lineTo(w-r, h); arcTo(Rect(w-r*2, h-r*2, w, h), 90f, -90f, false); lineTo(w, h-cl) }
+            ).forEach { drawPath(it, StardustPrimary, style = stroke) }
+            val y = h * progress
+            drawLine(
+                brush = Brush.horizontalGradient(
+                    listOf(Color.Transparent, StardustSecondary.copy(alpha = 0.7f), Color.Transparent),
+                    startX = 0f, endX = w
+                ),
+                start = Offset(0f, y), end = Offset(w, y),
+                strokeWidth = 2.dp.toPx()
+            )
+        }
+    )
+}
+
+@Composable
+private fun WarehouseScannerOverlay(
+    hasPermission: Boolean,
+    scanEventFlow: kotlinx.coroutines.flow.Flow<ScanEvent>,
+    isTorchOn: Boolean,
+    onTorchChange: (Boolean) -> Unit,
+    onCodeScanned: (String) -> Unit,
+    cartSize: Int,
+    onClose: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        // Камера
+        CameraView(
+            isSearchMode = false,
+            hasPermission = hasPermission,
+            scanEventFlow = scanEventFlow,
+            isTorchOn = isTorchOn,
+            onTorchChange = onTorchChange,
+            onCodeScanned = onCodeScanned,
+            onStatusUpdate = { _, _ -> }
+        )
+
+        // Рамка видоискателя
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            ScannerViewfinder(
+                modifier = Modifier
+                    .fillMaxWidth(0.65f)
+                    .aspectRatio(1f)
+            )
+        }
+
+        // Верхняя плашка управления (заголовок, фонарик, закрыть)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent)
+                    )
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .statusBarsPadding(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть сканер",
+                    tint = Color.White
+                )
+            }
+
+            Text(
+                text = "Сканирование деталей",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+
+            IconButton(onClick = { onTorchChange(!isTorchOn) }) {
+                Icon(
+                    imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                    contentDescription = "Фонарик",
+                    tint = if (isTorchOn) StardustWarning else Color.White
+                )
+            }
+        }
+
+        // Нижняя панель подсказки
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                    )
+                )
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 36.dp)
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Наведите камеру на штрихкод детали",
+                    color = StardustTextSecondary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
+                )
+
+                if (cartSize > 0) {
+                    Surface(
+                        color = StardustPrimary.copy(alpha = 0.2f),
+                        contentColor = StardustSecondary,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.3f))
+                    ) {
+                        Text(
+                            text = "В корзине: $cartSize поз.",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WarehouseCatalogScreen(
@@ -516,6 +731,8 @@ fun WarehouseCatalogScreen(
     cart: List<OrderItem>,
     onAddToCart: (WarehouseItem, Int) -> Unit,
     onRemoveFromCart: (String) -> Unit,
+    onUpdateCartItemQuantity: (String, Int) -> Unit,
+    onClearCart: () -> Unit,
     onSubmitOrder: () -> Unit,
     // ----------------------------
     onNavigateToAddItem: () -> Unit,
@@ -533,13 +750,95 @@ fun WarehouseCatalogScreen(
     var itemToTake by remember { mutableStateOf<WarehouseItem?>(null) }
     var itemToEdit by remember { mutableStateOf<WarehouseItem?>(null) }
     var itemToDelete by remember { mutableStateOf<WarehouseItem?>(null) }
+    var itemToQuickTake by remember { mutableStateOf<WarehouseItem?>(null) }
 
-    var showCartSheet by remember { mutableStateOf(false) }
+    var isCartExpanded by remember { mutableStateOf(false) }
 
     var selectedCategory by remember { mutableStateOf("Все") }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val viewModel: WarehouseViewModel = viewModel()
+
+    var showScannerDialog by remember { mutableStateOf(false) }
+    var isTorchOn by remember { mutableStateOf(false) }
+    val scanEventFlow = remember { MutableSharedFlow<ScanEvent>() }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var hasCameraPermission by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasCameraPermission = granted
+    }
+
+    LaunchedEffect(showScannerDialog) {
+        if (showScannerDialog && !hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    val vibrator = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+            vibratorManager?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+    }
+    val toneGen = remember { ToneGenerator(AudioManager.STREAM_MUSIC, 100) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            toneGen.release()
+        }
+    }
+
+    // Debounce to prevent scanning same item multiple times in rapid succession
+    var lastScannedCode by remember { mutableStateOf("") }
+    var lastScannedTime by remember { mutableLongStateOf(0L) }
+
+    val onCodeScanned = { code: String ->
+        val now = System.currentTimeMillis()
+        if (code != lastScannedCode || now - lastScannedTime > 2000L) {
+            lastScannedCode = code
+            lastScannedTime = now
+
+            val foundItem = items.find { item ->
+                item.sku == code ||
+                item.id == code ||
+                (item.sku != null && code.contains(item.sku))
+            }
+
+            if (foundItem != null) {
+                // Success: Add to cart
+                onAddToCart(foundItem, 1)
+
+                // Sound & Haptic
+                toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(50)
+                }
+
+                scope.launch {
+                    scanEventFlow.emit(ScanEvent.Success)
+                }
+            } else {
+                // Error: item not found in database
+                toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                scope.launch {
+                    delay(150)
+                    toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                    snackbarHostState.showSnackbar("Товар не найден: $code")
+                }
+            }
+        }
+    }
 
     if (showUploadDialog) {
         UploadConfirmationDialog(
@@ -563,6 +862,31 @@ fun WarehouseCatalogScreen(
         items.sortedByDescending { it.stockCount }.take(8)
     }
 
+    val quickConsumables = remember(items) {
+        items.filter { it.category == "Расходники" }
+    }
+
+    val shelfHeight = if (!isCartExpanded && quickConsumables.isNotEmpty()) 80.dp else 0.dp
+
+
+    val configuration = LocalConfiguration.current
+    val screenHeight = configuration.screenHeightDp.dp
+    val targetHeight = remember(cart.size, isCartExpanded, canManage) {
+        when {
+            cart.isEmpty() || canManage -> 0.dp
+            isCartExpanded -> screenHeight * 0.5f
+            else -> 96.dp
+        }
+    }
+    val animatedHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "cartPanelHeight"
+    )
+
     Scaffold(
         containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -578,96 +902,112 @@ fun WarehouseCatalogScreen(
                 },
                 onNavigateBack = onNavigateBack,
                 onUploadClicked = { showUploadDialog = true },
+                onScanClicked = { showScannerDialog = true },
                 isAdmin = canManage
             )
         },
         floatingActionButton = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.End
-            ) {
-                // Корзина (дополнительная функция для НЕ кладовщиков)
-                if (!canManage) {
-                    AnimatedVisibility(
-                        visible = cart.isNotEmpty(),
-                        enter = scaleIn() + fadeIn(),
-                        exit = scaleOut() + fadeOut()
-                    ) {
-                        ExtendedFloatingActionButton(
-                            onClick = { showCartSheet = true },
-                            containerColor = StardustPrimary,
-                            contentColor = Color.Black,
-                            icon = { Icon(Icons.Rounded.ShoppingCart, null) },
-                            text = { Text("Корзина (${cart.sumOf { it.quantity }})") }
-                        )
-                    }
-                }
-
-                // Кнопка добавления нового товара (только для админа)
-                if (canManage) {
-                    FloatingActionButton(onClick = onNavigateToAddItem) {
-                        Icon(Icons.Default.Add, "Добавить новую запчасть")
-                    }
+            if (canManage) {
+                FloatingActionButton(onClick = onNavigateToAddItem) {
+                    Icon(Icons.Default.Add, "Добавить новую запчасть")
                 }
             }
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
-            AnimatedVisibility(
-                visible = !isSearchActive,
-                enter = fadeIn() + slideInVertically(),
-                exit = fadeOut() + slideOutVertically()
-            ) {
-                Column {
-                    if (frequentlyTakenItems.isNotEmpty()) {
-                        FrequentlyTakenCarousel(
-                            frequentlyTakenItems = frequentlyTakenItems,
-                            onItemClick = { item -> itemToTake = item }
-                        )
-                    }
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.padding(padding)) {
+                AnimatedVisibility(
+                    visible = !isSearchActive,
+                    enter = fadeIn() + slideInVertically(),
+                    exit = fadeOut() + slideOutVertically()
+                ) {
+                    Column {
+                        if (frequentlyTakenItems.isNotEmpty()) {
+                            FrequentlyTakenCarousel(
+                                frequentlyTakenItems = frequentlyTakenItems,
+                                onItemClick = { item -> itemToTake = item }
+                            )
+                        }
 
-                    val categories = listOf("Все") + items.map { it.category }.distinct()
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        items(categories) { category ->
-                            if (category == "Все") {
-                                FilterChip(
-                                    selected = category == selectedCategory,
-                                    onClick = { selectedCategory = category },
-                                    label = { Text(category) }
-                                )
-                            } else {
-                                CategoryChip(
-                                    categoryName = category,
-                                    isSelected = category == selectedCategory,
-                                    onClick = { selectedCategory = category }
-                                )
+                        val categories = listOf("Все") + items.map { it.category }.distinct()
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            items(categories) { category ->
+                                if (category == "Все") {
+                                    FilterChip(
+                                        selected = category == selectedCategory,
+                                        onClick = { selectedCategory = category },
+                                        label = { Text(category) }
+                                    )
+                                } else {
+                                    CategoryChip(
+                                        categoryName = category,
+                                        isSelected = category == selectedCategory,
+                                        onClick = { selectedCategory = category }
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = padding.calculateBottomPadding() + 80.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(filteredCatalog, key = { it.id }) { item ->
-                    CatalogGridItem(
-                        item = item,
-                        onClick = { itemToTake = item },
-                        onQuickAdd = {
-                            // ИЗМЕНЕНИЕ: Быстрое добавление = Взять сразу (для ВСЕХ)
-                            onTakeItem(item, 1)
-                        }
-                    )
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        bottom = padding.calculateBottomPadding() + animatedHeight + shelfHeight + 16.dp
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(filteredCatalog, key = { it.id }) { item ->
+                        CatalogGridItem(
+                            item = item,
+                            onClick = { itemToTake = item },
+                            onQuickAdd = {
+                                if (!canManage) {
+                                    onAddToCart(item, 1)
+                                } else {
+                                    itemToQuickTake = item
+                                }
+                            }
+                        )
+                    }
                 }
             }
+
+            if (!isCartExpanded && quickConsumables.isNotEmpty()) {
+                QuickConsumablesShelf(
+                    consumables = quickConsumables,
+                    onAddConsumable = { item ->
+                        if (!canManage) {
+                            onAddToCart(item, 1)
+                        } else {
+                            itemToQuickTake = item
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = animatedHeight)
+                )
+            }
+
+            BottomCartPanel(
+                cart = cart,
+                isExpanded = isCartExpanded,
+                onExpandToggle = { isCartExpanded = it },
+                onUpdateQuantity = onUpdateCartItemQuantity,
+                onRemoveItem = onRemoveFromCart,
+                onClearCart = onClearCart,
+                onSubmit = onSubmitOrder,
+                animatedHeight = animatedHeight,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+
         }
     }
 
@@ -677,12 +1017,10 @@ fun WarehouseCatalogScreen(
             item = itemToTake!!,
             isAdmin = canManage,
             onDismiss = { itemToTake = null },
-            // В onConfirm передаем действие "Взять"
             onTake = { item, quantity ->
                 onTakeItem(item, quantity)
                 itemToTake = null
             },
-            // В onAddToCart передаем действие "В заказ"
             onAddToCart = { item, quantity ->
                 onAddToCart(item, quantity)
                 itemToTake = null
@@ -720,16 +1058,29 @@ fun WarehouseCatalogScreen(
         )
     }
 
-    // BOTTOM SHEET КОРЗИНЫ
-    if (showCartSheet) {
-        CartBottomSheet(
-            cartItems = cart,
-            onDismiss = { showCartSheet = false },
-            onRemoveItem = onRemoveFromCart,
-            onSubmitOrder = {
-                onSubmitOrder()
-                showCartSheet = false
-            }
+    if (itemToQuickTake != null) {
+        QuickTakeConfirmationDialog(
+            item = itemToQuickTake!!,
+            onConfirm = {
+                onTakeItem(itemToQuickTake!!, 1)
+            },
+            onDismiss = { itemToQuickTake = null }
+        )
+    }
+
+    AnimatedVisibility(
+        visible = showScannerDialog,
+        enter = fadeIn(tween(300)) + slideInVertically(tween(300)) { it },
+        exit = fadeOut(tween(250)) + slideOutVertically(tween(250)) { it }
+    ) {
+        WarehouseScannerOverlay(
+            hasPermission = hasCameraPermission,
+            scanEventFlow = scanEventFlow,
+            isTorchOn = isTorchOn,
+            onTorchChange = { isTorchOn = it },
+            onCodeScanned = onCodeScanned,
+            cartSize = cart.size,
+            onClose = { showScannerDialog = false }
         )
     }
 }
@@ -1314,33 +1665,9 @@ fun QuantityPickerDialog(
 
                     // --- КНОПКИ ДЕЙСТВИЯ ---
 
-                    // 1. Кнопка "Взять" (Доступна ВСЕМ)
-                    Button(
-                        onClick = {
-                            val finalQuantity = if (item.unit == "грамм") textQuantity.toIntOrNull() ?: 0 else stepperQuantity
-                            if (finalQuantity > 0) onTake(item, finalQuantity)
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = StardustPrimary,
-                            contentColor = Color.Black
-                        ),
-                        enabled = (item.unit == "грамм" && textQuantity.isNotBlank()) || (item.unit != "грамм")
-                    ) {
-                        Text(
-                            text = "Взять ${if(item.unit == "грамм") textQuantity else stepperQuantity} ${item.unit}",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // 2. Кнопка "В заказ" (Дополнительно, только для НЕ кладовщиков)
                     if (!isAdmin) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        OutlinedButton(
+                        // Для техников: Основное действие - "Добавить в заказ", второстепенное - "Взять сразу" (прямое списание)
+                        Button(
                             onClick = {
                                 val finalQuantity = if (item.unit == "грамм") textQuantity.toIntOrNull() ?: 0 else stepperQuantity
                                 if (finalQuantity > 0) onAddToCart(item, finalQuantity)
@@ -1349,17 +1676,65 @@ fun QuantityPickerDialog(
                                 .fillMaxWidth()
                                 .height(56.dp),
                             shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = StardustPrimary,
+                                contentColor = Color.Black
+                            ),
+                            enabled = (item.unit == "грамм" && textQuantity.isNotBlank()) || (item.unit != "грамм")
+                        ) {
+                            Icon(Icons.Outlined.AddShoppingCart, null, modifier = Modifier.size(20.dp), tint = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Добавить в заказ (${if(item.unit == "грамм") textQuantity else stepperQuantity} ${item.unit})",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        OutlinedButton(
+                            onClick = {
+                                val finalQuantity = if (item.unit == "грамм") textQuantity.toIntOrNull() ?: 0 else stepperQuantity
+                                if (finalQuantity > 0) onTake(item, finalQuantity)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
                             border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.5f)),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = StardustPrimary
-                            )
+                            ),
+                            enabled = (item.unit == "грамм" && textQuantity.isNotBlank()) || (item.unit != "грамм")
                         ) {
-                            Icon(Icons.Outlined.AddShoppingCart, null, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Добавить в заказ",
+                                text = "Взять сразу (списать)",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else {
+                        // Для админов: только одна кнопка прямого списания/приема товара
+                        Button(
+                            onClick = {
+                                val finalQuantity = if (item.unit == "грамм") textQuantity.toIntOrNull() ?: 0 else stepperQuantity
+                                if (finalQuantity > 0) onTake(item, finalQuantity)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = StardustPrimary,
+                                contentColor = Color.Black
+                            ),
+                            enabled = (item.unit == "грамм" && textQuantity.isNotBlank()) || (item.unit != "грамм")
+                        ) {
+                            Text(
+                                text = "Взять ${if(item.unit == "грамм") textQuantity else stepperQuantity} ${item.unit}",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -1381,3 +1756,495 @@ fun generateColorFromName(name: String): Color {
         alpha = 1f
     )
 }
+
+@Composable
+fun OverlappingCardFan(
+    cartItems: List<OrderItem>,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        val maxDisplayed = 7
+        val displayedItems = cartItems.take(maxDisplayed)
+        val extraCount = cartItems.size - maxDisplayed
+
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            displayedItems.forEachIndexed { index, item ->
+                val cardSize = 56.dp
+                val overlapOffset = (-16).dp
+                
+                val midIndex = (displayedItems.size - 1) / 2f
+                val rotation = (index - midIndex) * 5f
+                val translationY = kotlin.math.abs(index - midIndex) * 3f
+
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.5.dp, Color.White),
+                    colors = CardDefaults.cardColors(containerColor = StardustItemBg),
+                    modifier = Modifier
+                        .size(cardSize)
+                        .graphicsLayer {
+                            rotationZ = rotation
+                            this.translationY = translationY.dp.toPx()
+                        }
+                        .padding(horizontal = 0.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        val imgUrl = constructImageUrl(item.itemImageUrl)
+                        if (imgUrl != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(imgUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = item.itemName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            val seedColor = generateColorFromName(item.itemName)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(seedColor),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = item.itemName.take(1).uppercase(),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            }
+                        }
+                        
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(2.dp)
+                                .clip(CircleShape)
+                                .background(StardustPrimary)
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = "${item.quantity}",
+                                color = Color.Black,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                
+                if (index < displayedItems.size - 1) {
+                    Spacer(modifier = Modifier.width(overlapOffset))
+                }
+            }
+
+            if (extraCount > 0) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(StardustPrimary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "+$extraCount",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ExpandedCartItemRow(
+    item: OrderItem,
+    onUpdateQuantity: (Int) -> Unit,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(StardustItemBg, RoundedCornerShape(12.dp))
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val imgUrl = constructImageUrl(item.itemImageUrl)
+        if (imgUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(imgUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = item.itemName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
+            )
+        } else {
+            val seedColor = generateColorFromName(item.itemName)
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(seedColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = item.itemName.take(1).uppercase(),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.itemName,
+                color = StardustTextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = item.unit,
+                color = StardustTextSecondary,
+                fontSize = 11.sp
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            IconButton(
+                onClick = { onUpdateQuantity(item.quantity - 1) },
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(StardustModalBg, CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Remove,
+                    contentDescription = "Меньше",
+                    tint = StardustTextPrimary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            Text(
+                text = "${item.quantity}",
+                color = StardustTextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                modifier = Modifier.widthIn(min = 24.dp),
+                textAlign = TextAlign.Center
+            )
+
+            IconButton(
+                onClick = { onUpdateQuantity(item.quantity + 1) },
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(StardustModalBg, CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "Больше",
+                    tint = StardustTextPrimary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        IconButton(onClick = onRemove) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Удалить",
+                tint = StardustError.copy(alpha = 0.8f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun BottomCartPanel(
+    cart: List<OrderItem>,
+    isExpanded: Boolean,
+    onExpandToggle: (Boolean) -> Unit,
+    onUpdateQuantity: (String, Int) -> Unit,
+    onRemoveItem: (String) -> Unit,
+    onClearCart: () -> Unit,
+    onSubmit: () -> Unit,
+    animatedHeight: Dp,
+    modifier: Modifier = Modifier
+) {
+    if (cart.isEmpty()) return
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(animatedHeight),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        colors = CardDefaults.cardColors(containerColor = StardustModalBg),
+        elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
+        border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.3f))
+    ) {
+        if (!isExpanded) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { onExpandToggle(true) }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1.2f)) {
+                    Text(
+                        text = "Выбрано для списания",
+                        color = StardustTextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${cart.size} поз. (${cart.sumOf { it.quantity }} шт.)",
+                        color = StardustTextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                
+                OverlappingCardFan(
+                    cartItems = cart,
+                    modifier = Modifier
+                        .weight(2f)
+                        .padding(horizontal = 4.dp)
+                )
+
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowUp,
+                    contentDescription = "Развернуть",
+                    tint = StardustPrimary,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Выбранные детали (${cart.size})",
+                        color = StardustTextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(onClick = { onExpandToggle(false) }) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Свернуть",
+                            tint = StardustTextSecondary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(cart, key = { it.itemId }) { item ->
+                        ExpandedCartItemRow(
+                            item = item,
+                            onUpdateQuantity = { qty -> onUpdateQuantity(item.itemId, qty) },
+                            onRemove = { onRemoveItem(item.itemId) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            onClearCart()
+                            onExpandToggle(false)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, StardustError.copy(alpha = 0.5f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = StardustError)
+                    ) {
+                        Text("Отмена", fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            onSubmit()
+                            onExpandToggle(false)
+                        },
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Забрать детали", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ConsumableMiniCard(
+    item: WarehouseItem,
+    onAdd: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = StardustItemBg),
+        border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.2f)),
+        modifier = Modifier
+            .width(150.dp)
+            .height(44.dp)
+            .clickable { onAdd() }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            val imgUrl = constructImageUrl(item.imageUrl)
+            if (imgUrl != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(imgUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = item.shortName,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                )
+            } else {
+                val seedColor = generateColorFromName(item.shortName)
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(seedColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = item.shortName.take(1).uppercase(),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Text(
+                text = item.shortName,
+                color = StardustTextPrimary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+                lineHeight = 11.sp
+            )
+
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Добавить",
+                tint = StardustPrimary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun QuickConsumablesShelf(
+    consumables: List<WarehouseItem>,
+    onAddConsumable: (WarehouseItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                )
+            )
+            .padding(vertical = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Build,
+                contentDescription = null,
+                tint = StardustPrimary,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Быстрые расходники",
+                color = StardustTextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(consumables, key = { it.id }) { item ->
+                ConsumableMiniCard(item = item, onAdd = { onAddConsumable(item) })
+            }
+        }
+    }
+}
+

@@ -235,9 +235,11 @@ class ChatViewModel @Inject constructor(
 
     private fun listenToUnreadCounts() {
         val uid = currentUserId ?: return
+        val sevenDaysAgo = java.util.Date(System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L)
         accessibleRooms.forEach { room ->
             val listener = db.collection("chats").document(room.id)
                 .collection("messages")
+                .whereGreaterThanOrEqualTo("timestamp", sevenDaysAgo)
                 .addSnapshotListener { snapshot, _ ->
                     if (snapshot == null) return@addSnapshotListener
                     val unread = snapshot.documents.count { doc ->

@@ -7,10 +7,9 @@ uniform float3 layerColorB;   // насыщенный красный (серед
 uniform float3 layerColorC;   // тёплый персик (свет)
 uniform float brightness;
 
+// Быстрый хеш
 half hash(float2 p) {
-    p = fract(p * 0.3183099 + float2(0.1, 0.2));
-    p *= 17.0;
-    return fract(p.x * p.y * (p.x + p.y));
+    return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
 }
 
 half noise(float2 x) {
@@ -21,12 +20,12 @@ half noise(float2 x) {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+// 3 октавы вместо 4 (было 12 noise → стало 9 noise)
 half fbm(float2 p) {
     half v = 0.0; half a = 0.5; float2 shift = float2(100.0, 50.0);
     mat2 rot = mat2(cos(0.35), sin(0.35), -sin(0.35), cos(0.35));
     v += a * noise(p); p = rot * p * 2.0 + shift; a *= 0.45;
     v += a * noise(p); p = rot * p * 2.0 - shift; a *= 0.45;
-    v += a * noise(p); p = rot * p * 2.0 + shift; a *= 0.4;
     v += a * noise(p);
     return v;
 }
@@ -36,7 +35,7 @@ half4 main(float2 fragCoord) {
     float2 p = (fragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
     float t = iTime * flowSpeed;
 
-    // Органический дрейф с лёгким подъёмом (как жар от огня)
+    // Оптимизация: 5× fbm (15 noise) → 4× fbm (12 noise)
     float2 q = float2(
         fbm(p + float2(0.06 * t, -0.09 * t)),
         fbm(p + float2(0.07 * t, 0.0) + float2(2.1, 0.8))
@@ -49,22 +48,17 @@ half4 main(float2 fragCoord) {
 
     float f = fbm(p + complexity * 1.1 * r + float2(0.025 * t, -0.04 * t));
 
-    // Подъём яркости снизу вверх (uv.y=0 низ, uv.y=1 верх в OpenGL)
     float rise = uv.y;
-
-    // Плавный трёхслойный переход: бордо → красный → персик
     float depth = clamp(f * f * 1.7 + rise * 0.35, 0.0, 1.0);
     float3 col = mix(layerColorA, layerColorB, smoothstep(0.0, 0.45, depth));
     col = mix(col, layerColorC, smoothstep(0.38, 0.78, depth));
 
-    // Мерцание на пиках — тёплые персиковые искры
+    // Мерцание — один sin (было два)
     float spark = smoothstep(0.72, 0.90, depth) * (0.5 + 0.5 * sin(iTime * 3.1 + p.x * 8.0));
     col += layerColorC * spark * 0.14;
 
-    // Мягкий виньет
     float vig = 1.0 - length(uv - 0.5) * 0.38;
-    col *= vig;
+    col *= vig * brightness;
 
-    col *= brightness;
-    return half4(col, 1.0);
+    return half4(clamp(col, 0.0, 1.0), 1.0);
 }

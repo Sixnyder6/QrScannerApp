@@ -4,8 +4,8 @@
 [versions]
 # --- Build Tools & Core (Stable & Compatible Set) ---
 agp = "8.9.1"
-kotlin = "2.2.21"  # Обновлено до версии, совместимой с haze
-ksp = "2.2.21-2.0.5"  # KSP для Kotlin 2.2.21
+kotlin = "2.2.21"
+ksp = "2.2.21-2.0.5"
 googleGmsGoogleServices = "4.4.1"
 
 # --- AndroidX & Jetpack ---

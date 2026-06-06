@@ -27,8 +27,8 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    fun login(username: String, password: String) {
-        authManager.login(username, password)
+    fun login(email: String, password: String) {
+        authManager.login(email, password)
     }
 
     fun logout() {

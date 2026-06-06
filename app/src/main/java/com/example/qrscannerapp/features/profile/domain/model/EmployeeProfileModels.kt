@@ -21,7 +21,8 @@ data class UserProfile(
     val totalRamInGb: Double? = null,
     val isShiftActive: Boolean = false,
     val isAllowedToWork: Boolean = false,
-    val shiftRequestStatus: String = "NONE"
+    val shiftRequestStatus: String = "NONE",
+    val photoUrl: String? = null
 )
 
 data class UserActivityLog(

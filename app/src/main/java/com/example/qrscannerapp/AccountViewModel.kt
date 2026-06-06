@@ -1,7 +1,11 @@
 package com.example.qrscannerapp
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.qrscannerapp.common.upload.CloudinaryUploader
+import com.example.qrscannerapp.common.upload.UploadFolder
 import com.example.qrscannerapp.features.shift.data.repository.ShiftRepository
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ktx.firestore
@@ -52,6 +56,7 @@ data class AccountUiState(
     val isAllowedToWork: Boolean = false,
     val shiftRequestStatus: ShiftRequestStatus = ShiftRequestStatus.NONE,
     val shiftHistory: List<com.example.qrscannerapp.features.shift.domain.model.Shift> = emptyList(),
+    val photoUrl: String? = null,
     // Полевой ремонт — только для TECHNIC
     val fieldRepairStats: FieldRepairStats = FieldRepairStats(),
     val fieldRepairLoading: Boolean = false
@@ -75,13 +80,15 @@ data class UserProfileData(
     val isShiftActive: Boolean,
     val shiftStartTime: Long,
     val isAllowedToWork: Boolean,
-    val shiftRequestStatus: ShiftRequestStatus
+    val shiftRequestStatus: ShiftRequestStatus,
+    val photoUrl: String?
 )
 
 @HiltViewModel
 class AccountViewModel @Inject constructor(
     private val authManager: AuthManager,
-    private val shiftRepository: ShiftRepository
+    private val shiftRepository: ShiftRepository,
+    private val cloudinaryUploader: CloudinaryUploader
 ) : ViewModel() {
 
     private val db = Firebase.firestore
@@ -165,6 +172,30 @@ class AccountViewModel @Inject constructor(
         }
     }
 
+    // ── Загрузка аватара через Cloudinary → Firestore ─────────────────────────
+    fun uploadPhoto(context: Context, uri: Uri) {
+        val uid = userId ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            try {
+                val url = cloudinaryUploader.uploadImage(context, uri, UploadFolder.AVATAR)
+                if (url != null) {
+                    db.collection("internal_users").document(uid)
+                        .update("imageUrl", url)
+                        .await()
+                    // attachUserListener подхватит изменение и обновит AuthState.photoUrl,
+                    // а AccountViewModel.collect(authState) — AccountUiState.photoUrl
+                } else {
+                    _uiState.update { it.copy(error = "Не удалось загрузить фото") }
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "Ошибка загрузки фото: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(isLoading = false) }
+            }
+        }
+    }
+
     private fun loadInitialData() {
         viewModelScope.launch {
             val uid = userId
@@ -193,6 +224,7 @@ class AccountViewModel @Inject constructor(
                         shiftStartTime     = profile.shiftStartTime,
                         isAllowedToWork    = profile.isAllowedToWork,
                         shiftRequestStatus = profile.shiftRequestStatus,
+                        photoUrl           = profile.photoUrl,
                         totalScans         = activity.totalScans,
                         totalSessions      = activity.totalSessions,
                         scansToday         = activity.scansToday,
@@ -228,9 +260,10 @@ class AccountViewModel @Inject constructor(
                 }
                 val startOfToday = cal.timeInMillis
 
-                // Все задания этого техника
+                // Ограничиваем выгрузку последних заданий для расчета статистики (защита от лавины чтений)
                 val allSnapshot = db.collection("field_repair_tasks")
                     .whereEqualTo("assignedToId", uid)
+                    .limit(150)
                     .get().await()
 
                 val allTasks = allSnapshot.documents
@@ -306,8 +339,9 @@ class AccountViewModel @Inject constructor(
         val shiftStartTime     = userDoc.getLong("shiftStartTime") ?: 0L
         val isAllowedToWork    = userDoc.getBoolean("isAllowedToWork") ?: false
         val shiftRequestStatus = ShiftRequestStatus.fromKey(userDoc.getString("shiftRequestStatus"))
+        val photoUrl           = userDoc.getString("imageUrl")
 
-        return UserProfileData(name, roleDisplay, roleEnum, regDate, isShiftActive, shiftStartTime, isAllowedToWork, shiftRequestStatus)
+        return UserProfileData(name, roleDisplay, roleEnum, regDate, isShiftActive, shiftStartTime, isAllowedToWork, shiftRequestStatus, photoUrl)
     }
 
     // ── Активность (сканы/партии) — для не-техников ───────────────────────────
@@ -355,11 +389,27 @@ class AccountViewModel @Inject constructor(
             tempCal.add(Calendar.DAY_OF_WEEK, 1)
         }
 
+        // 1. Получаем точное общее количество сессий через агрегирующий count()
+        val totalSessions = try {
+            db.collection("activity_log")
+                .whereEqualTo("creatorId", userId)
+                .count()
+                .get(com.google.firebase.firestore.AggregateSource.SERVER)
+                .await()
+                .count
+                .toInt()
+        } catch (e: Exception) {
+            0
+        }
+
+        // 2. Лимитируем выгрузку до последних 100 записей для сканов и личного рекорда
         val totalSnapshot = db.collection("activity_log")
             .whereEqualTo("creatorId", userId)
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(100)
             .get().await()
+
         val totalScans    = totalSnapshot.documents.sumOf { it.getLong("itemCount")?.toInt() ?: 0 }
-        val totalSessions = totalSnapshot.size()
         val personalRecord = calculatePersonalRecord(totalSnapshot.documents)
         val streakDays = fetchStreakDays(userId)
 

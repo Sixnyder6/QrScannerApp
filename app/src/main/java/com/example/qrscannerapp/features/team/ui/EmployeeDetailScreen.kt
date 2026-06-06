@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -34,6 +35,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.qrscannerapp.*
 import com.example.qrscannerapp.common.ui.AppBackground
 import com.example.qrscannerapp.features.profile.domain.model.*
@@ -567,7 +570,8 @@ fun EmployeeDetailScreen(
                             name = profile.name.takeIf { it != "Загрузка..." } ?: userName,
                             role = profile.role.takeIf { it.isNotBlank() } ?: UserRole.fromKey(userRole).displayName,
                             roleColor = roleColor,
-                            isShiftActive = profile.isShiftActive
+                            isShiftActive = profile.isShiftActive,
+                            photoUrl = profile.photoUrl
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -1109,7 +1113,7 @@ private fun setupMap(map: GoogleMap, lat: Double, lng: Double, roleColor: Color,
 // ============================================================================================
 
 @Composable
-private fun ProfileHeader(name: String, role: String, roleColor: Color, isShiftActive: Boolean) {
+private fun ProfileHeader(name: String, role: String, roleColor: Color, isShiftActive: Boolean, photoUrl: String? = null) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1126,19 +1130,31 @@ private fun ProfileHeader(name: String, role: String, roleColor: Color, isShiftA
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(modifier = Modifier.size(88.dp)) {
-            val initials = name.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercase() }.joinToString("")
-            Box(
-                modifier = Modifier
-                    .size(88.dp)
-                    .clip(CircleShape)
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(roleColor.copy(alpha = 0.3f), roleColor.copy(alpha = 0.08f))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(initials, color = roleColor, fontWeight = FontWeight.Bold, fontSize = 32.sp)
+            val context = LocalContext.current
+            if (photoUrl != null) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context).data(photoUrl).crossfade(true).build(),
+                    contentDescription = name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clip(CircleShape)
+                )
+            } else {
+                val initials = name.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercase() }.joinToString("")
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clip(CircleShape)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = listOf(roleColor.copy(alpha = 0.3f), roleColor.copy(alpha = 0.08f))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(initials, color = roleColor, fontWeight = FontWeight.Bold, fontSize = 32.sp)
+                }
             }
             Box(
                 modifier = Modifier

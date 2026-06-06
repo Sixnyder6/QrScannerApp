@@ -141,9 +141,63 @@ class WarehouseViewModel : ViewModel() {
         _cart.value = currentCart
     }
 
+    fun onUpdateCartItemQuantity(itemId: String, newQuantity: Int) {
+        if (newQuantity <= 0) {
+            onRemoveFromCart(itemId)
+            return
+        }
+        val currentCart = _cart.value.toMutableList()
+        val index = currentCart.indexOfFirst { it.itemId == itemId }
+        if (index != -1) {
+            val item = currentCart[index]
+            val warehouseItem = _items.value.find { it.id == itemId }
+            if (warehouseItem != null && newQuantity > warehouseItem.stockCount) {
+                viewModelScope.launch { _uiEvents.send(UiEvent.ShowSnackbar("Нельзя заказать больше, чем есть на складе")) }
+                return
+            }
+            currentCart[index] = item.copy(quantity = newQuantity)
+            _cart.value = currentCart
+        }
+    }
+
+
     fun onClearCart() {
         _cart.value = emptyList()
     }
+
+    fun onConfirmTakeAll(userName: String, userId: String = "") {
+        val itemsToTake = _cart.value
+        if (itemsToTake.isEmpty()) return
+
+        viewModelScope.launch {
+            _isLoading.value = true
+            var successCount = 0
+            var firstError: String? = null
+
+            itemsToTake.forEach { orderItem ->
+                val result = repository.takeItem(orderItem.itemId, orderItem.quantity, userName, userId)
+                result.onSuccess {
+                    successCount++
+                }.onFailure { e ->
+                    if (firstError == null) {
+                        firstError = e.message
+                    }
+                }
+            }
+
+            _isLoading.value = false
+
+            if (successCount > 0) {
+                _uiEvents.send(UiEvent.ShowSnackbar("Успешно списано $successCount поз."))
+                _cart.value = emptyList() // Очищаем корзину после успешного списания
+            }
+
+            firstError?.let { err ->
+                _uiEvents.send(UiEvent.ShowSnackbar("Ошибка списания части деталей: $err"))
+            }
+        }
+    }
+
 
     fun onSubmitOrder(userId: String, userName: String, userRole: String) {
         if (_cart.value.isEmpty()) return

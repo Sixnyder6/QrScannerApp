@@ -1026,6 +1026,31 @@ fun AddEditEmployeeDialog(
                             icon        = Icons.Default.AlternateEmail
                         )
 
+                        // Email (автоматически из логина)
+                        if (username.isNotBlank()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(StardustGlassBg)
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Email, null,
+                                    tint = StardustPrimary.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    "$username@gmail.com",
+                                    color = StardustPrimary.copy(alpha = 0.7f),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
                         // Пароль
                         DialogField(
                             value       = password,

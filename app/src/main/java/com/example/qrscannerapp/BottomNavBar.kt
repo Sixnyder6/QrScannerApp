@@ -17,7 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Inventory2
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Warehouse
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,7 +49,7 @@ import androidx.compose.ui.unit.sp
  */
 
 enum class BottomTab {
-    SCANNER, STORAGE, SETTINGS, MENU
+    SCANNER, STORAGE, WAREHOUSE, MENU
 }
 
 private val InactiveColor = Color(0xFF636366)  // Apple tertiary label
@@ -64,10 +64,10 @@ private data class TabItem(
 )
 
 private val tabs = listOf(
-    TabItem(BottomTab.SCANNER,  Icons.Outlined.DocumentScanner, "Сканер"),
-    TabItem(BottomTab.STORAGE,  Icons.Outlined.Inventory2,       "Самокаты"),
-    TabItem(BottomTab.SETTINGS, Icons.Outlined.Settings,         "Настройки"),
-    TabItem(BottomTab.MENU,     Icons.Outlined.GridView,         "Меню")
+    TabItem(BottomTab.SCANNER,   Icons.Outlined.DocumentScanner, "Сканер"),
+    TabItem(BottomTab.STORAGE,   Icons.Outlined.Inventory2,       "Самокаты"),
+    TabItem(BottomTab.WAREHOUSE, Icons.Outlined.Warehouse,        "Склад"),
+    TabItem(BottomTab.MENU,      Icons.Outlined.GridView,         "Меню")
 )
 
 @Composable

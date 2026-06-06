@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.qrscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 45
-        versionName = "1.5.5"
+        versionCode = 46
+        versionName = "1.5.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -63,10 +63,6 @@ android {
         buildConfig = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.11"
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -87,15 +83,11 @@ dependencies {
     implementation("dev.chrisbanes.haze:haze:1.7.1")
     implementation("dev.chrisbanes.haze:haze-materials:1.7.1")
 
-    // Firebase Auth
-    implementation("com.google.firebase:firebase-auth-ktx:23.0.0")
-
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("com.google.android.gms:play-services-location:21.2.0")
     implementation("com.google.android.gms:play-services-maps:20.0.0")
-    implementation("androidx.compose.material:material-icons-extended:1.6.0")
 
     // FastExcel (чтение xlsx)
     implementation("org.dhatim:fastexcel-reader:0.16.4")

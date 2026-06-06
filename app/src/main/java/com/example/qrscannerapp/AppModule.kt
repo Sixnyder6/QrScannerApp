@@ -94,6 +94,10 @@ object AppModule {
 
     // --- FIREBASE & MANAGERS ---
 
+    // ⚠️ ВНИМАНИЕ: СТРОГИЙ СУТОЧНЫЙ ЛИМИТ FIRESTORE — 50,000 ЧТЕНИЙ И ЗАПИСЕЙ В ДЕНЬ!
+    // Все запросы к Firestore в проекте должны быть максимально оптимизированы
+    // (использовать лимиты, пагинацию, Room в качестве SSOT, count() для агрегаций).
+    // Не допускайте бесконтрольных realtime-слушателей или полных get() сканов коллекций!
     @Provides
     @Singleton
     fun provideFirebaseFirestore(): FirebaseFirestore {

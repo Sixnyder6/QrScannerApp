@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
@@ -78,7 +80,8 @@ data class AuthState(
     val shiftStartTime: Long = 0L,
     val isAllowedToWork: Boolean = false,
     val shiftRequestStatus: ShiftRequestStatus = ShiftRequestStatus.NONE,
-    val versionError: Boolean = false  // ⭐ НОВОЕ ПОЛЕ: флаг ошибки версии
+    val versionError: Boolean = false,  // ⭐ НОВОЕ ПОЛЕ: флаг ошибки версии
+    val photoUrl: String? = null
 )
 
 class AuthManager(
@@ -232,6 +235,7 @@ class AuthManager(
                     val isAllowedToWork = userDocument.getBoolean("isAllowedToWork") ?: false
                     val statusString = userDocument.getString("shiftRequestStatus")
                     val shiftRequestStatus = ShiftRequestStatus.fromKey(statusString)
+                    val photoUrl = userDocument.getString("imageUrl")
 
                     _authState.value = AuthState(
                         isLoggedIn = true,
@@ -244,7 +248,8 @@ class AuthManager(
                         isLoading = false,
                         isAllowedToWork = isAllowedToWork,
                         shiftRequestStatus = shiftRequestStatus,
-                        versionError = false
+                        versionError = false,
+                        photoUrl = photoUrl
                     )
                 } else {
                     Log.d(TAG, "User document for UID $uid not found. Logging out.")
@@ -364,59 +369,58 @@ class AuthManager(
         }
     }
 
-    fun login(username: String, password: String) {
-        _authState.value = _authState.value.copy(isLoading = true, error = null, versionError = false)
-        isKickedByAnotherDevice = false
+fun login(email: String, password: String) {
+    _authState.value = _authState.value.copy(isLoading = true, error = null)
+    isKickedByAnotherDevice = false
 
-        scope.launch {
-            try {
-                // ⭐ ПРОВЕРКА ВЕРСИИ ПРИЛОЖЕНИЯ ПЕРЕД ЛОГИНОМ
-                val versionCheckPassed = checkVersionAndBlock()
-                if (!versionCheckPassed) {
-                    return@launch
-                }
+    scope.launch {
+        try {
+            // 1. Вход через Firebase Auth
+            val auth = FirebaseAuth.getInstance()
+            val authResult = auth.signInWithEmailAndPassword(email, password).await()
+            val firebaseUid = authResult.user?.uid ?: throw Exception("Ошибка входа")
 
-                val querySnapshot = firestore.collection("internal_users")
-                    .whereEqualTo("username", username)
-                    .limit(1)
-                    .get()
-                    .await()
+            // 2. Находим пользователя в internal_users по email
+            val querySnapshot = firestore.collection("internal_users")
+                .whereEqualTo("email", email)
+                .limit(1)
+                .get()
+                .await()
 
-                if (querySnapshot.isEmpty) throw Exception("Пользователь не найден")
+            if (querySnapshot.isEmpty) {
+                auth.signOut()
+                throw Exception("Пользователь с таким email не найден")
+            }
 
-                val userDocument = querySnapshot.documents.first()
-                val correctPassword = userDocument.getString("password")
+            val userDocument = querySnapshot.documents.first()
+            val userId = userDocument.id
 
-                if (correctPassword == password) {
-                    val userId = userDocument.id
-                    val currentVersion = getCurrentAppVersion()
+            // 3. ВСЁ КАК БЫЛО — обновляем activeDeviceId и т.д.
+            val currentVersion = getCurrentAppVersion()
+            presenceManager.startTracking(userId)
+            firestore.collection("internal_users").document(userId)
+                .update(mapOf("activeDeviceId" to deviceId, "appVersion" to currentVersion))
+                .await()
 
-                    presenceManager.startTracking(userId)
-                    firestore.collection("internal_users").document(userId)
-                        .update(mapOf("activeDeviceId" to deviceId, "appVersion" to currentVersion))
-                        .await()
+            // 4. Сохраняем в DataStore и запускаем слушатель (как и было)
+            context.dataStore.edit { preferences ->
+                preferences[LOGGED_IN_USER_ID_KEY] = userId
+            }
+            withContext(Dispatchers.Main) {
+                attachUserListener(userId)
+            }
 
-                    context.dataStore.edit { preferences ->
-                        preferences[LOGGED_IN_USER_ID_KEY] = userId
-                    }
-                    withContext(Dispatchers.Main) {
-                        attachUserListener(userId)
-                    }
-                } else {
-                    throw Exception("Неверный пароль")
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _authState.value = AuthState(
-                        isLoggedIn = false,
-                        error = e.message ?: "Ошибка входа",
-                        isLoading = false,
-                        versionError = false
-                    )
-                }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                _authState.value = AuthState(
+                    isLoggedIn = false,
+                    error = e.message ?: "Ошибка входа",
+                    isLoading = false
+                )
             }
         }
     }
+}
 
     private suspend fun forceLogoutLocal(errorMessage: String) {
         heartbeatJob?.cancel()

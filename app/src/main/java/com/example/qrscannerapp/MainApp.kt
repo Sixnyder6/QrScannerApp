@@ -59,6 +59,7 @@ import com.example.qrscannerapp.features.interaction.ui.InteractionScreen
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseAddItemScreen
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseDashboardScreen
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseViewModel
+import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseHistoryScreen
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.WarehouseCatalogScreen
 import com.example.qrscannerapp.features.inventory.ui.distribution.PalletDistributionScreen
 import com.example.qrscannerapp.features.inventory.ui.storage.StorageScreen
@@ -113,6 +114,7 @@ sealed class Screen(val route: String, val title: String) {
     object Warehouse         : Screen("warehouse",                 "Склад")
     object WarehouseCatalog  : Screen("warehouse_catalog",         "Каталог запчастей")
     object WarehouseAddItem  : Screen("warehouse_add_item",        "Новая запчасть")
+    object WarehouseHistory  : Screen("warehouse_history",         "История склада")
     object TaskCreation      : Screen("task_creation",             "Создать Задачу")
     object VisualRepair      : Screen("visual_repair/{scooterId}", "3D Осмотр")
     object Chat              : Screen("chat",                      "Чат")
@@ -293,10 +295,11 @@ fun MainApp(
 
     LaunchedEffect(currentRoute) {
         currentTab = when (currentRoute) {
-            Screen.Storage.route    -> BottomTab.STORAGE
-            Screen.Settings.route   -> BottomTab.SETTINGS
-            Screen.Homescreen.route -> BottomTab.MENU
-            else                    -> BottomTab.SCANNER
+            Screen.Storage.route          -> BottomTab.STORAGE
+            Screen.Warehouse.route,
+            Screen.WarehouseCatalog.route -> BottomTab.WAREHOUSE
+            Screen.Homescreen.route       -> BottomTab.MENU
+            else                          -> BottomTab.SCANNER
         }
     }
 
@@ -316,6 +319,7 @@ fun MainApp(
                         Screen.VisualRepair.route,
                         Screen.WarehouseAddItem.route,
                         Screen.WarehouseCatalog.route,
+                        Screen.WarehouseHistory.route,
                         Screen.StreetDoctorTasks.route,
                         Screen.Storage.route,
                         Screen.Interaction.route,
@@ -401,7 +405,8 @@ fun MainApp(
                         Screen.DirectChat.route,
                         Screen.VisualRepair.route,
                         Screen.SecurityScanner.route,
-                        Screen.DeliveryForm.route
+                        Screen.DeliveryForm.route,
+                        Screen.WarehouseHistory.route
                     )
                     if (currentRoute !in screensWithoutBottomBar) {
                         BottomNavBar(
@@ -416,7 +421,7 @@ fun MainApp(
                                     BottomTab.STORAGE  -> navController.navigate(Screen.Storage.route) {
                                         launchSingleTop = true
                                     }
-                                    BottomTab.SETTINGS -> navController.navigate(Screen.Settings.route) {
+                                    BottomTab.WAREHOUSE -> navController.navigate(Screen.Warehouse.route) {
                                         launchSingleTop = true
                                     }
                                     BottomTab.MENU     -> navController.navigate(Screen.Homescreen.route) {
@@ -430,7 +435,9 @@ fun MainApp(
             ) { innerPadding ->
                 AppNavHost(
                     navController = navController,
-                    modifier = Modifier.padding(innerPadding),
+                    modifier = Modifier
+                        .padding(innerPadding)
+                        .consumeWindowInsets(innerPadding),
                     onHomeClick = {
                         hapticManager.performClick(hapticFeedback, scope)
                         navController.navigate(Screen.Homescreen.route) {
@@ -745,7 +752,9 @@ fun AppNavHost(
                 items = items, cart = cart,
                 onAddToCart = { item, qty -> warehouseViewModel.onAddToCart(item, qty) },
                 onRemoveFromCart = { id -> warehouseViewModel.onRemoveFromCart(id) },
-                onSubmitOrder = { warehouseViewModel.onSubmitOrder(currentUserId, currentUserName, currentUserRole) },
+                onUpdateCartItemQuantity = { id, qty -> warehouseViewModel.onUpdateCartItemQuantity(id, qty) },
+                onClearCart = { warehouseViewModel.onClearCart() },
+                onSubmitOrder = { warehouseViewModel.onConfirmTakeAll(currentUserName, currentUserId) },
                 onNavigateToAddItem = { navController.navigate(Screen.WarehouseAddItem.route) },
                 onTakeItem = { item, quantity -> warehouseViewModel.onTakeItem(item, quantity, currentUserName, currentUserId) },
                 isAdmin = isUserManager,
@@ -778,6 +787,14 @@ fun AppNavHost(
                         totalStock = newItem.totalStock, lowStockThreshold = newItem.lowStockThreshold
                     )
                 }
+            )
+        }
+
+        composable(route = Screen.WarehouseHistory.route, enterTransition = iosEnter, exitTransition = iosExit, popEnterTransition = iosPopEnter, popExitTransition = iosPopExit) {
+            val currentUserId = authState.userId ?: ""
+            WarehouseHistoryScreen(
+                navController = navController,
+                userId = currentUserId
             )
         }
 

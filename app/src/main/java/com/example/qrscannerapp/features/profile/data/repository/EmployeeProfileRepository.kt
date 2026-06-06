@@ -53,6 +53,7 @@ class EmployeeProfileRepository @Inject constructor(
             val isShiftActive = userDoc.getBoolean("isShiftActive") ?: false
             val isAllowedToWork = userDoc.getBoolean("isAllowedToWork") ?: false
             val shiftRequestStatus = userDoc.getString("shiftRequestStatus") ?: "NONE"
+            val photoUrl = userDoc.getString("imageUrl")
 
             // Телеметрийные поля — только из device_telemetry
             val telemetrySource = firestore.collection(TELEMETRY_COLLECTION).document(userId).get().await()
@@ -69,7 +70,8 @@ class EmployeeProfileRepository @Inject constructor(
                 totalRamInGb = telemetrySource.getDouble("totalRamInGb"),
                 isShiftActive = isShiftActive,
                 isAllowedToWork = isAllowedToWork,
-                shiftRequestStatus = shiftRequestStatus
+                shiftRequestStatus = shiftRequestStatus,
+                photoUrl = photoUrl
             )
             Result.success(profile)
         } catch (e: Exception) {

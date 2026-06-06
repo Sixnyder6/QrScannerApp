@@ -35,8 +35,9 @@ import com.example.qrscannerapp.data.local.entity.TelemetryBuffer
 // --- ИМПОРТЫ ДЛЯ SPYDER3000 ---
 import com.example.qrscannerapp.features.settings.ui.SpyderAnimationDao
 import com.example.qrscannerapp.features.settings.ui.SpyderAnimationLog
-// ------------------------------
-
+// ⚠️ ВНИМАНИЕ: СТРОГИЙ СУТОЧНЫЙ ЛИМИТ FIRESTORE — 50,000 ЧТЕНИЙ И ЗАПИСЕЙ В ДЕНЬ!
+// Используйте Room в качестве локального кэша и единственного источника правды для UI (SSOT).
+// Все изменения на сервере должны синхронизироваться порционно или дельта-запросами.
 @Database(
     entities = [
         BatteryRepairLogEntity::class,

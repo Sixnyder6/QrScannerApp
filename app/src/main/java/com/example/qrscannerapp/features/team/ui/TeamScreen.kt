@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -639,6 +641,7 @@ fun TeamMemberCard(
                         .split(" ").take(2)
                         .mapNotNull { it.firstOrNull()?.uppercase() }
                         .joinToString("")
+                    val photoUrl = member.info.photoUrl
 
                     Box(
                         modifier = Modifier
@@ -651,7 +654,16 @@ fun TeamMemberCard(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(initials, color = rColor, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        if (photoUrl != null) {
+                            AsyncImage(
+                                model = photoUrl,
+                                contentDescription = member.info.displayName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape)
+                            )
+                        } else {
+                            Text(initials, color = rColor, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        }
                     }
 
                     // Онлайн-индикатор

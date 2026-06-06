@@ -21,7 +21,8 @@ data class EmployeeInfo(
     val shiftRequestStatus: String = "NONE",
     val isAllowedToWork: Boolean = false,
     val appVersion: String? = null,
-    val lastAppUpdate: Long = 0L
+    val lastAppUpdate: Long = 0L,
+    val photoUrl: String? = null
 ) {
     companion object {
         private const val ONLINE_THRESHOLD_MS  = 3  * 60 * 1000L   // 3 мин

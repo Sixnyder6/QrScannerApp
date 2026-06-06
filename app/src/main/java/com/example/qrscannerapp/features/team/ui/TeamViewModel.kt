@@ -6,6 +6,14 @@ import androidx.lifecycle.viewModelScope
 import com.example.qrscannerapp.EmployeeActivity
 import com.example.qrscannerapp.EmployeeInfo
 import com.example.qrscannerapp.UserRole
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ktx.firestore
@@ -117,7 +125,8 @@ class TeamViewModel @Inject constructor() : ViewModel() {
                             shiftRequestStatus = doc.getString("shiftRequestStatus") ?: "NONE",
                             isAllowedToWork = doc.getBoolean("isAllowedToWork") ?: false,
                             appVersion = doc.getString("appVersion"),
-                            lastAppUpdate = doc.getLong("lastAppUpdate") ?: 0L
+                            lastAppUpdate = doc.getLong("lastAppUpdate") ?: 0L,
+                            photoUrl = doc.getString("imageUrl")
                         )
                     } catch (e: Exception) {
                         Log.e(tag, "Error parsing employee", e)
@@ -271,7 +280,17 @@ class TeamViewModel @Inject constructor() : ViewModel() {
     fun createEmployee(name: String, username: String, pass: String, role: String, warehouseId: String) {
         viewModelScope.launch {
             try {
+                // 1. Создаём email из username
+                val email = "$username@gmail.com"
+
+                // 2. Создаём пользователя через REST API (без автоматического входа)
+                val uid = withContext(Dispatchers.IO) {
+                    createFirebaseUser(email, pass)
+                }
+
+                // 3. Создаём документ в Firestore с documentId = uid из Auth
                 val newUser = hashMapOf(
+                    "email" to email,
                     "username" to username,
                     "password" to pass,
                     "role" to role,
@@ -287,7 +306,8 @@ class TeamViewModel @Inject constructor() : ViewModel() {
                     "lastAppUpdate" to System.currentTimeMillis(),
                     "deviceInfo" to "Created by Admin"
                 )
-                db.collection("internal_users").add(newUser).await()
+                db.collection("internal_users").document(uid).set(newUser).await()
+                Log.d(tag, "Employee created: uid=$uid, email=$email")
             } catch (e: Exception) {
                 Log.e(tag, "Error creating employee", e)
                 _uiState.update { it.copy(error = "Не удалось создать сотрудника: ${e.message}") }
@@ -304,9 +324,18 @@ class TeamViewModel @Inject constructor() : ViewModel() {
                     "isAdmin" to (role == "admin"),
                     "warehouseId" to warehouseId
                 )
-                if (username.isNotBlank()) updates["username"] = username
+                if (username.isNotBlank()) {
+                    updates["username"] = username
+                    updates["email"] = "$username@gmail.com"
+                }
                 if (password.isNotBlank()) updates["password"] = password
+
+                // Обновляем документ в Firestore
                 db.collection("internal_users").document(id).update(updates).await()
+
+                // Примечание: обновление email/password в Firebase Auth
+                // для другого пользователя требует Admin SDK (серверная логика).
+                Log.d(tag, "Employee $id updated in Firestore")
             } catch (e: Exception) {
                 Log.e(tag, "Error updating employee", e)
                 _uiState.update { it.copy(error = "Не удалось обновить данные: ${e.message}") }
@@ -317,12 +346,60 @@ class TeamViewModel @Inject constructor() : ViewModel() {
     fun deleteEmployee(userId: String) {
         viewModelScope.launch {
             try {
+                // 1. Получаем email пользователя перед удалением
+                val userDoc = db.collection("internal_users").document(userId).get().await()
+                val email = userDoc.getString("email") ?: ""
+
+                // 2. Удаляем документ из Firestore
                 db.collection("internal_users").document(userId).delete().await()
+
+                // 3. Пытаемся удалить аккаунт из Firebase Auth
+                // Клиентский SDK не позволяет удалять других пользователей,
+                // для полного удаления из Auth нужен вызов облачной функции (Admin SDK).
+                // Пользователь без документа в internal_users не сможет пройти
+                // attachUserListener в AuthManager и будет выкинут при попытке входа.
+                if (email.isNotBlank()) {
+                    Log.w(tag, "Employee $userId deleted from Firestore. " +
+                            "To fully delete from Firebase Auth, call cloud function with email=$email")
+                }
+                Log.d(tag, "Employee $userId deleted from Firestore")
             } catch (e: Exception) {
                 Log.e(tag, "Error deleting employee", e)
-                _uiState.update { it.copy(error = "Не удалось удалить сотрудника") }
+                _uiState.update { it.copy(error = "Не удалось удалить сотрудника: ${e.message}") }
             }
         }
+    }
+
+    /**
+     * Создаёт пользователя в Firebase Auth через REST API.
+     * Не выполняет автоматический вход — сессия админа сохраняется.
+     */
+    private fun createFirebaseUser(email: String, password: String): String {
+        val apiKey = "AIzaSyCmI-vKOZs5ETMCLYh9-lSk9kdNfxT46-4"
+        val url = URL("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey")
+        val body = JSONObject().apply {
+            put("email", email)
+            put("password", password)
+            put("returnSecureToken", false)
+        }
+        val connection = url.openConnection() as HttpURLConnection
+        connection.run {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            outputStream.use { it.write(body.toString().toByteArray()) }
+        }
+        val response = connection.inputStream.use {
+            BufferedReader(InputStreamReader(it)).readText()
+        }
+        connection.disconnect()
+        val json = JSONObject(response)
+        if (json.has("error")) {
+            throw Exception(json.getJSONObject("error").getString("message"))
+        }
+        val uid = json.getString("localId")
+        Log.d(tag, "Firebase Auth user created via REST API: uid=$uid")
+        return uid
     }
 
     fun clearError() {

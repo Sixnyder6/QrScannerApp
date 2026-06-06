@@ -1,6 +1,9 @@
 package com.example.qrscannerapp
 
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -73,19 +76,6 @@ object CorporateColors {
     val AccentAmber   = Color(0xFFF59E0B)
 }
 
-private const val GITHUB_EMPLOYEES_URL =
-    "https://raw.githubusercontent.com/Sixnyder6/QrScannerApp/master/images/employees/"
-
-fun getEmployeePhotoUrl(userName: String): String? {
-    val filename = when (userName) {
-        "Николай Никасов"   -> "nikasov.png"
-        "Михаил Ситников"   -> "sitnikov.png"
-        "Соболев Владислав" -> "sobolev.png"
-        else -> null
-    }
-    return filename?.let { GITHUB_EMPLOYEES_URL + it }
-}
-
 // =================================================================================
 // ГЛАВНЫЙ ЭКРАН
 // =================================================================================
@@ -155,7 +145,7 @@ fun AccountScreen(authManager: AuthManager) {
 
 @Composable
 private fun LoginScreen(authManager: AuthManager, loginErrorKey: Int) {
-    var username by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPass by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -194,12 +184,12 @@ private fun LoginScreen(authManager: AuthManager, loginErrorKey: Int) {
             Text("Stardust Field Operations", fontSize = 13.sp, color = CorporateColors.TextSecondary)
             Spacer(Modifier.height(32.dp))
 
-            // Поле логина
+            // Поле email
             AccountInputField(
-                value       = username,
-                onChange    = { username = it },
-                placeholder = "Логин",
-                icon        = Icons.Default.Person,
+                value       = email,
+                onChange    = { email = it },
+                placeholder = "Email",
+                icon        = Icons.Default.Email,
                 onNext      = { passwordFocusRequester.requestFocus() }
             )
             Spacer(Modifier.height(10.dp))
@@ -220,7 +210,7 @@ private fun LoginScreen(authManager: AuthManager, loginErrorKey: Int) {
             Spacer(Modifier.height(24.dp))
 
             // Кнопка войти
-            val canLogin = username.isNotBlank() && password.isNotBlank()
+            val canLogin = email.isNotBlank() && password.isNotBlank()
             val btnAlpha by animateFloatAsState(if (canLogin) 1f else 0.45f, tween(200), label = "btn")
             Box(
                 modifier = Modifier.fillMaxWidth().height(54.dp)
@@ -234,7 +224,7 @@ private fun LoginScreen(authManager: AuthManager, loginErrorKey: Int) {
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         enabled = canLogin
-                    ) { focusManager.clearFocus(); scope.launch { authManager.login(username.trim(), password.trim()) } },
+                    ) { focusManager.clearFocus(); scope.launch { authManager.login(email.trim(), password.trim()) } },
                 contentAlignment = Alignment.Center
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -331,12 +321,21 @@ private fun AccountInputField(
 
 @Composable
 fun PersonalProfileScreen(viewModel: AccountViewModel, state: AccountUiState, authManager: AuthManager) {
+    val photoUrl = state.photoUrl
     val scope = rememberCoroutineScope()
     val isTechnic = state.userRoleEnum == UserRole.TECHNIC
+    val context = LocalContext.current
 
     var showEndShiftDialog by remember { mutableStateOf(false) }
     var showLogoutDialog   by remember { mutableStateOf(false) }
     var showHistorySheet   by remember { mutableStateOf(false) }
+
+    // ImagePicker для аватара
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.uploadPhoto(context, it) }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // ── Градиентный фон за шапкой ────────────────────────────────
@@ -364,7 +363,7 @@ fun PersonalProfileScreen(viewModel: AccountViewModel, state: AccountUiState, au
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item { ProfileHeader(userName = state.userName, userRole = state.userRole, isShiftActive = state.isShiftActive, onStartShift = { viewModel.startShift() }, onEndShift = { showEndShiftDialog = true }) }
+            item { ProfileHeader(userName = state.userName, userRole = state.userRole, isShiftActive = state.isShiftActive, photoUrl = photoUrl, onStartShift = { viewModel.startShift() }, onEndShift = { showEndShiftDialog = true }, onPhotoClick = { imagePickerLauncher.launch("image/*") }) }
 
             item {
                 AnimatedVisibility(visible = state.isShiftActive, enter = fadeIn(tween(300)) + expandVertically(tween(500)), exit = fadeOut(tween(300)) + shrinkVertically(tween(500))) {
@@ -501,10 +500,10 @@ fun PersonalProfileScreen(viewModel: AccountViewModel, state: AccountUiState, au
 // =================================================================================
 
 @Composable
-fun ProfileHeader(userName: String, userRole: String, isShiftActive: Boolean, onStartShift: () -> Unit, onEndShift: () -> Unit, modifier: Modifier = Modifier) {
-    val photoUrl = remember(userName) { getEmployeePhotoUrl(userName) }
+fun ProfileHeader(userName: String, userRole: String, isShiftActive: Boolean, photoUrl: String?, onStartShift: () -> Unit, onEndShift: () -> Unit, onPhotoClick: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     var isShiftLoading by remember { mutableStateOf(false) }
     LaunchedEffect(isShiftActive) { isShiftLoading = false }
+    val hasPhoto = photoUrl != null
 
     // Пульс онлайн-индикатора
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -552,6 +551,24 @@ fun ProfileHeader(userName: String, userRole: String, isShiftActive: Boolean, on
                         Icon(Icons.Default.Person, null, modifier = Modifier.size(36.dp).align(Alignment.Center), tint = CorporateColors.TextSecondary)
                     }
                 }
+
+                // Overlay: кнопка выбора фото (поверх аватара)
+                if (onPhotoClick != null) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                            .background(if (hasPhoto) Color.Black.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.25f))
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onPhotoClick() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Сменить фото",
+                            tint = Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier.size(if (hasPhoto) 20.dp else 22.dp)
+                        )
+                    }
+                }
+
                 // Онлайн точка
                 Box(
                     modifier = Modifier.size(16.dp).align(Alignment.BottomEnd)
@@ -580,6 +597,16 @@ fun ProfileHeader(userName: String, userRole: String, isShiftActive: Boolean, on
                     Icon(Icons.Default.LocationOn, null, tint = CorporateColors.AccentGreen, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(3.dp))
                     Text("Бестужевская 10", fontSize = 12.sp, color = CorporateColors.TextSecondary)
+                }
+                // Подпись «Изменить фото», если фото уже есть
+                if (hasPhoto && onPhotoClick != null) {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "Изменить фото",
+                        color = CorporateColors.AccentPurple.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onPhotoClick() }
+                    )
                 }
             }
         }

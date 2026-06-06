@@ -6,7 +6,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -27,10 +30,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -40,6 +49,8 @@ import coil.request.ImageRequest
 import com.example.qrscannerapp.*
 import com.example.qrscannerapp.features.inventory.data.NewsItem
 import com.example.qrscannerapp.features.inventory.data.OrderStatus
+import com.example.qrscannerapp.features.inventory.data.WarehouseItem
+import com.example.qrscannerapp.features.inventory.data.WarehouseLog
 import com.example.qrscannerapp.features.inventory.data.WarehouseOrder
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.ActivityLogSheet
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.components.EmployeeHistorySheet
@@ -129,6 +140,67 @@ fun WarehouseDashboardScreen(
     val employeeHistory by viewModel.employeeHistory.collectAsState()
     val isEmployeeHistoryLoading by viewModel.isEmployeeHistoryLoading.collectAsState()
 
+    val items by viewModel.items.collectAsState()
+    val logs by viewModel.logs.collectAsState()
+
+    // 1. Дефицит (низкий остаток)
+    val lowStockItemsCount = remember(items) {
+        items.count { it.stockCount <= it.lowStockThreshold }
+    }
+
+    // Вспомогательные функции для дат
+    fun getStartOfDay(timeMs: Long): Long {
+        return java.util.Calendar.getInstance().apply {
+            timeInMillis = timeMs
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+
+    fun getEndOfDay(timeMs: Long): Long {
+        return java.util.Calendar.getInstance().apply {
+            timeInMillis = timeMs
+            set(java.util.Calendar.HOUR_OF_DAY, 23)
+            set(java.util.Calendar.MINUTE, 59)
+            set(java.util.Calendar.SECOND, 59)
+            set(java.util.Calendar.MILLISECOND, 999)
+        }.timeInMillis
+    }
+
+    // 2. Взято сегодня
+    val takenTodayCount = remember(logs) {
+        val todayStart = getStartOfDay(System.currentTimeMillis())
+        val todayEnd = getEndOfDay(System.currentTimeMillis())
+        logs.filter { log ->
+            log.timestamp.toDate().time in todayStart..todayEnd && log.quantityChange < 0
+        }.sumOf { -it.quantityChange }
+    }
+
+    // 3. Данные графика (Объемы списаний за последние 7 дней)
+    val last7DaysActivity = remember(logs) {
+        val calendar = java.util.Calendar.getInstance()
+        val result = mutableListOf<Pair<String, Float>>()
+        val dayFormat = java.text.SimpleDateFormat("EE", java.util.Locale("ru"))
+
+        for (i in 6 downTo 0) {
+            calendar.timeInMillis = System.currentTimeMillis()
+            calendar.add(java.util.Calendar.DAY_OF_YEAR, -i)
+            val dayStart = getStartOfDay(calendar.timeInMillis)
+            val dayEnd = getEndOfDay(calendar.timeInMillis)
+            val rawLabel = dayFormat.format(java.util.Date(calendar.timeInMillis))
+            val dayLabel = rawLabel.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale("ru")) else it.toString() }
+
+            val dayTotal = logs.filter { log ->
+                log.timestamp.toDate().time in dayStart..dayEnd && log.quantityChange < 0
+            }.sumOf { -it.quantityChange }.toFloat()
+
+            result.add(dayLabel to dayTotal)
+        }
+        result
+    }
+
     LaunchedEffect(syncIsBusy) {
         if (syncIsBusy) {
             delay(2000)
@@ -155,18 +227,7 @@ fun WarehouseDashboardScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0),
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { /* Навигация на сканер */ },
-                containerColor = StardustPrimary,
-                contentColor = Color.Black,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.size(64.dp)
-            ) {
-                Icon(Icons.Rounded.QrCodeScanner, null, modifier = Modifier.size(32.dp))
-            }
-        }
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         LazyColumn(
             modifier = Modifier
@@ -175,25 +236,18 @@ fun WarehouseDashboardScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // === БЛОК С НОВОСТЯМИ И СВОДКОЙ ===
+            // === БЛОК С АНАЛИТИКОЙ И СОТРУДНИКОМ (Сверху) ===
             item {
-                WarehouseSummaryCardWithNews(
-                    news = newsItems,
+                WarehouseSummaryCard(
+                    items = items,
+                    logs = logs,
                     shiftState = shiftState,
-                    lowStockItemsCount = 0,
-                    takenTodayCount = 0,
-                    onLowStockClick = { },
-                    onTakenTodayClick = { },
+                    takenTodayCount = takenTodayCount,
+                    last7DaysActivity = last7DaysActivity,
+                    onLowStockClick = { navController.navigate(Screen.WarehouseCatalog.route) },
+                    onTakenTodayClick = { navController.navigate(Screen.WarehouseHistory.route) },
                     onAnalyticsClick = { },
                     onExportClick = { },
-                    onAddNews = {
-                        newsItemToEdit = null
-                        showNewsEditSheet = true
-                    },
-                    onEditNews = { itemToEdit ->
-                        newsItemToEdit = itemToEdit
-                        showNewsEditSheet = true
-                    },
                     onChangeEmployeeClick = { showEmployeeSheet = true },
                     canManage = canManageWarehouse
                 )
@@ -234,7 +288,7 @@ fun WarehouseDashboardScreen(
                         subtitle = "Все операции",
                         color = StardustItemBg,
                         iconTint = StardustTextSecondary,
-                        onClick = { showActivityLog = true }
+                        onClick = { navController.navigate("warehouse_history") }
                     )
                     ActionCard(
                         modifier = Modifier.weight(1f),
@@ -247,6 +301,25 @@ fun WarehouseDashboardScreen(
                         onClick = { navController.navigate(Screen.WarehouseCatalog.route) }
                     )
                 }
+            }
+
+            // === БЛОК НОВОСТЕЙ ===
+            item {
+                EmbeddedNewsWidget(
+                    news = newsItems,
+                    onAddClick = {
+                        newsItemToEdit = null
+                        showNewsEditSheet = true
+                    },
+                    onEditClick = { itemToEdit ->
+                        newsItemToEdit = itemToEdit
+                        showNewsEditSheet = true
+                    },
+                    canManage = canManageWarehouse,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                )
             }
 
             // === ИНСТРУМЕНТЫ КЛАДОВЩИКА ===
@@ -677,22 +750,19 @@ fun OrderDetailsSheet(
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
-}
-
-// --- Остальные компоненты (Summary, DashboardWidget и др.) ---
+}// --- Остальные компоненты (Summary, DashboardWidget и др.) ---
 
 @Composable
-fun WarehouseSummaryCardWithNews(
-    news: List<NewsItem>,
+fun WarehouseSummaryCard(
+    items: List<WarehouseItem>,
+    logs: List<WarehouseLog>,
     shiftState: ShiftState,
-    lowStockItemsCount: Int,
     takenTodayCount: Int,
+    last7DaysActivity: List<Pair<String, Float>>,
     onLowStockClick: () -> Unit,
     onTakenTodayClick: () -> Unit,
     onAnalyticsClick: () -> Unit,
     onExportClick: () -> Unit,
-    onAddNews: () -> Unit,
-    onEditNews: (NewsItem) -> Unit,
     onChangeEmployeeClick: () -> Unit,
     canManage: Boolean
 ) {
@@ -702,23 +772,18 @@ fun WarehouseSummaryCardWithNews(
         colors = CardDefaults.cardColors(containerColor = StardustGlassBg)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(modifier = Modifier.height(IntrinsicSize.Min), verticalAlignment = Alignment.Top) {
-                Box(modifier = Modifier.weight(1.2f).fillMaxHeight()) {
-                    EmbeddedNewsWidget(
-                        news = news,
-                        onAddClick = onAddNews,
-                        onEditClick = onEditNews,
-                        canManage = canManage
-                    )
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val lowStockColor = if (lowStockItemsCount > 0) StardustError else StardustSuccess
-                    DashboardWidget(title = "Заканчивается", count = lowStockItemsCount, icon = Icons.Outlined.WarningAmber, color = lowStockColor, onClick = onLowStockClick)
-                    DashboardWidget(title = "Взято сегодня", count = takenTodayCount, icon = Icons.AutoMirrored.Outlined.TrendingUp, color = StardustPrimary, prefix = "+", onClick = onTakenTodayClick)
-                }
-            }
-            Spacer(modifier = Modifier.height(20.dp))
+            WarehouseStockActivityWidget(
+                items = items,
+                logs = logs,
+                takenTodayCount = takenTodayCount,
+                last7DaysActivity = last7DaysActivity,
+                onLowStockClick = onLowStockClick,
+                onTakenTodayClick = onTakenTodayClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
             val employeeRowModifier = if (canManage) {
                 Modifier.clickable(onClick = onChangeEmployeeClick)
             } else {
@@ -910,7 +975,8 @@ fun EmbeddedNewsWidget(
     news: List<NewsItem>,
     onAddClick: () -> Unit,
     onEditClick: (NewsItem) -> Unit,
-    canManage: Boolean
+    canManage: Boolean,
+    modifier: Modifier = Modifier
 ) {
     var currentIndex by remember { mutableIntStateOf(0) }
     val currentItem = news.getOrNull(currentIndex)
@@ -924,7 +990,7 @@ fun EmbeddedNewsWidget(
         }
     }
 
-    Card(modifier = Modifier.fillMaxSize(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
+    Card(modifier = modifier, shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
         AnimatedContent(
             targetState = currentItem,
             transitionSpec = { (fadeIn() + scaleIn(initialScale = 0.95f)).togetherWith(fadeOut()) },
@@ -934,26 +1000,57 @@ fun EmbeddedNewsWidget(
                 Box(modifier = Modifier.fillMaxSize()) {
                     AnimatedGradientBackground(baseColor = item.tag.color)
                     Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = item.title.uppercase(), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold, fontSize = 10.sp, color = Color.White.copy(alpha = 0.7f))
-                            Box(modifier = Modifier.background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
-                                Text(item.tag.displayName, fontSize = 9.sp, color = Color.White)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = item.title.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text(item.tag.displayName, fontSize = 9.sp, color = Color.White)
+                                }
+                                if (canManage) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Edit,
+                                        contentDescription = "Редактировать",
+                                        tint = Color.White.copy(alpha = 0.8f),
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clickable { onEditClick(item) }
+                                            .padding(4.dp)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Outlined.Add,
+                                        contentDescription = "Добавить",
+                                        tint = Color.White.copy(alpha = 0.8f),
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clickable { onAddClick() }
+                                            .padding(4.dp)
+                                    )
+                                }
                             }
                         }
                         Text(text = item.content, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 3, lineHeight = 18.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             news.forEachIndexed { index, _ ->
                                 Box(modifier = Modifier.height(4.dp).width(if (index == currentIndex) 12.dp else 4.dp).clip(CircleShape).background(Color.White.copy(alpha = if (index == currentIndex) 1f else 0.3f)))
-                            }
-                        }
-                    }
-                    if (canManage) {
-                        Row(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
-                            IconButton(onClick = { onEditClick(item) }, enabled = news.isNotEmpty()) {
-                                Icon(Icons.Outlined.Edit, "Редактировать", tint = Color.White.copy(alpha = 0.7f))
-                            }
-                            IconButton(onClick = onAddClick) {
-                                Icon(Icons.Outlined.Add, "Добавить", tint = Color.White.copy(alpha = 0.7f))
                             }
                         }
                     }
@@ -988,12 +1085,66 @@ fun DashboardWidget(title: String, count: Int, icon: ImageVector, color: Color, 
 
 @Composable
 fun ActionCard(modifier: Modifier = Modifier, icon: ImageVector, title: String, subtitle: String, color: Color, iconTint: Color, borderColor: Color? = null, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = modifier.height(90.dp), shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = color), border = if (borderColor != null) BorderStroke(1.dp, borderColor) else null) {
-        Column(modifier = Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.Start) {
-            Icon(icon, null, tint = iconTint)
-            Column {
-                Text(title, color = StardustTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Text(subtitle, color = StardustTextSecondary, fontSize = 10.sp, lineHeight = 10.sp)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "scale"
+    )
+
+    Card(
+        onClick = onClick,
+        modifier = modifier
+            .height(90.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            },
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = color),
+        border = if (borderColor != null) BorderStroke(1.dp, borderColor) else BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
+        interactionSource = interactionSource
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.align(Alignment.TopStart)
+            )
+
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = StardustTextSecondary.copy(alpha = 0.4f),
+                modifier = Modifier
+                    .size(16.dp)
+                    .align(Alignment.TopEnd)
+            )
+
+            Column(
+                modifier = Modifier.align(Alignment.BottomStart)
+            ) {
+                Text(
+                    text = title,
+                    color = StardustTextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = subtitle,
+                    color = StardustTextSecondary,
+                    fontSize = 10.sp,
+                    lineHeight = 10.sp
+                )
             }
         }
     }
@@ -1004,4 +1155,499 @@ fun AnimatedGradientBackground(baseColor: Color) {
     val infiniteTransition = rememberInfiniteTransition(label = "bg_anim")
     val offset by infiniteTransition.animateFloat(initialValue = 0f, targetValue = 1000f, animationSpec = infiniteRepeatable(animation = tween(20000, easing = LinearEasing), repeatMode = RepeatMode.Reverse), label = "offset")
     Canvas(modifier = Modifier.fillMaxSize()) { drawRect(brush = Brush.linearGradient(colors = listOf(baseColor, baseColor.copy(alpha = 0.6f), Color.Black.copy(alpha = 0.8f)), start = Offset(0f, 0f), end = Offset(size.width + offset, size.height + offset))) }
+}
+
+@Composable
+fun WarehouseStockActivityWidget(
+    items: List<WarehouseItem>,
+    logs: List<WarehouseLog>,
+    takenTodayCount: Int,
+    last7DaysActivity: List<Pair<String, Float>>,
+    onLowStockClick: () -> Unit,
+    onTakenTodayClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val lowStockCount = remember(items) {
+        items.count { it.stockCount <= it.lowStockThreshold }
+    }
+
+    var currentSlide by remember { mutableIntStateOf(0) }
+    LaunchedEffect(items.size) {
+        while (isActive) {
+            delay(7000)
+            currentSlide = (currentSlide + 1) % 3
+        }
+    }
+
+    val criticalItems = remember(items) {
+        val deficits = items.filter { it.stockCount <= it.lowStockThreshold }
+        val sorted = if (deficits.isNotEmpty()) {
+            deficits.sortedBy { it.stockCount.toFloat() / (if (it.lowStockThreshold > 0) it.lowStockThreshold else 1).toFloat() }
+        } else {
+            items.sortedBy { it.stockCount.toFloat() / (if (it.lowStockThreshold > 0) it.lowStockThreshold else 1).toFloat() }
+        }
+        sorted.take(3)
+    }
+
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.25f)),
+        border = BorderStroke(1.dp, StardustItemBg)
+    ) {
+        AnimatedContent(
+            targetState = currentSlide,
+            transitionSpec = {
+                if (targetState > initialState) {
+                    (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
+                        slideOutHorizontally { width -> -width } + fadeOut()
+                    )
+                } else {
+                    (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
+                        slideOutHorizontally { width -> width } + fadeOut()
+                    )
+                }
+            },
+            label = "SlideTransition",
+            modifier = Modifier.fillMaxSize()
+        ) { slide ->
+            if (slide == 0) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Stats Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Взято сегодня
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(onClick = onTakenTodayClick)
+                        ) {
+                            Text("Взято сегодня", color = StardustTextSecondary, fontSize = 10.sp)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "+$takenTodayCount шт",
+                                    color = StardustPrimary,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Outlined.TrendingUp,
+                                    contentDescription = null,
+                                    tint = StardustPrimary.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+
+                        // Дефицит
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(onClick = onLowStockClick),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Text("Дефицит", color = StardustTextSecondary, fontSize = 10.sp)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val color = if (lowStockCount > 0) StardustError else StardustSuccess
+                                Text(
+                                    text = "$lowStockCount поз",
+                                    color = color,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Icon(
+                                    imageVector = Icons.Outlined.WarningAmber,
+                                    contentDescription = null,
+                                    tint = color.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Chart
+                    StockActivityChart(
+                        dataPoints = last7DaysActivity,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    )
+                }
+            } else if (slide == 1) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Состояние запасов", color = StardustTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Критические позиции", color = StardustTextSecondary, fontSize = 9.sp)
+                        }
+                        if (lowStockCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .background(StardustError.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("$lowStockCount дефицит", color = StardustError, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .background(StardustSuccess.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("Запасы в норме", color = StardustSuccess, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        criticalItems.forEach { item ->
+                            val isDeficit = item.stockCount <= item.lowStockThreshold
+                            val denom = if (item.lowStockThreshold > 0) item.lowStockThreshold else 10
+                            val progress = (item.stockCount.toFloat() / denom.toFloat()).coerceIn(0f, 1f)
+                            val progressColor = when {
+                                item.stockCount == 0 -> StardustError
+                                item.stockCount <= item.lowStockThreshold / 2 -> StardustError.copy(alpha = 0.8f)
+                                isDeficit -> StardustWarning
+                                else -> StardustPrimary
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = item.shortName.ifBlank { item.fullName.take(15) },
+                                        color = StardustTextPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "${item.stockCount} / ${item.lowStockThreshold} ${item.unit}",
+                                        color = if (isDeficit) StardustWarning else StardustTextSecondary,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = { progress },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = progressColor,
+                                    trackColor = Color.White.copy(alpha = 0.08f),
+                                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                val latestLogs = remember(logs) {
+                    logs.sortedByDescending { it.timestamp.toDate().time }
+                        .take(3)
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Последняя активность", color = StardustTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("История операций в реальном времени", color = StardustTextSecondary, fontSize = 9.sp)
+                        }
+                        Icon(
+                            imageVector = Icons.Outlined.History,
+                            contentDescription = null,
+                            tint = StardustTextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (latestLogs.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Нет недавних операций", color = StardustTextSecondary, fontSize = 11.sp)
+                            }
+                        } else {
+                            latestLogs.forEach { log ->
+                                val timeStr = remember(log.timestamp) {
+                                    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+                                    sdf.format(log.timestamp.toDate())
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clip(CircleShape)
+                                                .background(if (log.quantityChange < 0) StardustError.copy(alpha = 0.15f) else StardustSuccess.copy(alpha = 0.15f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (log.quantityChange < 0) Icons.Default.CallMade else Icons.Default.CallReceived,
+                                                contentDescription = null,
+                                                tint = if (log.quantityChange < 0) StardustError else StardustSuccess,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            val parts = log.userName.trim().split("\\s+".toRegex())
+                                            val shortUser = if (parts.size >= 2) "${parts[0]} ${parts[1].take(1)}." else log.userName
+                                            Text(
+                                                text = "$shortUser • ${log.itemName}",
+                                                color = StardustTextPrimary,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = timeStr,
+                                                color = StardustTextSecondary,
+                                                fontSize = 9.sp
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = if (log.quantityChange < 0) "${log.quantityChange} шт" else "+${log.quantityChange} шт",
+                                        color = if (log.quantityChange < 0) StardustError else StardustSuccess,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StockActivityChart(
+    dataPoints: List<Pair<String, Float>>,
+    modifier: Modifier = Modifier
+) {
+    val animProgress = remember { Animatable(0f) }
+    LaunchedEffect(dataPoints) {
+        animProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 1500, easing = FastOutSlowInEasing)
+        )
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulseAlpha"
+    )
+    val pulseRadius by infiniteTransition.animateFloat(
+        initialValue = 4f,
+        targetValue = 12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulseRadius"
+    )
+
+    val maxVal = remember(dataPoints) {
+        val max = dataPoints.maxOfOrNull { it.second } ?: 0f
+        if (max == 0f) 10f else max
+    }
+
+    Box(modifier = modifier) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
+            val paddingX = 16.dp.toPx()
+            val paddingBottom = 16.dp.toPx()
+            val paddingTop = 8.dp.toPx()
+
+            val chartWidth = width - (paddingX * 2)
+            val chartHeight = height - paddingBottom - paddingTop
+
+            if (dataPoints.size < 2) return@Canvas
+
+            // Координаты точек
+            val points = dataPoints.mapIndexed { idx, pair ->
+                val x = paddingX + (idx * chartWidth / (dataPoints.size - 1))
+                val ratio = pair.second / maxVal
+                val y = height - paddingBottom - (ratio * chartHeight)
+                Offset(x, y)
+            }
+
+            // Фоновая сетка / средняя линия
+            val avgRatio = 0.5f
+            val avgY = height - paddingBottom - (avgRatio * chartHeight)
+            drawLine(
+                color = StardustItemBg.copy(alpha = 0.4f),
+                start = Offset(paddingX, avgY),
+                end = Offset(width - paddingX, avgY),
+                strokeWidth = 1.dp.toPx(),
+                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+            )
+
+            // Кривая Безье
+            val strokePath = Path().apply {
+                val firstPoint = points.first()
+                moveTo(firstPoint.x, firstPoint.y)
+
+                for (i in 1 until points.size) {
+                    val from = points[i - 1]
+                    val to = points[i]
+                    val cx1 = from.x + (to.x - from.x) / 2f
+                    val cy1 = from.y
+                    val cx2 = from.x + (to.x - from.x) / 2f
+                    val cy2 = to.y
+                    cubicTo(cx1, cy1, cx2, cy2, to.x, to.y)
+                }
+            }
+
+            val animatedWidth = paddingX + (chartWidth * animProgress.value)
+
+            clipRect(
+                left = 0f,
+                top = 0f,
+                right = animatedWidth,
+                bottom = height
+            ) {
+                // Glow эффект сзади
+                drawPath(
+                    path = strokePath,
+                    color = StardustPrimary.copy(alpha = 0.2f),
+                    style = Stroke(
+                        width = 5.dp.toPx(),
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    )
+                )
+
+                // Линия тренда
+                drawPath(
+                    path = strokePath,
+                    color = StardustPrimary,
+                    style = Stroke(
+                        width = 1.5f.dp.toPx(),
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    )
+                )
+
+                // Область заливки
+                val fillPath = Path().apply {
+                    addPath(strokePath)
+                    lineTo(points.last().x, height - paddingBottom)
+                    lineTo(points.first().x, height - paddingBottom)
+                    close()
+                }
+
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            StardustPrimary.copy(alpha = 0.12f),
+                            Color.Transparent
+                        ),
+                        startY = points.minOf { it.y },
+                        endY = height - paddingBottom
+                    )
+                )
+
+                // Пульсирующая биржевая точка на конце линии
+                if (animProgress.value > 0.95f) {
+                    val lastPoint = points.last()
+                    // Внешнее свечение
+                    drawCircle(
+                        color = StardustPrimary.copy(alpha = pulseAlpha),
+                        radius = pulseRadius.dp.toPx(),
+                        center = lastPoint
+                    )
+                    // Центральная точка
+                    drawCircle(
+                        color = StardustPrimary,
+                        radius = 2.5f.dp.toPx(),
+                        center = lastPoint
+                    )
+                }
+            }
+
+            // Рисование дней недели
+            val textPaint = android.graphics.Paint().apply {
+                color = StardustTextSecondary.copy(alpha = 0.7f).toArgb()
+                textSize = 10.sp.toPx()
+                textAlign = android.graphics.Paint.Align.CENTER
+                typeface = android.graphics.Typeface.create("Roboto", android.graphics.Typeface.NORMAL)
+            }
+
+            dataPoints.forEachIndexed { idx, pair ->
+                val x = paddingX + (idx * chartWidth / (dataPoints.size - 1))
+                val y = height - 2.dp.toPx()
+                drawContext.canvas.nativeCanvas.drawText(
+                    pair.first,
+                    x,
+                    y,
+                    textPaint
+                )
+            }
+        }
+    }
 }
