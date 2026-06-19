@@ -132,7 +132,7 @@ class WarehouseViewModel : ViewModel() {
             )
         }
         _cart.value = currentCart
-        viewModelScope.launch { _uiEvents.send(UiEvent.ShowSnackbar("Добавлено в корзину")) }
+        // Убираем уведомление "Добавлено", так как теперь есть анимация полета в корзину
     }
 
     fun onRemoveFromCart(itemId: String) {

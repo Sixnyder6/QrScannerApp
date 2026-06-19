@@ -17,6 +17,7 @@ import com.example.qrscannerapp.features.inventory.data.mapper.toDomain
 import com.example.qrscannerapp.features.inventory.data.mapper.toEntity
 import com.example.qrscannerapp.features.inventory.data.mapper.toJson
 import com.example.qrscannerapp.features.inventory.domain.model.StoragePallet
+import com.example.qrscannerapp.features.inventory.domain.model.HubEntry
 import com.example.qrscannerapp.features.inventory.data.worker.InventorySyncWorker
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -25,9 +26,8 @@ import com.google.firebase.firestore.Query
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.Collections
@@ -50,9 +50,63 @@ class StorageRepository @Inject constructor(
     private val activityLogCollection = firestore.collection("storage_activity_log")
     private val palletsCollection = firestore.collection("storage_pallets")
     private val batteriesCollection = firestore.collection("batteries")
+    private val hubHistoryCollection = firestore.collection("scooter_hub_history")
 
     private var palletsListenerRegistration: ListenerRegistration? = null
     private var cellsListenerRegistration: ListenerRegistration? = null
+
+    // ========================================================================================
+    // SCOOTER HUB
+    // ========================================================================================
+
+    fun getHubHistoryFlow(): Flow<List<HubEntry>> {
+        return callbackFlow {
+            val listener = hubHistoryCollection
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.e("StorageRepository", "Error fetching hub history", error)
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val entries = snapshot.documents.mapNotNull { it.toObject(HubEntry::class.java) }
+                        trySend(entries)
+                    }
+                }
+            awaitClose { listener.remove() }
+        }.flowOn(Dispatchers.IO)
+    }
+
+    suspend fun saveHubEntry(entry: HubEntry): Result<Unit> {
+        return try {
+            val currentUser = authManager.authState.first()
+            val entryWithUser = entry.copy(
+                userId = currentUser.userId ?: "",
+                userName = currentUser.userName ?: "Unknown"
+            )
+            
+            val map = hashMapOf(
+                "id" to entryWithUser.id,
+                "type" to entryWithUser.type.name,
+                "scooterId" to entryWithUser.scooterId,
+                "userId" to entryWithUser.userId,
+                "userName" to entryWithUser.userName,
+                "timestamp" to FieldValue.serverTimestamp(),
+                "oldFrameId" to entryWithUser.oldFrameId,
+                "newFrameId" to entryWithUser.newFrameId,
+                "mileage" to entryWithUser.mileage,
+                "oldImei" to entryWithUser.oldImei,
+                "newImei" to entryWithUser.newImei,
+                "comment" to entryWithUser.comment
+            )
+            
+            hubHistoryCollection.document(entryWithUser.id).set(map).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("StorageRepository", "Error saving hub entry", e)
+            Result.failure(e)
+        }
+    }
 
     // ========================================================================================
     // ЗАЩИТА ОТ ВОССТАНОВЛЕНИЯ УДАЛЁННЫХ ЯЧЕЕК

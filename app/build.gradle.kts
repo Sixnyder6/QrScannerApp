@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.qrscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 46
-        versionName = "1.5.6"
+        versionCode = 47
+        versionName = "1.5.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

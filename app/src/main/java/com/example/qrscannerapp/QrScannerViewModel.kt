@@ -70,7 +70,8 @@ data class StorageUiState(
     val cells: List<StorageCell> = emptyList(),
     val activityLog: List<StorageActivityLogEntry> = emptyList(),
     val distributionResult: String? = null,
-    val todayAddedCount: Int = 0
+    val todayAddedCount: Int = 0,
+    val hubHistory: List<HubEntry> = emptyList()
 )
 
 data class BatterySearchResult(
@@ -167,6 +168,36 @@ class QrScannerViewModel @Inject constructor(
 
     private val _isSavingSession = MutableStateFlow(false)
     val isSavingSession: StateFlow<Boolean> = _isSavingSession.asStateFlow()
+
+    init {
+        loadStorageCells()
+        observeHubHistory()
+    }
+
+    private fun observeHubHistory() {
+        storageRepository.getHubHistoryFlow()
+            .onEach { history ->
+                _storageState.update { it.copy(hubHistory = history) }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    fun saveHubEntry(entry: HubEntry) {
+        viewModelScope.launch {
+            storageRepository.saveHubEntry(entry)
+                .onSuccess {
+                    _statusMessage.value = "Запись успешно сохранена"
+                }
+                .onFailure { e ->
+                    _statusMessage.value = "Ошибка сохранения: ${e.localizedMessage}"
+                    Log.e("QrScannerViewModel", "Error saving hub entry", e)
+                }
+        }
+    }
+
+    fun clearStatusMessage() {
+        _statusMessage.value = ""
+    }
 
     private val _recentlySavedSession = MutableStateFlow<ScanSession?>(null)
     val recentlySavedSession: StateFlow<ScanSession?> = _recentlySavedSession.asStateFlow()
@@ -1449,6 +1480,19 @@ class QrScannerViewModel @Inject constructor(
                     _scooterCodes.clear()
                 }
                 .onFailure { error -> _storageState.update { it.copy(isLoading = false, distributionResult = "Ошибка: ${error.message}") } }
+        }
+    }
+
+    fun bulkAddScooters(cell: StorageCell, text: String) {
+        viewModelScope.launch {
+            _storageState.update { it.copy(isLoading = true) }
+            storageRepository.bulkAddScootersToCell(cell.id, text)
+                .onSuccess { 
+                    _storageState.update { it.copy(isLoading = false, distributionResult = "Номера добавлены в ${cell.name}") }
+                }
+                .onFailure { error -> 
+                    _storageState.update { it.copy(isLoading = false, error = "Ошибка: ${error.message}") }
+                }
         }
     }
 

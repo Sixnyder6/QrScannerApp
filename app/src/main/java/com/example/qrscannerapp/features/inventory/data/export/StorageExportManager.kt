@@ -48,7 +48,21 @@ class StorageExportManager(private val context: Context) {
                 fillForegroundColor = IndexedColors.DARK_BLUE.index
                 fillPattern = FillPatternType.SOLID_FOREGROUND
             }
+            val directionHeaderStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THICK
+                fillForegroundColor = IndexedColors.GREY_50_PERCENT.index
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+            }
             val itemStyle = workbook.createCellStyle().apply {
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THIN
+                borderLeft = BorderStyle.THIN
+                borderRight = BorderStyle.THIN
+                borderTop = BorderStyle.THIN
+            }
+            val directionStyle = workbook.createCellStyle().apply {
                 alignment = HorizontalAlignment.CENTER
                 borderBottom = BorderStyle.THIN
                 borderLeft = BorderStyle.THIN
@@ -57,17 +71,24 @@ class StorageExportManager(private val context: Context) {
             }
 
             sheet.setColumnWidth(0, 22 * 256)
+            sheet.setColumnWidth(1, 10 * 256)
 
             val headerRow = sheet.createRow(0)
             val headerCell = headerRow.createCell(0)
             headerCell.setCellValue("${cell.name} — ${cell.description}")
             headerCell.cellStyle = headerStyle
+            val dirHeaderCell = headerRow.createCell(1)
+            dirHeaderCell.setCellValue("Напр.")
+            dirHeaderCell.cellStyle = directionHeaderStyle
 
             orderedItems.forEachIndexed { index, scooterId ->
                 val row = sheet.createRow(index + 1)
                 val dataCell = row.createCell(0)
                 dataCell.setCellValue(scooterId)
                 dataCell.cellStyle = itemStyle
+                val dirCell = row.createCell(1)
+                dirCell.setCellValue(getDirectionArrows(cell, scooterId))
+                dirCell.cellStyle = directionStyle
             }
 
             shareExcelFile(workbook, "raw_${sanitizeFileName(cell.name)}")
@@ -110,6 +131,13 @@ class StorageExportManager(private val context: Context) {
                 fillForegroundColor = IndexedColors.DARK_BLUE.index
                 fillPattern = FillPatternType.SOLID_FOREGROUND
             }
+            val directionHeaderStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THICK
+                fillForegroundColor = IndexedColors.GREY_50_PERCENT.index
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+            }
             val itemStyle = workbook.createCellStyle().apply {
                 alignment = HorizontalAlignment.CENTER
                 borderBottom = BorderStyle.THIN
@@ -128,11 +156,20 @@ class StorageExportManager(private val context: Context) {
                 fillPattern = FillPatternType.SOLID_FOREGROUND
             }
 
+            val directionStyle = workbook.createCellStyle().apply {
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THIN
+                borderLeft = BorderStyle.THIN
+                borderRight = BorderStyle.THIN
+                borderTop = BorderStyle.THIN
+            }
+
             chunks.forEachIndexed { chunkIndex, chunkItems ->
-                val colIndex = chunkIndex * 2
+                val colIndex = chunkIndex * 3  // было *2, теперь *3: код | направление | разделитель
                 sheet.setColumnWidth(colIndex, 16 * 256)
+                sheet.setColumnWidth(colIndex + 1, 7 * 256)  // столбец направления (узкий)
                 if (chunkIndex > 0) {
-                    // Разделитель между столбцами
+                    // Разделитель между группами
                     sheet.setColumnWidth(colIndex - 1, 2 * 256)
                 }
 
@@ -140,6 +177,9 @@ class StorageExportManager(private val context: Context) {
                 val headerCell = headerRow.createCell(colIndex)
                 headerCell.setCellValue("${cell.name} (${chunkIndex + 1}/${chunks.size})")
                 headerCell.cellStyle = headerStyle
+                val dirHeaderCell = headerRow.createCell(colIndex + 1)
+                dirHeaderCell.setCellValue("→")
+                dirHeaderCell.cellStyle = directionHeaderStyle
 
                 chunkItems.forEachIndexed { itemIndex, scooterId ->
                     val rowIndex = itemIndex + 1
@@ -147,6 +187,9 @@ class StorageExportManager(private val context: Context) {
                     val dataCell = row.createCell(colIndex)
                     dataCell.setCellValue(scooterId)
                     dataCell.cellStyle = if (itemIndex % 2 == 0) itemStyle else itemStyleAlt
+                    val dirCell = row.createCell(colIndex + 1)
+                    dirCell.setCellValue(getDirectionArrows(cell, scooterId))
+                    dirCell.cellStyle = directionStyle
                 }
             }
 
@@ -183,6 +226,13 @@ class StorageExportManager(private val context: Context) {
                 fillPattern = FillPatternType.SOLID_FOREGROUND
                 borderBottom = BorderStyle.THICK
             }
+            val directionHeaderStyle = workbook.createCellStyle().apply {
+                setFont(headerFont)
+                alignment = HorizontalAlignment.CENTER
+                fillForegroundColor = IndexedColors.GREY_50_PERCENT.index
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                borderBottom = BorderStyle.THICK
+            }
             val descStyle = workbook.createCellStyle().apply {
                 val font = workbook.createFont().apply {
                     italic = true
@@ -198,26 +248,48 @@ class StorageExportManager(private val context: Context) {
                 borderRight = BorderStyle.THIN
                 borderTop = BorderStyle.THIN
             }
+            val directionStyle = workbook.createCellStyle().apply {
+                alignment = HorizontalAlignment.CENTER
+                borderBottom = BorderStyle.THIN
+                borderLeft = BorderStyle.THIN
+                borderRight = BorderStyle.THIN
+                borderTop = BorderStyle.THIN
+            }
 
-            cells.forEachIndexed { colIndex, cell ->
-                sheet.setColumnWidth(colIndex, 22 * 256)
+            cells.forEachIndexed { cellIndex, cell ->
+                val codeCol = cellIndex * 2      // столбец кода
+                val dirCol = codeCol + 1         // столбец направления
+                sheet.setColumnWidth(codeCol, 22 * 256)
+                sheet.setColumnWidth(dirCol, 10 * 256)
 
                 val row0 = sheet.getRow(0) ?: sheet.createRow(0)
-                row0.createCell(colIndex).apply {
+                row0.createCell(codeCol).apply {
                     setCellValue(cell.name)
                     cellStyle = headerStyle
                 }
+                row0.createCell(dirCol).apply {
+                    setCellValue("Напр.")
+                    cellStyle = directionHeaderStyle
+                }
 
                 val row1 = sheet.getRow(1) ?: sheet.createRow(1)
-                row1.createCell(colIndex).apply {
+                row1.createCell(codeCol).apply {
                     setCellValue(cell.description)
+                    cellStyle = descStyle
+                }
+                row1.createCell(dirCol).apply {
+                    setCellValue("")
                     cellStyle = descStyle
                 }
 
                 // Счётчик: "12 / 600"
                 val row2 = sheet.getRow(2) ?: sheet.createRow(2)
-                row2.createCell(colIndex).apply {
+                row2.createCell(codeCol).apply {
                     setCellValue("${cell.items.size} / ${cell.capacity}")
+                    cellStyle = descStyle
+                }
+                row2.createCell(dirCol).apply {
+                    setCellValue("")
                     cellStyle = descStyle
                 }
 
@@ -225,9 +297,13 @@ class StorageExportManager(private val context: Context) {
                 sortedItems.forEachIndexed { itemIndex, scooterId ->
                     val rIndex = itemIndex + 3
                     val row = sheet.getRow(rIndex) ?: sheet.createRow(rIndex)
-                    row.createCell(colIndex).apply {
+                    row.createCell(codeCol).apply {
                         setCellValue(scooterId)
                         cellStyle = itemStyle
+                    }
+                    row.createCell(dirCol).apply {
+                        setCellValue(getDirectionArrows(cell, scooterId))
+                        cellStyle = directionStyle
                     }
                 }
             }
@@ -292,6 +368,23 @@ class StorageExportManager(private val context: Context) {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(shareIntent, "Сохранить / Отправить"))
+    }
+
+    /**
+     * Возвращает строку со стрелочками направления для кода самоката.
+     * Пример: "↑←" для UP и LEFT, "↓" для DOWN, "" если направлений нет.
+     */
+    private fun getDirectionArrows(cell: StorageCell, scooterId: String): String {
+        val directions = cell.stickerDirections?.get(scooterId) ?: return ""
+        return directions.joinToString("") { dir ->
+            when (dir.uppercase()) {
+                "UP" -> "\u2191"      // ↑
+                "DOWN" -> "\u2193"    // ↓
+                "LEFT" -> "\u2190"    // ←
+                "RIGHT" -> "\u2192"   // →
+                else -> ""
+            }
+        }
     }
 
     private fun handleError(e: Exception) {

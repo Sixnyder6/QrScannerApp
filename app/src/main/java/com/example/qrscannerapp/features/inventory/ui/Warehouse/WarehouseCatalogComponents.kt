@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -82,6 +83,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -94,6 +96,8 @@ import com.example.qrscannerapp.features.inventory.data.OrderItem
 import com.example.qrscannerapp.features.inventory.data.WarehouseItem
 import com.example.qrscannerapp.features.inventory.ui.Warehouse.WarehouseViewModel
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalConfiguration
 import kotlinx.coroutines.delay
@@ -754,6 +758,11 @@ fun WarehouseCatalogScreen(
 
     var isCartExpanded by remember { mutableStateOf(false) }
 
+    // --- Flying Animation State ---
+    var flyingItemPos by remember { mutableStateOf<Offset?>(null) }
+    var cartPos by remember { mutableStateOf<Offset?>(null) }
+    // ------------------------------
+
     var selectedCategory by remember { mutableStateOf("Все") }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -874,8 +883,8 @@ fun WarehouseCatalogScreen(
     val targetHeight = remember(cart.size, isCartExpanded, canManage) {
         when {
             cart.isEmpty() || canManage -> 0.dp
-            isCartExpanded -> screenHeight * 0.5f
-            else -> 96.dp
+            isCartExpanded -> screenHeight * 0.6f
+            else -> 80.dp // Чуть компактнее в свернутом виде
         }
     }
     val animatedHeight by animateDpAsState(
@@ -889,7 +898,17 @@ fun WarehouseCatalogScreen(
 
     Scaffold(
         containerColor = Color.Transparent,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { 
+            // Переносим Snackbar наверх
+            Box(modifier = Modifier.fillMaxSize()) {
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 70.dp) // Ниже TopAppBar
+                )
+            }
+        },
         topBar = {
             WarehouseCatalogTopAppBar(
                 isSearchActive = isSearchActive,
@@ -954,8 +973,15 @@ fun WarehouseCatalogScreen(
                     }
                 }
 
+                // Адаптивная сетка: 3 колонки на телефонах, до 6 на широких экранах (ноутбуках)
+                val gridColumns = when {
+                    configuration.screenWidthDp < 600 -> 3
+                    configuration.screenWidthDp < 900 -> 4
+                    else -> 6
+                }
+
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
+                    columns = GridCells.Fixed(gridColumns),
                     contentPadding = PaddingValues(
                         start = 16.dp,
                         end = 16.dp,
@@ -965,12 +991,19 @@ fun WarehouseCatalogScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(filteredCatalog, key = { it.id }) { item ->
+                        var itemOffset by remember { mutableStateOf(Offset.Zero) }
+                        
                         CatalogGridItem(
                             item = item,
+                            modifier = Modifier.onGloballyPositioned { 
+                                itemOffset = it.positionInRoot() 
+                            },
                             onClick = { itemToTake = item },
                             onQuickAdd = {
                                 if (!canManage) {
                                     onAddToCart(item, 1)
+                                    // Запускаем анимацию полета
+                                    flyingItemPos = itemOffset
                                 } else {
                                     itemToQuickTake = item
                                 }
@@ -992,7 +1025,7 @@ fun WarehouseCatalogScreen(
                     },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = animatedHeight)
+                        .padding(bottom = animatedHeight + 20.dp) // Чуть выше плавающей корзины
                 )
             }
 
@@ -1005,8 +1038,23 @@ fun WarehouseCatalogScreen(
                 onClearCart = onClearCart,
                 onSubmit = onSubmitOrder,
                 animatedHeight = animatedHeight,
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .onGloballyPositioned { 
+                        cartPos = it.positionInRoot() 
+                    }
             )
+
+            // --- Flying Animation Overlay ---
+            flyingItemPos?.let { startPos ->
+                cartPos?.let { endPos ->
+                    FlyingItemAnimation(
+                        startPos = startPos,
+                        endPos = endPos,
+                        onAnimationEnd = { flyingItemPos = null }
+                    )
+                }
+            }
 
         }
     }
@@ -1279,6 +1327,7 @@ fun FrequentlyTakenCarouselItem(
 @Composable
 fun CatalogGridItem(
     item: WarehouseItem,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onQuickAdd: () -> Unit
 ) {
@@ -1290,8 +1339,16 @@ fun CatalogGridItem(
     )
     val haptic = LocalHapticFeedback.current
 
+    val isLowStock = item.stockCount < item.lowStockThreshold
+    
+    val borderColor by animateColorAsState(
+        targetValue = if (isLowStock) StardustError.copy(alpha = 0.5f) else Color.Transparent,
+        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
+        label = "borderUrgency"
+    )
+
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .scale(scale)
@@ -1302,7 +1359,8 @@ fun CatalogGridItem(
             ),
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = if (isLowStock) BorderStroke(1.5.dp, borderColor) else null
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             val finalImageUrl = constructImageUrl(item.imageUrl)
@@ -1350,19 +1408,23 @@ fun CatalogGridItem(
                     )
                 }
             }
+            // Усиленный градиент для читаемости текста
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.6f)
+                    .fillMaxHeight(0.7f) // Увеличил высоту градиента
                     .align(Alignment.BottomCenter)
                     .background(
                         brush = Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                            colors = listOf(
+                                Color.Transparent, 
+                                Color.Black.copy(alpha = 0.5f), 
+                                Color.Black.copy(alpha = 0.95f)
+                            )
                         )
                     )
             )
-            val isLowStock = item.stockCount < item.lowStockThreshold
-            val badgeColor = if (isLowStock) StardustError else Color.Black.copy(alpha = 0.5f)
+            val badgeColor = if (isLowStock) StardustError else Color.Black.copy(alpha = 0.6f)
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -1998,128 +2060,183 @@ fun BottomCartPanel(
 ) {
     if (cart.isEmpty()) return
 
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(animatedHeight),
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        colors = CardDefaults.cardColors(containerColor = StardustModalBg),
-        elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
-        border = BorderStroke(1.dp, StardustPrimary.copy(alpha = 0.3f))
-    ) {
-        if (!isExpanded) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable { onExpandToggle(true) }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1.2f)) {
-                    Text(
-                        text = "Выбрано для списания",
-                        color = StardustTextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "${cart.size} поз. (${cart.sumOf { it.quantity }} шт.)",
-                        color = StardustTextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                
-                OverlappingCardFan(
-                    cartItems = cart,
-                    modifier = Modifier
-                        .weight(2f)
-                        .padding(horizontal = 4.dp)
-                )
+    // Добавляем эффект "подпрыгивания" при изменении размера корзины
+    val cartScale by animateFloatAsState(
+        targetValue = if (cart.isNotEmpty()) 1f else 0.8f,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "cartScale"
+    )
 
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowUp,
-                    contentDescription = "Развернуть",
-                    tint = StardustPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
+    Box(
+        modifier = modifier
+            .padding(horizontal = 12.dp, vertical = 12.dp) // Отступы для плавающего эффекта
+            .navigationBarsPadding()
+            .graphicsLayer { 
+                scaleX = cartScale
+                scaleY = cartScale
             }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp)
-            ) {
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(animatedHeight),
+            shape = RoundedCornerShape(28.dp), // Более круглые углы
+            colors = CardDefaults.cardColors(
+                containerColor = StardustModalBg.copy(alpha = 0.95f) // Glass-эффект
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 20.dp),
+            border = BorderStroke(1.2.dp, Brush.linearGradient(
+                listOf(StardustPrimary.copy(alpha = 0.5f), Color.Transparent)
+            ))
+        ) {
+            if (!isExpanded) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable { onExpandToggle(true) }
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Выбранные детали (${cart.size})",
-                        color = StardustTextPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    IconButton(onClick = { onExpandToggle(false) }) {
+                    // Компактный вид "Макдак"
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(StardustPrimary.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Свернуть",
-                            tint = StardustTextSecondary
+                            Icons.Rounded.ShoppingCart,
+                            null,
+                            tint = StardustPrimary,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
-                }
+                    
+                    Spacer(modifier = Modifier.width(16.dp))
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(cart, key = { it.itemId }) { item ->
-                        ExpandedCartItemRow(
-                            item = item,
-                            onUpdateQuantity = { qty -> onUpdateQuantity(item.itemId, qty) },
-                            onRemove = { onRemoveItem(item.itemId) }
+                    Column(modifier = Modifier.weight(1.2f)) {
+                        Text(
+                            text = "Корзина",
+                            color = StardustTextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${cart.size} поз. · ${cart.sumOf { it.quantity }} шт.",
+                            color = StardustTextSecondary,
+                            fontSize = 12.sp
                         )
                     }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            onClearCart()
-                            onExpandToggle(false)
-                        },
+                    
+                    OverlappingCardFan(
+                        cartItems = cart,
                         modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, StardustError.copy(alpha = 0.5f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = StardustError)
+                            .weight(2f)
+                            .padding(horizontal = 8.dp)
+                    )
+
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Развернуть",
+                        tint = StardustTextSecondary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Отмена", fontWeight = FontWeight.Bold)
+                        Column {
+                            Text(
+                                text = "Ваш заказ",
+                                color = StardustTextPrimary,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Text(
+                                text = "Проверьте количество перед списанием",
+                                color = StardustTextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        IconButton(
+                            onClick = { onExpandToggle(false) },
+                            modifier = Modifier
+                                .background(StardustGlassBg, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Свернуть",
+                                tint = StardustTextPrimary
+                            )
+                        }
                     }
 
-                    Button(
-                        onClick = {
-                            onSubmit()
-                            onExpandToggle(false)
-                        },
-                        modifier = Modifier
-                            .weight(1.5f)
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = StardustPrimary)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Забрать детали", color = Color.Black, fontWeight = FontWeight.Bold)
+                        items(cart, key = { it.itemId }) { item ->
+                            ExpandedCartItemRow(
+                                item = item,
+                                onUpdateQuantity = { qty -> onUpdateQuantity(item.itemId, qty) },
+                                onRemove = { onRemoveItem(item.itemId) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            onClick = {
+                                onClearCart()
+                                onExpandToggle(false)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(56.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            color = StardustError.copy(alpha = 0.1f),
+                            border = BorderStroke(1.dp, StardustError.copy(alpha = 0.2f))
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("Очистить", color = StardustError, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                onSubmit()
+                                onExpandToggle(false)
+                            },
+                            modifier = Modifier
+                                .weight(2f)
+                                .height(56.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = StardustPrimary,
+                                contentColor = Color.Black
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Подтвердить списание", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                        }
                     }
                 }
             }
@@ -2247,4 +2364,46 @@ fun QuickConsumablesShelf(
         }
     }
 }
-
+
+@Composable
+fun FlyingItemAnimation(
+    startPos: Offset,
+    endPos: Offset,
+    onAnimationEnd: () -> Unit
+) {
+    val animProgress = remember { Animatable(0f) }
+    
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
+        )
+        onAnimationEnd()
+    }
+
+    val currentX = startPos.x + (endPos.x - startPos.x) * animProgress.value
+    val currentY = startPos.y + (endPos.y - startPos.y) * animProgress.value
+    val scale = 1f - (animProgress.value * 0.5f)
+    val alpha = 1f - (animProgress.value * 0.3f)
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(currentX.toInt(), currentY.toInt()) }
+            .size(40.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
+            .background(StardustPrimary, CircleShape)
+            .border(2.dp, Color.White, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            Icons.Default.Add,
+            contentDescription = null,
+            tint = Color.Black,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
